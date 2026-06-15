@@ -2,7 +2,9 @@ import io
 
 from PIL import Image
 
-from modules.multi_image_workflow import add_image_items, combined_notes, combined_text, move_image_item
+import fitz
+
+from modules.multi_image_workflow import add_image_items, add_upload_items, combined_notes, combined_text, move_image_item
 
 
 def image_bytes(color):
@@ -42,3 +44,18 @@ def test_move_image_changes_combined_order():
     reordered = move_image_item(items, "two", -1)
     assert [item["id"] for item in reordered] == ["two", "one"]
     assert combined_text(reordered).index("二番") < combined_text(reordered).index("一番")
+
+
+def test_add_pdf_expands_pages_into_image_items():
+    document = fitz.open()
+    for text in ("first", "second"):
+        page = document.new_page()
+        page.insert_text((72, 72), text)
+    pdf = document.tobytes()
+    document.close()
+
+    items, added, errors = add_upload_items([], [("lesson.pdf", pdf)])
+
+    assert len(items) == 2
+    assert added == ["lesson - trang 01.png", "lesson - trang 02.png"]
+    assert errors == []

@@ -4,10 +4,17 @@ from __future__ import annotations
 
 import streamlit as st
 
-from config import GEMINI_MODEL_TEXT, GEMINI_MODEL_VISION, MAX_IMAGE_SIZE_MB, SUPPORTED_FORMATS
+from config import (
+    GEMINI_MODEL_TEXT,
+    GEMINI_MODEL_VISION,
+    MAX_IMAGE_SIZE_MB,
+    MAX_PDF_PAGES,
+    MAX_PDF_SIZE_MB,
+    SUPPORTED_UPLOAD_FORMATS,
+)
 from modules.cost_estimator import estimate_cost, format_cost, sum_costs
 from modules.doc_exporter import export_to_docx
-from modules.multi_image_workflow import add_image_items, combined_notes, combined_text, move_image_item
+from modules.multi_image_workflow import add_upload_items, combined_notes, combined_text, move_image_item
 from modules.ocr_engine import run_ocr
 from modules.text_analyzer import run_analysis
 
@@ -40,13 +47,13 @@ def clear_analysis() -> None:
 
 
 def add_sources(sources: list[tuple[str, bytes]]) -> None:
-    items, added, errors = add_image_items(st.session_state.image_items, sources)
+    items, added, errors = add_upload_items(st.session_state.image_items, sources)
     st.session_state.image_items = items
     if added:
         clear_analysis()
-        st.toast(f"Đã thêm {len(added)} ảnh.", icon="✅")
+        st.toast(f"Đã thêm {len(added)} ảnh/trang PDF.", icon="✅")
     for error in errors:
-        st.error(f"❌ Không thể thêm ảnh: {error}")
+        st.error(f"❌ Không thể thêm file: {error}")
 
 
 def remove_image(item_id: str) -> None:
@@ -65,7 +72,7 @@ def run_item_ocr(item: dict) -> None:
 
 
 st.title("🔍 Japanese OCR Analyzer")
-st.caption("Tải nhiều ảnh, OCR từng ảnh hoặc toàn bộ, rồi gộp nội dung để phân tích chung.")
+st.caption("Tải nhiều ảnh hoặc PDF, OCR từng trang hoặc toàn bộ, rồi gộp nội dung để phân tích chung.")
 
 items = st.session_state.image_items
 st.sidebar.header("📚 Bộ ảnh phân tích")
@@ -80,7 +87,7 @@ if items and st.sidebar.button("🗑️ Xóa toàn bộ bộ ảnh", width="stre
 st.sidebar.divider()
 st.sidebar.header("⚙️ Settings")
 show_preprocessing = st.sidebar.toggle("Hiển thị chi tiết tiền xử lý", value=True)
-st.sidebar.caption(f"Kích thước tối đa mỗi ảnh: {MAX_IMAGE_SIZE_MB} MB")
+st.sidebar.caption(f"Ảnh tối đa {MAX_IMAGE_SIZE_MB} MB · PDF tối đa {MAX_PDF_SIZE_MB} MB/{MAX_PDF_PAGES} trang")
 st.sidebar.subheader("💰 Ước tính chi phí")
 billing_tier = st.sidebar.radio(
     "Gói Gemini",
@@ -92,22 +99,23 @@ usd_to_vnd = st.sidebar.number_input("Tỷ giá USD → VND", min_value=1.0, val
 st.sidebar.caption("Gemini 2.5 Flash: input $0.30/M token, output $2.50/M token.")
 st.sidebar.markdown("[Xem bảng giá Gemini chính thức](https://ai.google.dev/gemini-api/docs/pricing)")
 with st.sidebar.expander("💡 Luồng sử dụng"):
-    st.write("1. Thêm một hoặc nhiều ảnh.")
-    st.write("2. OCR từng ảnh hoặc OCR toàn bộ.")
-    st.write("3. Chỉnh văn bản của từng ảnh.")
-    st.write("4. Phân tích chung tất cả ảnh đã OCR.")
+    st.write("1. Thêm ảnh hoặc PDF từ máy/ứng dụng Files.")
+    st.write("2. Mỗi trang PDF sẽ được chuyển thành một ảnh.")
+    st.write("3. OCR từng trang hoặc OCR toàn bộ.")
+    st.write("4. Phân tích chung tất cả nội dung đã OCR.")
 
-with st.expander("➕ Thêm ảnh vào bộ phân tích", expanded=not items):
-    upload_tab, camera_tab = st.tabs(["📁 Chọn nhiều ảnh từ máy", "📷 Chụp thêm ảnh"])
+with st.expander("➕ Thêm ảnh hoặc PDF vào bộ phân tích", expanded=not items):
+    upload_tab, camera_tab = st.tabs(["📁 Chọn ảnh/PDF từ máy", "📷 Chụp thêm ảnh"])
     with upload_tab:
         uploaded_files = st.file_uploader(
-            "Kéo thả nhiều ảnh hoặc bấm nút để chọn file",
-            type=SUPPORTED_FORMATS,
+            "Kéo thả hoặc bấm nút để chọn ảnh/PDF",
+            type=SUPPORTED_UPLOAD_FORMATS,
             accept_multiple_files=True,
             key=f"multi_uploader_{st.session_state.uploader_version}",
-            help=f"Mỗi ảnh tối đa {MAX_IMAGE_SIZE_MB} MB.",
+            help=f"PDF tối đa {MAX_PDF_SIZE_MB} MB và {MAX_PDF_PAGES} trang. Trên iPhone, chọn Browse để mở Files.",
         )
-        if uploaded_files and st.button("➕ Thêm ảnh đã chọn", type="primary", width="stretch"):
+        st.caption(f"Hỗ trợ PDF tối đa {MAX_PDF_SIZE_MB} MB. Trên iPhone, chọn Browse/Duyệt để mở ứng dụng Files.")
+        if uploaded_files and st.button("➕ Thêm file đã chọn", type="primary", width="stretch"):
             add_sources([(file.name, file.getvalue()) for file in uploaded_files])
             st.session_state.uploader_version += 1
             st.rerun()
@@ -122,10 +130,10 @@ with st.expander("➕ Thêm ảnh vào bộ phân tích", expanded=not items):
             st.rerun()
 
 if not items:
-    st.info("Hãy thêm một hoặc nhiều ảnh để bắt đầu.")
+    st.info("Hãy thêm một hoặc nhiều ảnh/PDF để bắt đầu.")
     st.stop()
 
-st.subheader(f"Ảnh trong bộ phân tích ({len(items)})")
+st.subheader(f"Ảnh/trang PDF trong bộ phân tích ({len(items)})")
 controls_left, controls_right = st.columns(2)
 with controls_left:
     if st.button("🔍 OCR tất cả ảnh chưa xử lý", type="primary", width="stretch"):

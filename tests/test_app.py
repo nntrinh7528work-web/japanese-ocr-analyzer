@@ -16,7 +16,7 @@ def test_app_starts_without_upload():
     app = AppTest.from_file("app.py").run(timeout=20)
     assert not app.exception
     assert app.title[0].value == "🔍 Japanese OCR Analyzer"
-    assert any("một hoặc nhiều ảnh" in item.value for item in app.info)
+    assert any("một hoặc nhiều ảnh/PDF" in item.value for item in app.info)
     assert len(app.tabs) == 2
 
 
@@ -35,4 +35,4 @@ def test_app_renders_two_independent_image_flows():
     labels = [button.label for button in app.button]
     assert labels.count("🔍 OCR ảnh này") == 2
     assert "🔍 OCR tất cả ảnh chưa xử lý" in labels
-    assert "Ảnh trong bộ phân tích (2)" in [heading.value for heading in app.subheader]
+    assert "Ảnh/trang PDF trong bộ phân tích (2)" in [heading.value for heading in app.subheader]

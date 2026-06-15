@@ -24,5 +24,9 @@ if GEMINI_API_KEY == "your_api_key_here":
 
 GEMINI_MODEL_VISION = "gemini-2.5-flash"
 GEMINI_MODEL_TEXT = "gemini-2.5-flash"
-MAX_IMAGE_SIZE_MB = 10
-SUPPORTED_FORMATS = ["jpg", "jpeg", "png", "webp", "bmp", "tiff"]
+MAX_UPLOAD_SIZE_MB = 50
+MAX_IMAGE_SIZE_MB = 20
+MAX_PDF_SIZE_MB = 50
+MAX_PDF_PAGES = 60
+SUPPORTED_FORMATS = ["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff"]
+SUPPORTED_UPLOAD_FORMATS = [*SUPPORTED_FORMATS, "pdf"]
