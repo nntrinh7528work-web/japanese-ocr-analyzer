@@ -37,7 +37,7 @@ def analysis_json_bytes(
     analysis: dict[str, Any],
     session_cost: dict[str, Any],
     billing_tier: str,
-    usd_to_vnd: float,
+    usd_to_jpy: float,
     budget: dict[str, Any] | None = None,
     created_at: datetime | None = None,
 ) -> bytes:
@@ -45,7 +45,7 @@ def analysis_json_bytes(
     payload = {
         "created_at": (created_at or datetime.now()).isoformat(timespec="seconds"),
         "billing_tier": billing_tier,
-        "usd_to_vnd": usd_to_vnd,
+        "usd_to_jpy": usd_to_jpy,
         "session_cost": session_cost,
         "budget": budget or {},
         "sources": [

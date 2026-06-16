@@ -26,7 +26,7 @@ def test_sum_and_format_costs():
     total = sum_costs(costs)
     assert total["input_tokens"] == 400
     assert total["output_tokens"] == 600
-    assert "VND" in format_cost(total["total_cost_usd"])
+    assert "JPY" in format_cost(total["total_cost_usd"])
 
 
 def test_output_cost_can_include_thinking_tokens():
@@ -38,10 +38,10 @@ def test_output_cost_can_include_thinking_tokens():
     assert cost["output_cost_usd"] == 500 * 2.50 / 1_000_000
 
 
-def test_budget_status_tracks_remaining_vnd():
-    status = budget_status(100_000, 20_000, 1.0, 25_000)
+def test_budget_status_tracks_remaining_jpy():
+    status = budget_status(100_000, 20_000, 1.0, 155)
 
-    assert status["session_spent_vnd"] == 25_000
-    assert status["total_spent_vnd"] == 45_000
-    assert status["remaining_vnd"] == 55_000
-    assert status["remaining_ratio"] == 0.55
+    assert status["session_spent_jpy"] == 155
+    assert status["total_spent_jpy"] == 20_155
+    assert status["remaining_jpy"] == 79_845
+    assert status["remaining_ratio"] == 0.79845

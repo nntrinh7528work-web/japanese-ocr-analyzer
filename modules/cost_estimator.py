@@ -48,31 +48,31 @@ def sum_costs(costs: list[dict[str, Any]]) -> dict[str, float | int]:
     }
 
 
-def format_cost(usd: float, usd_to_vnd: float = 25_500) -> str:
-    """Format a small USD estimate with its approximate VND equivalent."""
-    return f"${usd:.6f} (~{usd * usd_to_vnd:,.0f} VND)"
+def format_cost(usd: float, usd_to_jpy: float = 155) -> str:
+    """Format a small USD estimate with its approximate JPY equivalent."""
+    return f"${usd:.6f} (~¥{usd * usd_to_jpy:,.0f} JPY)"
 
 
 def budget_status(
-    budget_vnd: float,
-    spent_before_vnd: float,
+    budget_jpy: float,
+    spent_before_jpy: float,
     session_cost_usd: float,
-    usd_to_vnd: float = 25_500,
+    usd_to_jpy: float = 155,
 ) -> dict[str, float]:
-    """Estimate remaining API budget in VND from app-tracked costs."""
-    budget = max(0.0, float(budget_vnd or 0))
-    spent_before = max(0.0, float(spent_before_vnd or 0))
-    session_spent = max(0.0, float(session_cost_usd or 0) * float(usd_to_vnd or 0))
+    """Estimate remaining API budget in JPY from app-tracked costs."""
+    budget = max(0.0, float(budget_jpy or 0))
+    spent_before = max(0.0, float(spent_before_jpy or 0))
+    session_spent = max(0.0, float(session_cost_usd or 0) * float(usd_to_jpy or 0))
     total_spent = spent_before + session_spent
     remaining = max(0.0, budget - total_spent)
     used_ratio = total_spent / budget if budget else 0.0
     remaining_ratio = remaining / budget if budget else 0.0
     return {
-        "budget_vnd": budget,
-        "spent_before_vnd": spent_before,
-        "session_spent_vnd": session_spent,
-        "total_spent_vnd": total_spent,
-        "remaining_vnd": remaining,
+        "budget_jpy": budget,
+        "spent_before_jpy": spent_before,
+        "session_spent_jpy": session_spent,
+        "total_spent_jpy": total_spent,
+        "remaining_jpy": remaining,
         "used_ratio": used_ratio,
         "remaining_ratio": remaining_ratio,
     }
