@@ -50,6 +50,46 @@ for key, default in {
         st.session_state[key] = default
 
 
+COLUMN_LABELS = {
+    "english": {
+        "num": "STT",
+        "word": "Từ",
+        "base_form": "Dạng gốc",
+        "part_of_speech": "Loại từ",
+        "meaning": "Nghĩa tiếng Việt",
+        "cefr": "Cấp độ CEFR",
+        "example": "Ví dụ trong bài",
+        "difficulty": "Độ khó",
+        "phrase": "Từ/Cụm từ",
+        "type": "Loại",
+        "note": "Ghi chú",
+        "function": "Chức năng",
+        "register": "Sắc thái",
+    },
+    "japanese": {
+        "num": "STT",
+        "word": "Từ gốc",
+        "reading": "Phiên âm",
+        "type": "Loại từ",
+        "meaning": "Nghĩa",
+        "jlpt": "JLPT",
+        "example": "Ví dụ",
+        "difficulty": "Độ khó",
+        "kanji": "Kanji",
+        "onyomi": "Âm On",
+        "kunyomi": "Âm Kun",
+        "vocab": "Từ vựng trong bài",
+        "role": "Vai trò",
+        "phrase": "Từ/Cụm",
+    },
+}
+
+
+def display_rows(rows: list[dict], language: str) -> list[dict]:
+    labels = COLUMN_LABELS.get(language, {})
+    return [{labels.get(key, key): value for key, value in row.items()} for row in rows]
+
+
 def clear_analysis() -> None:
     st.session_state.analysis = None
 
@@ -364,7 +404,7 @@ if st.session_state.analysis:
     detail_tabs = (
         ["📝 Tóm tắt", "📊 Từ vựng", "漢字 Kanji", "🔗 Từ nối & Ngữ pháp", "💾 Xem bản lưu"]
         if result_language == "japanese"
-        else ["📝 Tóm tắt", "📊 Từ vựng", "🔗 Phrasal & Collocations", "🧩 Discourse & Grammar", "💾 Xem bản lưu"]
+        else ["📝 Tóm tắt", "📊 Từ vựng", "🔗 Cụm từ & Thành ngữ", "🧩 Từ nối & Ngữ pháp", "💾 Xem bản lưu"]
     )
     tab1, tab2, tab3, tab4, tab5 = st.tabs(detail_tabs)
     with tab1:
@@ -373,46 +413,47 @@ if st.session_state.analysis:
         st.subheader("Tóm tắt")
         st.info(analysis["summary"])
     with tab2:
-        st.dataframe(analysis["vocabulary_all"], width="stretch")
+        st.dataframe(display_rows(analysis["vocabulary_all"], result_language), width="stretch")
         st.subheader("Từ vựng quan trọng")
-        st.dataframe(analysis["vocabulary_important"], width="stretch")
+        st.dataframe(display_rows(analysis["vocabulary_important"], result_language), width="stretch")
     with tab3:
         if result_language == "japanese":
             if analysis["kanji_analysis"]:
-                st.dataframe(analysis["kanji_analysis"], width="stretch")
+                st.dataframe(display_rows(analysis["kanji_analysis"], result_language), width="stretch")
             else:
                 st.info("Chưa trích xuất được bảng Kanji riêng. Xem nội dung gốc bên dưới.")
                 st.markdown(analysis.get("section_markdown", {}).get("kanji") or "Không có dữ liệu Kanji.")
         elif analysis.get("phrasal_collocations"):
-            st.dataframe(analysis["phrasal_collocations"], width="stretch")
+            st.subheader("Cụm động từ, collocation, idiom")
+            st.dataframe(display_rows(analysis["phrasal_collocations"], result_language), width="stretch")
         else:
-            st.info("Chưa trích xuất được bảng phrasal verbs/collocations riêng. Xem nội dung gốc bên dưới.")
+            st.info("Chưa trích xuất được bảng cụm động từ/collocation riêng. Xem nội dung gốc bên dưới.")
             st.markdown(
                 analysis.get("section_markdown", {}).get("phrasal_collocations")
-                or "Không có dữ liệu phrasal verbs/collocations."
+                or "Không có dữ liệu cụm động từ/collocation."
             )
     with tab4:
-        st.subheader("Từ nối câu" if result_language == "japanese" else "Linking words & discourse markers")
+        st.subheader("Từ nối câu" if result_language == "japanese" else "Từ nối & dấu hiệu diễn ngôn")
         marker_key = "connectors" if result_language == "japanese" else "discourse_markers"
         marker_markdown_key = "connectors" if result_language == "japanese" else "discourse_markers"
         if analysis.get(marker_key):
-            st.dataframe(analysis[marker_key], width="stretch")
+            st.dataframe(display_rows(analysis[marker_key], result_language), width="stretch")
         else:
-            st.info("Chưa trích xuất được bảng từ nối/discourse markers riêng.")
+            st.info("Chưa trích xuất được bảng từ nối/dấu hiệu diễn ngôn riêng.")
             st.markdown(
                 analysis.get("section_markdown", {}).get(marker_markdown_key)
-                or "Không có dữ liệu từ nối/discourse markers."
+                or "Không có dữ liệu từ nối/dấu hiệu diễn ngôn."
             )
-        st.subheader("Điểm ngữ pháp" if result_language == "japanese" else "Grammar points")
+        st.subheader("Điểm ngữ pháp")
         if analysis["grammar_points"]:
             for point in analysis["grammar_points"]:
                 with st.expander(f"📌 {point['name']}"):
-                    st.write(f"**{'Quy tắc' if result_language == 'japanese' else 'Rule'}:** {point['rule']}")
+                    st.write(f"**Quy tắc:** {point['rule']}")
                     st.code(point["example"], language=None)
-                    st.write(f"**{'Giải thích' if result_language == 'japanese' else 'Explanation'}:** {point['explanation']}")
+                    st.write(f"**Giải thích:** {point['explanation']}")
         else:
-            st.info("Chưa trích xuất được mục ngữ pháp/grammar riêng. Xem nội dung gốc bên dưới.")
-            st.markdown(analysis.get("section_markdown", {}).get("grammar") or "Không có dữ liệu ngữ pháp/grammar.")
+            st.info("Chưa trích xuất được mục ngữ pháp riêng. Xem nội dung gốc bên dưới.")
+            st.markdown(analysis.get("section_markdown", {}).get("grammar") or "Không có dữ liệu ngữ pháp.")
     with tab5:
         st.info("Dùng mục '💾 Lưu kết quả phân tích' phía trên để tải Word, Markdown hoặc JSON.")
         st.markdown(analysis["full_markdown"])

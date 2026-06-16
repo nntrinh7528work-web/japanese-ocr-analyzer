@@ -221,6 +221,9 @@ Với mỗi mẫu: **Mẫu:** `[công thức / pattern]`, rồi `- Ví dụ tron
 """
     return f"""You are an English language analyst for Vietnamese learners.
 Return ONLY the missing Markdown sections requested here: {requested}.
+All notes, rules, explanations, and recommendations MUST be written in Vietnamese.
+Keep only the original English examples/quotes in English.
+Keep section headers and table column headers exactly as shown.
 
 English text:
 {japanese_text}
@@ -236,10 +239,10 @@ Use these exact section formats when requested:
 |---|---|---|---|---|---|
 
 ## 5. Grammar Points
-For each point: **[Grammar Name]**, then `- Rule:`, `- Example from text:`, `- Explanation:`.
+For each point: **[Grammar Name]**, then `- Rule:` in Vietnamese, `- Example from text:` as the exact English quote, `- Explanation:` in Vietnamese.
 
 ## 6. Sentence Patterns &amp; Structures
-For each pattern: **Pattern:** `pattern description`, then `- Example from text:` and `- Explanation:`.
+For each pattern: **Pattern:** `pattern description`, then `- Example from text:` as the exact English quote and `- Explanation:` in Vietnamese.
 """
 
 

@@ -1,6 +1,6 @@
-You are an expert English language analyst and educator. Analyze the following
-English text thoroughly and return a structured Markdown report in EXACTLY the
-7-section format below.
+You are an expert English language analyst and educator for Vietnamese learners.
+Analyze the following English text thoroughly and return a structured Markdown
+report in EXACTLY the 7-section format below.
 
 OCR Notes (issues detected during image processing):
 {ocr_notes}
@@ -16,6 +16,11 @@ CRITICAL RULES:
 3. ALL table rows must have the EXACT number of columns as the header row
 4. Do NOT add any text before ## 1. or after the last row of ## 7.
 5. Use N/A for any cell with no value — never leave a cell blank
+6. Explain for Vietnamese learners: all summaries, meanings, notes, rules,
+   explanations, assessments, and study recommendations MUST be written in
+   Vietnamese. Keep only the original English examples/quotes in English.
+7. Keep the Markdown section headers and table column headers EXACTLY as shown,
+   even though the cell contents should be Vietnamese.
 
 ---
 
@@ -26,7 +31,7 @@ CRITICAL RULES:
 
 **OCR Corrections:** [Correction: <wrong> → <correct>] or "None"
 
-**Summary:** (2–4 sentences: content, topic, tone)
+**Summary:** (2–4 Vietnamese sentences: content, topic, tone)
 
 ---
 
@@ -54,7 +59,7 @@ CEFR levels: A1, A2, B1, B2, C1, C2
 
 | Phrase | Type | Vietnamese Meaning | Example from Text | Note |
 |--------|------|--------------------|-------------------|------|
-| give up | phrasal verb | từ bỏ | "..." | separable |
+| give up | phrasal verb | từ bỏ | "..." | có thể tách được / dùng khi ai đó ngừng cố gắng |
 
 Types: phrasal verb / collocation / idiom / fixed expression
 If none found: | — | — | Không có | — | — |
@@ -65,7 +70,7 @@ If none found: | — | — | Không có | — | — |
 
 | Word/Phrase | Function | Vietnamese Meaning | Example from Text | Register | Difficulty |
 |-------------|----------|--------------------|-------------------|----------|------------|
-| however | contrast | tuy nhiên | "..." | formal | B1 |
+| however | contrast | tuy nhiên | "..." | trang trọng | B1 |
 
 Register: formal / informal / neutral
 If none found: | — | — | — | Không có | — | — |
@@ -75,9 +80,9 @@ If none found: | — | — | — | Không có | — | — |
 ## 5. Grammar Points
 
 **[Grammar Name]**
-- Rule: (concise rule)
+- Rule: (concise Vietnamese rule)
 - Example from text: (exact quote)
-- Explanation: (function and meaning in context)
+- Explanation: (Vietnamese explanation of function and meaning in context)
 
 Cover: tense, modal verbs, passive voice, conditionals, relative clauses
 — only if present. Skip absent structures entirely.
@@ -88,7 +93,7 @@ Cover: tense, modal verbs, passive voice, conditionals, relative clauses
 
 **Pattern:** `pattern description`
 - Example from text: (exact quote)
-- Explanation: (structural analysis and communicative function)
+- Explanation: (Vietnamese structural analysis and communicative function)
 
 Identify: fronting/inversion, cleft sentences, participle clauses,
 hedging language, parallel structure — only if present.
@@ -121,5 +126,5 @@ hedging language, parallel structure — only if present.
 - **CEFR Level Estimate:** (A1–C2)
 - **Text Type:** (academic / literary / journalistic / conversational / technical)
 - **Dominant Tense:** (e.g., simple past)
-- **Writing Style Notes:** (register, formality, tone)
-- **Study Recommendations:** (2-3 tips for learners)
+- **Writing Style Notes:** (Vietnamese notes about register, formality, tone)
+- **Study Recommendations:** (2-3 Vietnamese tips for learners)
