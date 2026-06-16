@@ -1,4 +1,4 @@
-"""Streamlit entry point for Japanese OCR Analyzer."""
+"""Streamlit entry point for English OCR Analyzer."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from modules.result_exporter import analysis_json_bytes, default_export_stem, ma
 from modules.text_analyzer import run_analysis
 
 
-st.set_page_config(page_title="Japanese OCR Analyzer", page_icon="🔍", layout="wide")
+st.set_page_config(page_title="English OCR Analyzer", page_icon="🔍", layout="wide")
 st.markdown(
     """
     <style>
@@ -98,7 +98,7 @@ def current_budget_status(
     }
 
 
-st.title("🔍 Japanese OCR Analyzer")
+st.title("🔍 English OCR Analyzer")
 st.caption("Tải nhiều ảnh hoặc PDF, OCR từng trang hoặc toàn bộ, rồi gộp nội dung để phân tích chung.")
 
 items = st.session_state.image_items
@@ -170,7 +170,7 @@ with st.expander("➕ Thêm ảnh hoặc PDF vào bộ phân tích", expanded=no
             st.error(f"❌ Không thể thêm file: {error}")
     with camera_tab:
         camera_file = st.camera_input(
-            "Chụp ảnh văn bản tiếng Nhật",
+            "Chụp ảnh văn bản tiếng Anh",
             key=f"camera_{st.session_state.camera_version}",
         )
         if camera_file and st.button("➕ Thêm ảnh vừa chụp", width="stretch"):
@@ -343,7 +343,7 @@ if st.session_state.analysis:
             width="stretch",
         )
     tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["📝 Tóm tắt", "📊 Từ vựng", "漢字 Kanji", "🔗 Từ nối & Ngữ pháp", "💾 Xem bản lưu"]
+        ["📝 Tóm tắt", "📊 Từ vựng", "🔗 Phrasal & Collocations", "🧩 Discourse & Grammar", "💾 Xem bản lưu"]
     )
     with tab1:
         st.subheader("Văn bản đã xác nhận")
@@ -355,28 +355,34 @@ if st.session_state.analysis:
         st.subheader("Từ vựng quan trọng")
         st.dataframe(analysis["vocabulary_important"], width="stretch")
     with tab3:
-        if analysis["kanji_analysis"]:
-            st.dataframe(analysis["kanji_analysis"], width="stretch")
+        if analysis.get("phrasal_collocations"):
+            st.dataframe(analysis["phrasal_collocations"], width="stretch")
         else:
-            st.info("Chưa trích xuất được bảng Kanji riêng. Xem nội dung gốc bên dưới.")
-            st.markdown(analysis.get("section_markdown", {}).get("kanji") or "Không có dữ liệu Kanji.")
+            st.info("Chưa trích xuất được bảng phrasal verbs/collocations riêng. Xem nội dung gốc bên dưới.")
+            st.markdown(
+                analysis.get("section_markdown", {}).get("phrasal_collocations")
+                or "Không có dữ liệu phrasal verbs/collocations."
+            )
     with tab4:
-        st.subheader("Từ nối câu")
-        if analysis["connectors"]:
-            st.dataframe(analysis["connectors"], width="stretch")
+        st.subheader("Linking words & discourse markers")
+        if analysis.get("discourse_markers"):
+            st.dataframe(analysis["discourse_markers"], width="stretch")
         else:
-            st.info("Chưa trích xuất được bảng từ nối riêng.")
-            st.markdown(analysis.get("section_markdown", {}).get("connectors") or "Không có dữ liệu từ nối.")
-        st.subheader("Điểm ngữ pháp")
+            st.info("Chưa trích xuất được bảng discourse markers riêng.")
+            st.markdown(
+                analysis.get("section_markdown", {}).get("discourse_markers")
+                or "Không có dữ liệu discourse markers."
+            )
+        st.subheader("Grammar points")
         if analysis["grammar_points"]:
             for point in analysis["grammar_points"]:
                 with st.expander(f"📌 {point['name']}"):
-                    st.write(f"**Quy tắc:** {point['rule']}")
+                    st.write(f"**Rule:** {point['rule']}")
                     st.code(point["example"], language=None)
-                    st.write(f"**Giải thích:** {point['explanation']}")
+                    st.write(f"**Explanation:** {point['explanation']}")
         else:
-            st.info("Chưa trích xuất được mục ngữ pháp riêng. Xem nội dung gốc bên dưới.")
-            st.markdown(analysis.get("section_markdown", {}).get("grammar") or "Không có dữ liệu ngữ pháp.")
+            st.info("Chưa trích xuất được mục grammar riêng. Xem nội dung gốc bên dưới.")
+            st.markdown(analysis.get("section_markdown", {}).get("grammar") or "Không có dữ liệu grammar.")
     with tab5:
         st.info("Dùng mục '💾 Lưu kết quả phân tích' phía trên để tải Word, Markdown hoặc JSON.")
         st.markdown(analysis["full_markdown"])

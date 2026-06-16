@@ -32,5 +32,4 @@ def test_export_docx_is_valid_and_formatted(tmp_path):
     assert len(doc.tables) == 1
     assert doc.tables[0].rows[0].cells[1].text == "Từ gốc"
     assert any(paragraph.style.name == "Heading 1" for paragraph in doc.paragraphs)
-    assert "Japanese OCR Analyzer" in doc.sections[0].footer.paragraphs[0].text
-
+    assert "English OCR Analyzer" in doc.sections[0].footer.paragraphs[0].text

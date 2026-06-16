@@ -163,7 +163,7 @@ def parse_and_add_markdown(doc: Document, markdown_text: str) -> None:
 def _add_footer(doc: Document) -> None:
     footer = doc.sections[0].footer.paragraphs[0]
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    footer.add_run("Japanese OCR Analyzer | Trang ")
+    footer.add_run("English OCR Analyzer | Trang ")
     field = OxmlElement("w:fldSimple")
     field.set(qn("w:instr"), "PAGE")
     footer._p.append(field)

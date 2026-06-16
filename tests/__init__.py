@@ -1,2 +1,1 @@
-"""Tests for the Japanese OCR Analyzer."""
-
+"""Tests for the English OCR Analyzer."""

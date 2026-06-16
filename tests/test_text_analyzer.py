@@ -5,60 +5,87 @@ import pytest
 from modules import text_analyzer
 
 
-RESPONSE = """# PHÂN TÍCH VĂN BẢN TIẾNG NHẬT
-## 1. XÁC NHẬN VĂN BẢN GỐC
-日本は島国です。
-[Sửa: 本 → 日本 | Lý do: ngữ cảnh]
-**Tóm tắt nội dung:** Bài viết giới thiệu Nhật Bản.
+RESPONSE = """## 1. Text Confirmation &amp; Summary
+**Original text:**
+The team decided to carry out the plan because the deadline was approaching.
 
-## 2. TỪ VỰNG JLPT N4-N1
-### 2.1 Danh sách toàn bộ từ vựng trong bài
-| # | Từ gốc | Phiên âm | Loại từ | Nghĩa | JLPT |
-|---|---|---|---|---|---|
-| 1 | 日本 | にほん | Danh từ | Nhật Bản | N5 |
-### 2.2 Từ vựng quan trọng
-| Từ | Phiên âm | Loại | Nghĩa | Ví dụ | Khó |
-|---|---|---|---|---|---|
-| 島国 | しまぐに | Danh từ | Đảo quốc | 日本は島国です | N3 |
+**OCR Corrections:** [Correction: tearn -> team]
 
-## 3. PHÂN TÍCH KANJI
-| Kanji | On | Kun | Nghĩa | JLPT | Từ | Ví dụ | Vai trò |
-|---|---|---|---|---|---|---|---|
-| 日 | ニチ | ひ | ngày | N5 | 日本 | 日本 | bổ nghĩa |
+**Summary:** The sentence describes a team choosing to execute a plan under time pressure. The tone is neutral and task-focused.
 
-## 4. TỪ NỐI CÂU & LIÊN TỪ
-| Cụm | Phiên âm | Loại | Nghĩa | Ví dụ | Vai trò | Khó |
-|---|---|---|---|---|---|---|
-| しかし | しかし | liên từ | tuy nhiên | しかし | tương phản | N4 |
+## 2. Vocabulary Analysis
+### 2.1 All Vocabulary
+| # | Word | Base Form | Part of Speech | Vietnamese Meaning | CEFR Level |
+|---|------|-----------|----------------|--------------------|------------|
+| 1 | team | team | noun | đội nhóm | A2 |
+| 2 | decided | decide | verb | quyết định | B1 |
+| 3 | approaching | approach | verb | đang đến gần | B2 |
+### 2.2 Key Vocabulary (B2-C2, idioms, academic, domain-specific)
+| Word | Base Form | Part of Speech | Vietnamese Meaning | Example from Text | Difficulty |
+|------|-----------|----------------|--------------------|-------------------|------------|
+| approaching | approach | verb | đang đến gần | "the deadline was approaching" | B2 |
 
-## 5. PHÂN TÍCH NGỮ PHÁP
-**[N + です]**
-- Quy tắc: N + です
-- Ví dụ trong bài: 日本は島国です
-- Giải thích ý nghĩa & cách dùng: Câu lịch sự.
+## 3. Phrasal Verbs &amp; Collocations
+| Phrase | Type | Vietnamese Meaning | Example from Text | Note |
+|--------|------|--------------------|-------------------|------|
+| carry out | phrasal verb | thực hiện | "carry out the plan" | transitive |
 
-## 6. MẪU CÂU ĐẶC TRƯNG
-**Mẫu:** `N は N です`
-- Ví dụ trong bài: 日本は島国です
-- Giải thích: Khẳng định.
+## 4. Linking Words &amp; Discourse Markers
+| Word/Phrase | Function | Vietnamese Meaning | Example from Text | Register | Difficulty |
+|-------------|----------|--------------------|-------------------|----------|------------|
+| because | reason | bởi vì | "because the deadline was approaching" | neutral | A2 |
 
-## 7. TỔNG HỢP ĐẦY ĐỦ (DÀNH CHO WORD EXPORT)
-# Báo cáo
-Nội dung hoàn chỉnh.
+## 5. Grammar Points
+**[Past simple]**
+- Rule: Use past simple for completed decisions or actions in the past.
+- Example from text: "The team decided"
+- Explanation: It presents the decision as completed.
+
+## 6. Sentence Patterns &amp; Structures
+**Pattern:** `because-clause of reason`
+- Example from text: "because the deadline was approaching"
+- Explanation: The subordinate clause gives the reason for the main action.
+
+## 7. Full Analysis Report (Markdown)
+# English Text Analysis Report
+## 1. Text Overview
+The team decided to carry out the plan because the deadline was approaching.
+## 2. Vocabulary
+See vocabulary tables above.
+## 3. Phrasal Verbs &amp; Collocations
+See section 3.
+## 4. Linking Words &amp; Discourse Markers
+See section 4.
+## 5. Grammar Points
+See section 5.
+## 6. Sentence Patterns
+See section 6.
+## 7. Overall Assessment
+- **CEFR Level Estimate:** B1
+- **Text Type:** conversational
+- **Dominant Tense:** simple past
+- **Writing Style Notes:** neutral and clear
+- **Study Recommendations:** Review phrasal verbs and reason clauses.
 """
 
 
 def test_build_and_parse():
-    prompt = text_analyzer.build_analysis_prompt("日本", ["ghi chú một", "ghi chú hai"])
+    prompt = text_analyzer.build_analysis_prompt("The team decided.", ["ghi chú một", "ghi chú hai"])
     result = text_analyzer.parse_analysis_response(RESPONSE)
 
+    assert "English text to analyze:" in prompt
+    assert "The team decided." in prompt
     assert "1. ghi chú một" in prompt
-    assert result["summary"] == "Bài viết giới thiệu Nhật Bản."
-    assert len(result["vocabulary_all"]) == 1
-    assert len(result["kanji_analysis"]) == 1
-    assert result["grammar_points"][0]["rule"] == "N + です"
-    assert result["sentence_patterns"][0]["pattern"] == "N は N です"
-    assert result["full_markdown"].startswith("# PHÂN TÍCH")
+    assert result["summary"].startswith("The sentence describes")
+    assert result["ocr_corrections"] == ["[Correction: tearn -> team]"]
+    assert result["vocabulary_all"][0]["base_form"] == "team"
+    assert result["vocabulary_all"][2]["cefr"] == "B2"
+    assert result["vocabulary_important"][0]["difficulty"] == "B2"
+    assert result["phrasal_collocations"][0]["phrase"] == "carry out"
+    assert result["discourse_markers"][0]["function"] == "reason"
+    assert result["grammar_points"][0]["rule"].startswith("Use past simple")
+    assert result["sentence_patterns"][0]["pattern"] == "because-clause of reason"
+    assert result["full_markdown"].startswith("## 1. Text Confirmation")
 
 
 def test_run_analysis_and_long_text_merge(monkeypatch):
@@ -71,8 +98,9 @@ def test_run_analysis_and_long_text_merge(monkeypatch):
             )
 
     monkeypatch.setattr(text_analyzer, "_init_model", lambda: Model())
-    result = text_analyzer.run_analysis("日" * 4001, [])
-    assert len(result["vocabulary_all"]) == 2
+    result = text_analyzer.run_analysis("A" * 4001, [])
+    assert len(result["vocabulary_all"]) == 6
+    assert len(result["phrasal_collocations"]) == 2
     assert result["usage"]["input_tokens"] == 20
     assert result["usage"]["output_tokens"] == 40
     assert result["usage"]["candidate_tokens"] == 40
@@ -85,12 +113,11 @@ def test_empty_text_rejected():
 
 
 def test_truncated_response_without_section_7_is_still_usable(monkeypatch):
-    truncated = """# PHÂN TÍCH
-## 1 XÁC NHẬN VĂN BẢN GỐC
-日本は島国です。
-Tóm tắt: Nhật Bản là đảo quốc.
-## 2 TỪ VỰNG
-Nội dung bị cắt trước mục 7.
+    truncated = """## 1. Text Confirmation &amp; Summary
+The deadline was approaching.
+Summary: The text describes time pressure.
+## 2. Vocabulary Analysis
+Content was cut before section 7.
 """
 
     class Model:
@@ -99,33 +126,32 @@ Nội dung bị cắt trước mục 7.
             return SimpleNamespace(text=truncated, usage_metadata=None)
 
     monkeypatch.setattr(text_analyzer, "_init_model", lambda: Model())
-    result = text_analyzer.run_analysis("日本は島国です。", [])
+    result = text_analyzer.run_analysis("The deadline was approaching.", [])
 
-    assert result["summary"] == "Nhật Bản là đảo quốc."
+    assert result["summary"] == "The text describes time pressure."
     assert result["confirmed_text"]
     assert result["full_markdown"] == truncated.strip()
 
 
-def test_analysis_backfills_missing_kanji_and_grammar(monkeypatch):
-    main = """# PHÂN TÍCH
-## 1 XÁC NHẬN VĂN BẢN GỐC
-日本は島国です。
-Tóm tắt: Nhật Bản là đảo quốc.
-## 2 TỪ VỰNG
-### 2.1 Danh sách toàn bộ từ vựng trong bài
-| # | Từ | Đọc | Loại | Nghĩa | JLPT |
+def test_analysis_backfills_missing_phrasal_and_grammar(monkeypatch):
+    main = """## 1. Text Confirmation &amp; Summary
+The team decided to carry out the plan.
+Summary: The text describes a decision.
+## 2. Vocabulary Analysis
+### 2.1 All Vocabulary
+| # | Word | Base Form | Part of Speech | Vietnamese Meaning | CEFR Level |
 |---|---|---|---|---|---|
-| 1 | 日本 | にほん | danh từ | Nhật Bản | N5 |
+| 1 | team | team | noun | đội nhóm | A2 |
 """
-    supplemental = """## 3. PHÂN TÍCH KANJI
-| Kanji | On | Kun | Nghĩa | JLPT | Từ | Ví dụ | Vai trò |
-|---|---|---|---|---|---|---|---|
-| 国 | コク | くに | nước | N5 | 島国 | 島国です | gốc nghĩa |
-## 5. PHÂN TÍCH NGỮ PHÁP
-### N + です
-- Quy tắc: N + です
-- Ví dụ trong bài: 島国です
-- Giải thích: Câu lịch sự.
+    supplemental = """## 3. Phrasal Verbs &amp; Collocations
+| Phrase | Type | Vietnamese Meaning | Example from Text | Note |
+|---|---|---|---|---|
+| carry out | phrasal verb | thực hiện | "carry out the plan" | transitive |
+## 5. Grammar Points
+**[Past simple]**
+- Rule: Use past simple for completed past actions.
+- Example from text: "decided"
+- Explanation: It marks the decision as completed.
 """
 
     class Model:
@@ -137,8 +163,8 @@ Tóm tắt: Nhật Bản là đảo quốc.
 
     model = Model()
     monkeypatch.setattr(text_analyzer, "_init_model", lambda: model)
-    result = text_analyzer.run_analysis("日本は島国です。", [])
+    result = text_analyzer.run_analysis("The team decided to carry out the plan.", [])
 
-    assert result["kanji_analysis"][0]["kanji"] == "国"
-    assert result["grammar_points"][0]["name"] == "N + です"
-    assert "Bổ sung mục còn thiếu" in result["full_markdown"]
+    assert result["phrasal_collocations"][0]["phrase"] == "carry out"
+    assert result["grammar_points"][0]["name"] == "Past simple"
+    assert "Missing section supplement" in result["full_markdown"]

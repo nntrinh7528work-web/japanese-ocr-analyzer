@@ -15,7 +15,7 @@ def _image_bytes(color):
 def test_app_starts_without_upload():
     app = AppTest.from_file("app.py").run(timeout=20)
     assert not app.exception
-    assert app.title[0].value == "🔍 Japanese OCR Analyzer"
+    assert app.title[0].value == "🔍 English OCR Analyzer"
     assert any("một hoặc nhiều ảnh/PDF" in item.value for item in app.info)
     assert len(app.tabs) == 2
 
@@ -59,6 +59,8 @@ def test_app_renders_analysis_download_options():
         "summary": "Tóm tắt",
         "vocabulary_all": [],
         "vocabulary_important": [],
+        "phrasal_collocations": [],
+        "discourse_markers": [],
         "kanji_analysis": [],
         "connectors": [],
         "grammar_points": [],

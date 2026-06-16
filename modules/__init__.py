@@ -1,2 +1,1 @@
-"""Core modules for the Japanese OCR Analyzer."""
-
+"""Core modules for the English OCR Analyzer."""

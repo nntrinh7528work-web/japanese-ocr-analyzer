@@ -17,7 +17,7 @@ def make_image_bytes(fmt="JPEG", size=(500, 300)):
     image = Image.new("RGB", size, "white")
     draw = ImageDraw.Draw(image)
     for y in range(30, size[1] - 20, 35):
-        draw.text((20, y), "Japanese OCR test 12345", fill="black")
+        draw.text((20, y), "English OCR test 12345", fill="black")
     buffer = io.BytesIO()
     image.save(buffer, format=fmt)
     return buffer.getvalue()
@@ -49,4 +49,3 @@ def test_helpers_and_validation():
         load_image(b"not an image")
     with pytest.raises(ValueError):
         apply_rotation(np.zeros((10, 10, 3), dtype=np.uint8), 45)
-

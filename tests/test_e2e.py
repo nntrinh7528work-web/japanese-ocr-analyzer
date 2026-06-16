@@ -14,54 +14,74 @@ TEXT_REGIONS: 1
 HAS_FURIGANA: no
 CONFIDENCE: high
 ---OCR_START---
-日本は島国です。
+The team decided to carry out the plan.
 ---OCR_END---
 ---NOTES_START---
-なし
+none
 ---NOTES_END---
 """
 
-ANALYSIS_RESPONSE = """# PHÂN TÍCH VĂN BẢN TIẾNG NHẬT
-## 1. XÁC NHẬN VĂN BẢN GỐC
-日本は島国です。
-**Tóm tắt nội dung:** Nhật Bản là đảo quốc.
-## 2. TỪ VỰNG JLPT N4-N1
-### 2.1 Danh sách toàn bộ từ vựng trong bài
-| # | Từ | Đọc | Loại | Nghĩa | JLPT |
-|---|---|---|---|---|---|
-| 1 | 日本 | にほん | danh từ | Nhật Bản | N5 |
-### 2.2 Từ vựng quan trọng
-| Từ | Đọc | Loại | Nghĩa | Ví dụ | Khó |
-|---|---|---|---|---|---|
-| 島国 | しまぐに | danh từ | đảo quốc | 日本は島国です | N3 |
-## 3. PHÂN TÍCH KANJI
-| Kanji | On | Kun | Nghĩa | JLPT | Từ | Ví dụ | Vai trò |
-|---|---|---|---|---|---|---|---|
-| 日 | ニチ | ひ | ngày | N5 | 日本 | 日本 | cấu tạo |
-## 4. TỪ NỐI CÂU & LIÊN TỪ
-Không có.
-## 5. PHÂN TÍCH NGỮ PHÁP
-**[N + です]**
-- Quy tắc: N + です
-- Ví dụ trong bài: 日本は島国です
-- Giải thích: Khẳng định lịch sự.
-## 6. MẪU CÂU ĐẶC TRƯNG
-**Mẫu:** `N は N です`
-- Ví dụ trong bài: 日本は島国です
-- Giải thích: Câu khẳng định.
-## 7. TỔNG HỢP ĐẦY ĐỦ (DÀNH CHO WORD EXPORT)
-# Báo cáo phân tích
-## Tóm tắt
-Nhật Bản là đảo quốc.
-| Từ | Nghĩa |
-|---|---|
-| 日本 | Nhật Bản |
+ANALYSIS_RESPONSE = """## 1. Text Confirmation &amp; Summary
+**Original text:**
+The team decided to carry out the plan.
+
+**OCR Corrections:** None
+
+**Summary:** The sentence describes a team deciding to execute a plan. The tone is neutral and practical.
+
+## 2. Vocabulary Analysis
+### 2.1 All Vocabulary
+| # | Word | Base Form | Part of Speech | Vietnamese Meaning | CEFR Level |
+|---|------|-----------|----------------|--------------------|------------|
+| 1 | team | team | noun | đội nhóm | A2 |
+| 2 | decided | decide | verb | quyết định | B1 |
+### 2.2 Key Vocabulary (B2-C2, idioms, academic, domain-specific)
+| Word | Base Form | Part of Speech | Vietnamese Meaning | Example from Text | Difficulty |
+|------|-----------|----------------|--------------------|-------------------|------------|
+| carry out | carry out | phrasal verb | thực hiện | "carry out the plan" | B2 |
+## 3. Phrasal Verbs &amp; Collocations
+| Phrase | Type | Vietnamese Meaning | Example from Text | Note |
+|--------|------|--------------------|-------------------|------|
+| carry out | phrasal verb | thực hiện | "carry out the plan" | transitive |
+## 4. Linking Words &amp; Discourse Markers
+| Word/Phrase | Function | Vietnamese Meaning | Example from Text | Register | Difficulty |
+|-------------|----------|--------------------|-------------------|----------|------------|
+| -- | -- | -- | Không có | -- | -- |
+## 5. Grammar Points
+**[Past simple]**
+- Rule: Use past simple for completed past actions.
+- Example from text: "decided"
+- Explanation: It presents the decision as completed.
+## 6. Sentence Patterns &amp; Structures
+**Pattern:** `subject + verb + infinitive`
+- Example from text: "decided to carry out"
+- Explanation: The infinitive phrase completes the verb "decided".
+## 7. Full Analysis Report (Markdown)
+# English Text Analysis Report
+## 1. Text Overview
+The team decided to carry out the plan.
+## 2. Vocabulary
+See sections above.
+## 3. Phrasal Verbs &amp; Collocations
+See section 3.
+## 4. Linking Words &amp; Discourse Markers
+See section 4.
+## 5. Grammar Points
+See section 5.
+## 6. Sentence Patterns
+See section 6.
+## 7. Overall Assessment
+- **CEFR Level Estimate:** B1
+- **Text Type:** conversational
+- **Dominant Tense:** simple past
+- **Writing Style Notes:** neutral
+- **Study Recommendations:** Review phrasal verbs.
 """
 
 
 def sample_image():
     image = Image.new("RGB", (600, 300), "white")
-    ImageDraw.Draw(image).text((40, 120), "Japanese OCR", fill="black")
+    ImageDraw.Draw(image).text((40, 120), "English OCR", fill="black")
     buffer = io.BytesIO()
     image.save(buffer, "JPEG")
     return buffer.getvalue()
@@ -87,6 +107,7 @@ def test_full_pipeline(monkeypatch):
     assert len(ocr_result["clean_text"]) > 5
     assert analysis["summary"]
     assert analysis["vocabulary_all"]
+    assert analysis["phrasal_collocations"]
     assert len(docx_bytes) > 1000
 
 

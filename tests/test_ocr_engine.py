@@ -12,10 +12,10 @@ HAS_FURIGANA: yes
 CONFIDENCE: high
 
 ---OCR_START---
-日本語《にほんご》です。【要確認: 語→語 | rõ】
+The tearn decided. [CHECK: tearn -> team | blurry letter]
 ---OCR_END---
 ---NOTES_START---
-- Một ký tự cần xác nhận
+- One word needs confirmation
 ---NOTES_END---
 """
 
@@ -30,12 +30,13 @@ def test_build_and_parse():
     prompt = ocr_engine.build_ocr_prompt({"quality_level": "good", "rotation_detected": 90, "issues": []})
     result = ocr_engine.parse_ocr_response(RESPONSE)
 
+    assert "English text" in prompt
     assert "good" in prompt and "90°" in prompt
     assert result["text_direction"] == "vertical"
     assert result["text_regions"] == 2
     assert result["has_furigana"] is True
-    assert "要確認" not in result["clean_text"]
-    assert result["ocr_notes"] == ["Một ký tự cần xác nhận"]
+    assert "CHECK" not in result["clean_text"]
+    assert result["ocr_notes"] == ["One word needs confirmation"]
 
 
 def test_run_ocr_retries_and_usage(monkeypatch):

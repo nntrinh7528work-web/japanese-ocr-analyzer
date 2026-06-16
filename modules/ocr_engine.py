@@ -69,7 +69,7 @@ def parse_ocr_response(response_text: str) -> dict[str, Any]:
         for line in notes_text.splitlines()
         if line.strip() and line.strip().lower() not in {"なし", "none", "không có"}
     ]
-    clean_text = re.sub(r"【要確認:.*?】", "", raw_text, flags=re.DOTALL)
+    clean_text = re.sub(r"(?:【要確認:.*?】|\[CHECK:.*?\])", "", raw_text, flags=re.DOTALL)
     clean_text = re.sub(r"[ \t]+\n", "\n", clean_text).strip()
     return {
         "raw_text": raw_text,

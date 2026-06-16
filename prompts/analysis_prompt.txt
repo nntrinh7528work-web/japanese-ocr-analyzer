@@ -1,44 +1,125 @@
-Bạn là chuyên gia phân tích văn bản tiếng Nhật và giảng dạy ngôn ngữ Nhật cho người học tiếng Việt.
-Phân tích văn bản sau và trả lời bằng tiếng Việt, dùng định dạng Markdown.
+You are an expert English language analyst and educator. Analyze the following
+English text thoroughly and return a structured Markdown report in EXACTLY the
+7-section format below.
 
-===VĂN BẢN ĐẦU VÀO===
-{japanese_text}
-======================
-
-===GHI CHÚ OCR===
+OCR Notes (issues detected during image processing):
 {ocr_notes}
-================
 
-Thực hiện đúng thứ tự 7 bước sau:
+English text to analyze:
+{english_text}
 
-# PHÂN TÍCH VĂN BẢN TIẾNG NHẬT
+---
 
-## 1. XÁC NHẬN VĂN BẢN GỐC
-Trình bày lại văn bản, ghi các sửa lỗi theo dạng `[Sửa: XXX → YYY | Lý do: ...]`.
-**Tóm tắt nội dung:** Tóm tắt 2-3 câu.
+CRITICAL RULES:
+1. Every section header MUST match exactly: ## 1., ## 2., ... ## 7.
+2. Every subsection header MUST match exactly: ### 2.1, ### 2.2
+3. ALL table rows must have the EXACT number of columns as the header row
+4. Do NOT add any text before ## 1. or after the last row of ## 7.
+5. Use N/A for any cell with no value — never leave a cell blank
 
-## 2. TỪ VỰNG JLPT N4-N1
-### 2.1 Danh sách toàn bộ từ vựng trong bài
-| # | Từ gốc | Phiên âm | Loại từ | Nghĩa tiếng Việt | Cấp JLPT |
-|---|---|---|---|---|---|
+---
 
-### 2.2 Từ vựng quan trọng / từ mới / từ chuyên ngành
-| Từ gốc | Phiên âm | Loại từ | Nghĩa tiếng Việt | Ví dụ trong bài | Mức độ khó |
-|---|---|---|---|---|---|
+## 1. Text Confirmation &amp; Summary
 
-## 3. PHÂN TÍCH KANJI
-| Kanji | Onyomi | Kunyomi | Nghĩa cơ bản | JLPT | Từ vựng trong bài (≤5 từ) | Câu ví dụ trong bài | Vai trò trong từ |
-|---|---|---|---|---|---|---|---|
+**Original text:**
+{english_text}
 
-## 4. TỪ NỐI CÂU & LIÊN TỪ
-| Từ/Cụm | Phiên âm | Loại | Nghĩa tiếng Việt | Câu ví dụ trong bài | Vai trò ngữ nghĩa | Mức độ khó |
-|---|---|---|---|---|---|---|
+**OCR Corrections:** [Correction: <wrong> → <correct>] or "None"
 
-## 5. PHÂN TÍCH NGỮ PHÁP
-Với mỗi điểm: **[Tên cấu trúc]**, rồi `- Quy tắc:`, `- Ví dụ trong bài:`, `- Giải thích ý nghĩa & cách dùng:`.
+**Summary:** (2–4 sentences: content, topic, tone)
 
-## 6. MẪU CÂU ĐẶC TRƯNG
-Với mỗi mẫu: **Mẫu:** `[công thức / pattern]`, rồi `- Ví dụ trong bài:` và `- Giải thích:`.
+---
 
-## 7. TỔNG HỢP ĐẦY ĐỦ (DÀNH CHO WORD EXPORT)
-Không lặp lại nội dung mục 1-6. Chỉ ghi một dòng xác nhận hoàn tất vì toàn bộ phản hồi này sẽ được dùng trực tiếp để xuất Word.
+## 2. Vocabulary Analysis
+
+### 2.1 All Vocabulary
+
+List every content word (nouns, verbs, adjectives, adverbs).
+
+| # | Word | Base Form | Part of Speech | Vietnamese Meaning | CEFR Level |
+|---|------|-----------|----------------|--------------------|------------|
+| 1 | word | word | noun | từ | A1 |
+
+CEFR levels: A1, A2, B1, B2, C1, C2
+
+### 2.2 Key Vocabulary (B2–C2, idioms, academic, domain-specific)
+
+| Word | Base Form | Part of Speech | Vietnamese Meaning | Example from Text | Difficulty |
+|------|-----------|----------------|--------------------|-------------------|------------|
+| word | word | noun | từ | "..." | B2 |
+
+---
+
+## 3. Phrasal Verbs &amp; Collocations
+
+| Phrase | Type | Vietnamese Meaning | Example from Text | Note |
+|--------|------|--------------------|-------------------|------|
+| give up | phrasal verb | từ bỏ | "..." | separable |
+
+Types: phrasal verb / collocation / idiom / fixed expression
+If none found: | — | — | Không có | — | — |
+
+---
+
+## 4. Linking Words &amp; Discourse Markers
+
+| Word/Phrase | Function | Vietnamese Meaning | Example from Text | Register | Difficulty |
+|-------------|----------|--------------------|-------------------|----------|------------|
+| however | contrast | tuy nhiên | "..." | formal | B1 |
+
+Register: formal / informal / neutral
+If none found: | — | — | — | Không có | — | — |
+
+---
+
+## 5. Grammar Points
+
+**[Grammar Name]**
+- Rule: (concise rule)
+- Example from text: (exact quote)
+- Explanation: (function and meaning in context)
+
+Cover: tense, modal verbs, passive voice, conditionals, relative clauses
+— only if present. Skip absent structures entirely.
+
+---
+
+## 6. Sentence Patterns &amp; Structures
+
+**Pattern:** `pattern description`
+- Example from text: (exact quote)
+- Explanation: (structural analysis and communicative function)
+
+Identify: fronting/inversion, cleft sentences, participle clauses,
+hedging language, parallel structure — only if present.
+
+---
+
+## 7. Full Analysis Report (Markdown)
+
+# English Text Analysis Report
+
+## 1. Text Overview
+(confirmed text + summary)
+
+## 2. Vocabulary
+(tables 2.1 and 2.2)
+
+## 3. Phrasal Verbs &amp; Collocations
+(table from section 3)
+
+## 4. Linking Words &amp; Discourse Markers
+(table from section 4)
+
+## 5. Grammar Points
+(all blocks from section 5)
+
+## 6. Sentence Patterns
+(all blocks from section 6)
+
+## 7. Overall Assessment
+- **CEFR Level Estimate:** (A1–C2)
+- **Text Type:** (academic / literary / journalistic / conversational / technical)
+- **Dominant Tense:** (e.g., simple past)
+- **Writing Style Notes:** (register, formality, tone)
+- **Study Recommendations:** (2-3 tips for learners)
