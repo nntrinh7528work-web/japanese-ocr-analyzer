@@ -68,6 +68,48 @@ See section 6.
 - **Study Recommendations:** Review phrasal verbs and reason clauses.
 """
 
+JAPANESE_RESPONSE = """# PHÂN TÍCH VĂN BẢN TIẾNG NHẬT
+## 1. XÁC NHẬN VĂN BẢN GỐC
+日本は島国です。
+[Sửa: 本 → 日本 | Lý do: ngữ cảnh]
+**Tóm tắt nội dung:** Bài viết giới thiệu Nhật Bản.
+
+## 2. TỪ VỰNG JLPT N4-N1
+### 2.1 Danh sách toàn bộ từ vựng trong bài
+| # | Từ gốc | Phiên âm | Loại từ | Nghĩa | JLPT |
+|---|---|---|---|---|---|
+| 1 | 日本 | にほん | Danh từ | Nhật Bản | N5 |
+### 2.2 Từ vựng quan trọng
+| Từ | Phiên âm | Loại | Nghĩa | Ví dụ | Khó |
+|---|---|---|---|---|---|
+| 島国 | しまぐに | Danh từ | Đảo quốc | 日本は島国です | N3 |
+
+## 3. PHÂN TÍCH KANJI
+| Kanji | On | Kun | Nghĩa | JLPT | Từ | Ví dụ | Vai trò |
+|---|---|---|---|---|---|---|---|
+| 日 | ニチ | ひ | ngày | N5 | 日本 | 日本 | bổ nghĩa |
+
+## 4. TỪ NỐI CÂU & LIÊN TỪ
+| Cụm | Phiên âm | Loại | Nghĩa | Ví dụ | Vai trò | Khó |
+|---|---|---|---|---|---|---|
+| しかし | しかし | liên từ | tuy nhiên | しかし | tương phản | N4 |
+
+## 5. PHÂN TÍCH NGỮ PHÁP
+**[N + です]**
+- Quy tắc: N + です
+- Ví dụ trong bài: 日本は島国です
+- Giải thích ý nghĩa & cách dùng: Câu lịch sự.
+
+## 6. MẪU CÂU ĐẶC TRƯNG
+**Mẫu:** `N は N です`
+- Ví dụ trong bài: 日本は島国です
+- Giải thích: Khẳng định.
+
+## 7. TỔNG HỢP ĐẦY ĐỦ (DÀNH CHO WORD EXPORT)
+# Báo cáo
+Nội dung hoàn chỉnh.
+"""
+
 
 def test_build_and_parse():
     prompt = text_analyzer.build_analysis_prompt("The team decided.", ["ghi chú một", "ghi chú hai"])
@@ -86,6 +128,21 @@ def test_build_and_parse():
     assert result["grammar_points"][0]["rule"].startswith("Use past simple")
     assert result["sentence_patterns"][0]["pattern"] == "because-clause of reason"
     assert result["full_markdown"].startswith("## 1. Text Confirmation")
+
+
+def test_build_and_parse_japanese_mode():
+    prompt = text_analyzer.build_analysis_prompt("日本", ["ghi chú"], "japanese")
+    result = text_analyzer.parse_analysis_response(JAPANESE_RESPONSE, "japanese")
+
+    assert "PHÂN TÍCH VĂN BẢN TIẾNG NHẬT" in prompt
+    assert "English text to analyze" not in prompt
+    assert result["analysis_language"] == "japanese"
+    assert result["summary"] == "Bài viết giới thiệu Nhật Bản."
+    assert result["vocabulary_all"][0]["reading"] == "にほん"
+    assert result["kanji_analysis"][0]["kanji"] == "日"
+    assert result["connectors"][0]["phrase"] == "しかし"
+    assert result["phrasal_collocations"] == []
+    assert result["discourse_markers"] == []
 
 
 def test_run_analysis_and_long_text_merge(monkeypatch):

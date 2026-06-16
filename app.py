@@ -1,4 +1,4 @@
-"""Streamlit entry point for English OCR Analyzer."""
+"""Streamlit entry point for Japanese/English OCR Analyzer."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from modules.result_exporter import analysis_json_bytes, default_export_stem, ma
 from modules.text_analyzer import run_analysis
 
 
-st.set_page_config(page_title="English OCR Analyzer", page_icon="🔍", layout="wide")
+st.set_page_config(page_title="Japanese / English OCR Analyzer", page_icon="🔍", layout="wide")
 st.markdown(
     """
     <style>
@@ -98,8 +98,8 @@ def current_budget_status(
     }
 
 
-st.title("🔍 English OCR Analyzer")
-st.caption("Tải nhiều ảnh hoặc PDF, OCR từng trang hoặc toàn bộ, rồi gộp nội dung để phân tích chung.")
+st.title("🔍 Japanese / English OCR Analyzer")
+st.caption("Tải nhiều ảnh hoặc PDF, OCR từng trang hoặc toàn bộ, rồi chọn phân tích tiếng Nhật hoặc tiếng Anh.")
 
 items = st.session_state.image_items
 st.sidebar.header("📚 Bộ ảnh phân tích")
@@ -115,6 +115,15 @@ st.sidebar.divider()
 st.sidebar.header("⚙️ Settings")
 show_preprocessing = st.sidebar.toggle("Hiển thị chi tiết tiền xử lý", value=True)
 st.sidebar.caption(f"Ảnh tối đa {MAX_IMAGE_SIZE_MB} MB · PDF tối đa {MAX_PDF_SIZE_MB} MB/{MAX_PDF_PAGES} trang")
+analysis_language = st.sidebar.radio(
+    "Ngôn ngữ phân tích",
+    options=["japanese", "english"],
+    format_func=lambda value: "Tiếng Nhật (Kanji/JLPT)" if value == "japanese" else "Tiếng Anh (CEFR/Grammar)",
+    horizontal=False,
+)
+if st.session_state.get("_last_analysis_language") not in (None, analysis_language):
+    clear_analysis()
+st.session_state["_last_analysis_language"] = analysis_language
 st.sidebar.subheader("💰 Ước tính chi phí")
 billing_tier = st.sidebar.radio(
     "Gói Gemini",
@@ -170,7 +179,7 @@ with st.expander("➕ Thêm ảnh hoặc PDF vào bộ phân tích", expanded=no
             st.error(f"❌ Không thể thêm file: {error}")
     with camera_tab:
         camera_file = st.camera_input(
-            "Chụp ảnh văn bản tiếng Anh",
+            "Chụp ảnh văn bản",
             key=f"camera_{st.session_state.camera_version}",
         )
         if camera_file and st.button("➕ Thêm ảnh vừa chụp", width="stretch"):
@@ -272,12 +281,13 @@ else:
     if st.button("🧠 Phân tích tất cả ảnh đã OCR", type="primary", width="stretch"):
         try:
             with st.spinner("Đang phân tích nội dung từ nhiều ảnh..."):
-                st.session_state.analysis = run_analysis(analysis_text, combined_notes(items))
+                st.session_state.analysis = run_analysis(analysis_text, combined_notes(items), analysis_language)
         except Exception as exc:
             st.error(f"❌ Lỗi phân tích: {exc}")
 
 if st.session_state.analysis:
     analysis = st.session_state.analysis
+    result_language = analysis.get("analysis_language", analysis_language)
     ocr_costs = [
         estimate_cost(item["ocr_result"].get("usage"), GEMINI_MODEL_VISION, billing_tier)
         for item in items
@@ -342,9 +352,12 @@ if st.session_state.analysis:
             mime="application/json",
             width="stretch",
         )
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["📝 Tóm tắt", "📊 Từ vựng", "🔗 Phrasal & Collocations", "🧩 Discourse & Grammar", "💾 Xem bản lưu"]
+    detail_tabs = (
+        ["📝 Tóm tắt", "📊 Từ vựng", "漢字 Kanji", "🔗 Từ nối & Ngữ pháp", "💾 Xem bản lưu"]
+        if result_language == "japanese"
+        else ["📝 Tóm tắt", "📊 Từ vựng", "🔗 Phrasal & Collocations", "🧩 Discourse & Grammar", "💾 Xem bản lưu"]
     )
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(detail_tabs)
     with tab1:
         st.subheader("Văn bản đã xác nhận")
         st.write(analysis["confirmed_text"])
@@ -355,7 +368,13 @@ if st.session_state.analysis:
         st.subheader("Từ vựng quan trọng")
         st.dataframe(analysis["vocabulary_important"], width="stretch")
     with tab3:
-        if analysis.get("phrasal_collocations"):
+        if result_language == "japanese":
+            if analysis["kanji_analysis"]:
+                st.dataframe(analysis["kanji_analysis"], width="stretch")
+            else:
+                st.info("Chưa trích xuất được bảng Kanji riêng. Xem nội dung gốc bên dưới.")
+                st.markdown(analysis.get("section_markdown", {}).get("kanji") or "Không có dữ liệu Kanji.")
+        elif analysis.get("phrasal_collocations"):
             st.dataframe(analysis["phrasal_collocations"], width="stretch")
         else:
             st.info("Chưa trích xuất được bảng phrasal verbs/collocations riêng. Xem nội dung gốc bên dưới.")
@@ -364,25 +383,27 @@ if st.session_state.analysis:
                 or "Không có dữ liệu phrasal verbs/collocations."
             )
     with tab4:
-        st.subheader("Linking words & discourse markers")
-        if analysis.get("discourse_markers"):
-            st.dataframe(analysis["discourse_markers"], width="stretch")
+        st.subheader("Từ nối câu" if result_language == "japanese" else "Linking words & discourse markers")
+        marker_key = "connectors" if result_language == "japanese" else "discourse_markers"
+        marker_markdown_key = "connectors" if result_language == "japanese" else "discourse_markers"
+        if analysis.get(marker_key):
+            st.dataframe(analysis[marker_key], width="stretch")
         else:
-            st.info("Chưa trích xuất được bảng discourse markers riêng.")
+            st.info("Chưa trích xuất được bảng từ nối/discourse markers riêng.")
             st.markdown(
-                analysis.get("section_markdown", {}).get("discourse_markers")
-                or "Không có dữ liệu discourse markers."
+                analysis.get("section_markdown", {}).get(marker_markdown_key)
+                or "Không có dữ liệu từ nối/discourse markers."
             )
-        st.subheader("Grammar points")
+        st.subheader("Điểm ngữ pháp" if result_language == "japanese" else "Grammar points")
         if analysis["grammar_points"]:
             for point in analysis["grammar_points"]:
                 with st.expander(f"📌 {point['name']}"):
-                    st.write(f"**Rule:** {point['rule']}")
+                    st.write(f"**{'Quy tắc' if result_language == 'japanese' else 'Rule'}:** {point['rule']}")
                     st.code(point["example"], language=None)
-                    st.write(f"**Explanation:** {point['explanation']}")
+                    st.write(f"**{'Giải thích' if result_language == 'japanese' else 'Explanation'}:** {point['explanation']}")
         else:
-            st.info("Chưa trích xuất được mục grammar riêng. Xem nội dung gốc bên dưới.")
-            st.markdown(analysis.get("section_markdown", {}).get("grammar") or "Không có dữ liệu grammar.")
+            st.info("Chưa trích xuất được mục ngữ pháp/grammar riêng. Xem nội dung gốc bên dưới.")
+            st.markdown(analysis.get("section_markdown", {}).get("grammar") or "Không có dữ liệu ngữ pháp/grammar.")
     with tab5:
         st.info("Dùng mục '💾 Lưu kết quả phân tích' phía trên để tải Word, Markdown hoặc JSON.")
         st.markdown(analysis["full_markdown"])
