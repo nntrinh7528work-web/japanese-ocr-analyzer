@@ -14,7 +14,7 @@ def pdf_to_image_sources(
     filename: str,
     max_pages: int = MAX_PDF_PAGES,
 ) -> list[tuple[str, bytes]]:
-    """Return PDF pages as named PNG byte sources."""
+    """Return PDF pages as compact named JPEG byte sources."""
     if not data:
         raise ValueError("PDF trống.")
     if len(data) > MAX_PDF_SIZE_MB * 1024 * 1024:
@@ -36,11 +36,11 @@ def pdf_to_image_sources(
         stem = Path(filename).stem or "document"
         digits = max(2, len(str(document.page_count)))
         sources = []
-        matrix = fitz.Matrix(1.5, 1.5)
+        matrix = fitz.Matrix(1.3, 1.3)
         for page_number, page in enumerate(document, 1):
             pixmap = page.get_pixmap(matrix=matrix, alpha=False)
-            page_name = f"{stem} - trang {page_number:0{digits}d}.png"
-            sources.append((page_name, pixmap.tobytes("png")))
+            page_name = f"{stem} - trang {page_number:0{digits}d}.jpg"
+            sources.append((page_name, pixmap.tobytes("jpeg", jpg_quality=85)))
         return sources
     finally:
         document.close()

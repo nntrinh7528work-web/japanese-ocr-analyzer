@@ -57,5 +57,5 @@ def test_add_pdf_expands_pages_into_image_items():
     items, added, errors = add_upload_items([], [("lesson.pdf", pdf)])
 
     assert len(items) == 2
-    assert added == ["lesson - trang 01.png", "lesson - trang 02.png"]
+    assert added == ["lesson - trang 01.jpg", "lesson - trang 02.jpg"]
     assert errors == []

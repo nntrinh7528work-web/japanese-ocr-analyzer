@@ -104,3 +104,41 @@ Nội dung bị cắt trước mục 7.
     assert result["summary"] == "Nhật Bản là đảo quốc."
     assert result["confirmed_text"]
     assert result["full_markdown"] == truncated.strip()
+
+
+def test_analysis_backfills_missing_kanji_and_grammar(monkeypatch):
+    main = """# PHÂN TÍCH
+## 1 XÁC NHẬN VĂN BẢN GỐC
+日本は島国です。
+Tóm tắt: Nhật Bản là đảo quốc.
+## 2 TỪ VỰNG
+### 2.1 Danh sách toàn bộ từ vựng trong bài
+| # | Từ | Đọc | Loại | Nghĩa | JLPT |
+|---|---|---|---|---|---|
+| 1 | 日本 | にほん | danh từ | Nhật Bản | N5 |
+"""
+    supplemental = """## 3. PHÂN TÍCH KANJI
+| Kanji | On | Kun | Nghĩa | JLPT | Từ | Ví dụ | Vai trò |
+|---|---|---|---|---|---|---|---|
+| 国 | コク | くに | nước | N5 | 島国 | 島国です | gốc nghĩa |
+## 5. PHÂN TÍCH NGỮ PHÁP
+### N + です
+- Quy tắc: N + です
+- Ví dụ trong bài: 島国です
+- Giải thích: Câu lịch sự.
+"""
+
+    class Model:
+        calls = 0
+
+        def generate_content(self, _prompt, generation_config):
+            self.calls += 1
+            return SimpleNamespace(text=main if self.calls == 1 else supplemental, usage_metadata=None)
+
+    model = Model()
+    monkeypatch.setattr(text_analyzer, "_init_model", lambda: model)
+    result = text_analyzer.run_analysis("日本は島国です。", [])
+
+    assert result["kanji_analysis"][0]["kanji"] == "国"
+    assert result["grammar_points"][0]["name"] == "N + です"
+    assert "Bổ sung mục còn thiếu" in result["full_markdown"]

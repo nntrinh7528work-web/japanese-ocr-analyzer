@@ -14,11 +14,11 @@ def _pdf_bytes(page_count=2):
     return data
 
 
-def test_pdf_pages_are_rendered_as_named_png_sources():
+def test_pdf_pages_are_rendered_as_named_jpeg_sources():
     sources = pdf_to_image_sources(_pdf_bytes(), "lesson.pdf")
 
-    assert [name for name, _ in sources] == ["lesson - trang 01.png", "lesson - trang 02.png"]
-    assert all(data.startswith(b"\x89PNG") for _, data in sources)
+    assert [name for name, _ in sources] == ["lesson - trang 01.jpg", "lesson - trang 02.jpg"]
+    assert all(data.startswith(b"\xff\xd8\xff") for _, data in sources)
 
 
 def test_pdf_page_limit_is_enforced():

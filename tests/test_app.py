@@ -27,6 +27,8 @@ def test_app_renders_two_independent_image_flows():
         create_image_item(_image_bytes("black"), "page-2.png"),
     ]
     app.session_state["analysis"] = None
+    app.session_state["upload_messages"] = []
+    app.session_state["upload_errors"] = []
     app.session_state["uploader_version"] = 0
     app.session_state["camera_version"] = 0
     app.run(timeout=20)

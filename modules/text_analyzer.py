@@ -47,7 +47,7 @@ def _parse_table(section: str, keys: list[str]) -> list[dict[str, str]]:
 
 
 def _field(block: str, labels: str) -> str:
-    match = re.search(rf"(?mi)^\s*-\s*(?:{labels})\s*:\s*(.+)$", block)
+    match = re.search(rf"(?mi)^\s*(?:[-*]\s*)?(?:\*\*)?(?:{labels})(?:\*\*)?\s*:\s*(.+)$", block)
     return match.group(1).strip().strip("`") if match else ""
 
 
@@ -74,6 +74,31 @@ def _parse_named_blocks(section: str, heading_pattern: str, kind: str) -> list[d
                 }
             )
     return results
+
+
+def _parse_grammar(section: str) -> list[dict[str, str]]:
+    grammar = _parse_named_blocks(section, r"^\s*\*\*(?!Mẫu:)(.+?)\*\*\s*$", "grammar")
+    if grammar:
+        return grammar
+
+    heading_matches = list(re.finditer(r"(?m)^#{3,5}\s+(.+?)\s*$", section))
+    results = []
+    for index, match in enumerate(heading_matches):
+        block = section[match.end() : heading_matches[index + 1].start() if index + 1 < len(heading_matches) else None]
+        results.append(
+            {
+                "name": match.group(1).strip("[] "),
+                "rule": _field(block, r"Quy tắc|Cấu trúc|Mẫu câu"),
+                "example": _field(block, r"Ví dụ(?: trong bài)?"),
+                "explanation": _field(block, r"Giải thích(?: ý nghĩa & cách dùng)?|Ý nghĩa|Cách dùng"),
+            }
+        )
+    return [item for item in results if any(item.values())]
+
+
+def _section_markdown(response_text: str, number: int) -> str:
+    section = _section(response_text, number)
+    return section.strip()
 
 
 def parse_analysis_response(response_text: str) -> dict[str, Any]:
@@ -104,7 +129,7 @@ def parse_analysis_response(response_text: str) -> dict[str, Any]:
     connectors = _parse_table(
         sections[4], ["phrase", "reading", "type", "meaning", "example", "role", "difficulty"]
     )
-    grammar = _parse_named_blocks(sections[5], r"^\s*\*\*(?!Mẫu:)(.+?)\*\*\s*$", "grammar")
+    grammar = _parse_grammar(sections[5])
     patterns = _parse_named_blocks(sections[6], r"^\s*\*\*Mẫu:\*\*\s*(.+?)\s*$", "pattern")
     return {
         "confirmed_text": sections[1],
@@ -116,11 +141,84 @@ def parse_analysis_response(response_text: str) -> dict[str, Any]:
         "connectors": connectors,
         "grammar_points": grammar,
         "sentence_patterns": patterns,
+        "section_markdown": {
+            "kanji": _section_markdown(response_text, 3),
+            "connectors": _section_markdown(response_text, 4),
+            "grammar": _section_markdown(response_text, 5),
+            "patterns": _section_markdown(response_text, 6),
+        },
         # The complete response is already a valid export document. Using it also
         # preserves useful analysis when Gemini reaches its token limit before section 7.
         "full_markdown": response_text.strip(),
         "usage": {"input_tokens": 0, "output_tokens": 0},
     }
+
+
+def build_missing_sections_prompt(japanese_text: str, missing_sections: list[str]) -> str:
+    """Build a compact prompt to recover sections that were empty in the main analysis."""
+    requested = ", ".join(missing_sections)
+    return f"""Bạn là giáo viên tiếng Nhật cho người Việt.
+Phân tích BỔ SUNG chỉ các mục còn thiếu sau: {requested}.
+
+Văn bản:
+{japanese_text}
+
+Trả lời đúng Markdown theo các tiêu đề sau nếu được yêu cầu:
+
+## 3. PHÂN TÍCH KANJI
+| Kanji | Onyomi | Kunyomi | Nghĩa cơ bản | JLPT | Từ vựng trong bài (≤5 từ) | Câu ví dụ trong bài | Vai trò trong từ |
+|---|---|---|---|---|---|---|---|
+
+## 4. TỪ NỐI CÂU & LIÊN TỪ
+| Từ/Cụm | Phiên âm | Loại | Nghĩa tiếng Việt | Câu ví dụ trong bài | Vai trò ngữ nghĩa | Mức độ khó |
+|---|---|---|---|---|---|---|
+
+## 5. PHÂN TÍCH NGỮ PHÁP
+Với mỗi điểm: **[Tên cấu trúc]**, rồi `- Quy tắc:`, `- Ví dụ trong bài:`, `- Giải thích ý nghĩa & cách dùng:`.
+
+## 6. MẪU CÂU ĐẶC TRƯNG
+Với mỗi mẫu: **Mẫu:** `[công thức / pattern]`, rồi `- Ví dụ trong bài:` và `- Giải thích:`.
+"""
+
+
+def _merge_usage(base: dict[str, int], extra: dict[str, int]) -> dict[str, int]:
+    keys = set(base) | set(extra)
+    return {key: int(base.get(key, 0) or 0) + int(extra.get(key, 0) or 0) for key in keys}
+
+
+def _fill_missing_sections(model: Any, parsed: dict[str, Any], text: str) -> dict[str, Any]:
+    missing = []
+    if not parsed["kanji_analysis"]:
+        missing.append("Kanji")
+    if not parsed["connectors"]:
+        missing.append("Từ nối")
+    if not parsed["grammar_points"]:
+        missing.append("Ngữ pháp")
+    if not parsed["sentence_patterns"]:
+        missing.append("Mẫu câu")
+    if not missing:
+        return parsed
+
+    try:
+        response = model.generate_content(
+            build_missing_sections_prompt(text, missing),
+            generation_config={"temperature": 0.1, "max_output_tokens": 8192},
+        )
+        if not response.text or not response.text.strip():
+            return parsed
+        supplemental = parse_analysis_response(response.text)
+        for field in ("kanji_analysis", "connectors", "grammar_points", "sentence_patterns"):
+            if not parsed[field] and supplemental[field]:
+                parsed[field] = supplemental[field]
+        for key, value in supplemental.get("section_markdown", {}).items():
+            if value and not parsed["section_markdown"].get(key):
+                parsed["section_markdown"][key] = value
+        if any(supplemental[field] for field in ("kanji_analysis", "connectors", "grammar_points", "sentence_patterns")):
+            parsed["full_markdown"] = f"{parsed['full_markdown']}\n\n---\n\n# Bổ sung mục còn thiếu\n{response.text.strip()}"
+        parsed["usage"] = _merge_usage(parsed.get("usage", {}), _usage(response))
+    except Exception:
+        return parsed
+    return parsed
 
 
 def _init_model():
@@ -163,6 +261,7 @@ def _analyze_chunk(model: Any, text: str, notes: list) -> dict[str, Any]:
             if not parsed["summary"]:
                 parsed["summary"] = "Không thể trích xuất tóm tắt riêng; xem toàn bộ nội dung phân tích bên dưới."
             parsed["usage"] = _usage(response)
+            parsed = _fill_missing_sections(model, parsed, text)
             return parsed
         except Exception as exc:
             last_error = exc
@@ -211,6 +310,10 @@ def run_analysis(japanese_text: str, ocr_notes: list) -> dict[str, Any]:
     merged["confirmed_text"] = "\n\n".join(result["confirmed_text"] for result in results)
     merged["summary"] = " ".join(result["summary"] for result in results)
     merged["full_markdown"] = "\n\n".join(result["full_markdown"] for result in results)
+    merged["section_markdown"] = {
+        key: "\n\n".join(result.get("section_markdown", {}).get(key, "") for result in results).strip()
+        for key in ("kanji", "connectors", "grammar", "patterns")
+    }
     merged["usage"] = {
         "input_tokens": sum(result["usage"]["input_tokens"] for result in results),
         "output_tokens": sum(result["usage"]["output_tokens"] for result in results),

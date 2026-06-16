@@ -35,6 +35,8 @@ st.markdown(
 for key, default in {
     "image_items": [],
     "analysis": None,
+    "upload_messages": [],
+    "upload_errors": [],
     "uploader_version": 0,
     "camera_version": 0,
 }.items():
@@ -46,14 +48,15 @@ def clear_analysis() -> None:
     st.session_state.analysis = None
 
 
-def add_sources(sources: list[tuple[str, bytes]]) -> None:
+def add_sources(sources: list[tuple[str, bytes]]) -> bool:
     items, added, errors = add_upload_items(st.session_state.image_items, sources)
     st.session_state.image_items = items
+    st.session_state.upload_messages = []
+    st.session_state.upload_errors = errors
     if added:
         clear_analysis()
-        st.toast(f"Đã thêm {len(added)} ảnh/trang PDF.", icon="✅")
-    for error in errors:
-        st.error(f"❌ Không thể thêm file: {error}")
+        st.session_state.upload_messages.append(f"Đã thêm {len(added)} ảnh/trang PDF.")
+    return bool(added)
 
 
 def remove_image(item_id: str) -> None:
@@ -116,18 +119,24 @@ with st.expander("➕ Thêm ảnh hoặc PDF vào bộ phân tích", expanded=no
         )
         st.caption(f"Hỗ trợ PDF tối đa {MAX_PDF_SIZE_MB} MB. Trên iPhone, chọn Browse/Duyệt để mở ứng dụng Files.")
         if uploaded_files and st.button("➕ Thêm file đã chọn", type="primary", width="stretch"):
-            add_sources([(file.name, file.getvalue()) for file in uploaded_files])
-            st.session_state.uploader_version += 1
-            st.rerun()
+            with st.spinner("Đang xử lý file upload..."):
+                added_any = add_sources([(file.name, file.getvalue()) for file in uploaded_files])
+            if added_any:
+                st.session_state.uploader_version += 1
+                st.rerun()
+        for message in st.session_state.upload_messages:
+            st.success(f"✅ {message}")
+        for error in st.session_state.upload_errors:
+            st.error(f"❌ Không thể thêm file: {error}")
     with camera_tab:
         camera_file = st.camera_input(
             "Chụp ảnh văn bản tiếng Nhật",
             key=f"camera_{st.session_state.camera_version}",
         )
         if camera_file and st.button("➕ Thêm ảnh vừa chụp", width="stretch"):
-            add_sources([(f"camera_{len(items) + 1}.jpg", camera_file.getvalue())])
-            st.session_state.camera_version += 1
-            st.rerun()
+            if add_sources([(f"camera_{len(items) + 1}.jpg", camera_file.getvalue())]):
+                st.session_state.camera_version += 1
+                st.rerun()
 
 if not items:
     st.info("Hãy thêm một hoặc nhiều ảnh/PDF để bắt đầu.")
@@ -142,6 +151,7 @@ with controls_left:
         for index, item in enumerate(pending, 1):
             progress.progress(index / len(pending), text=f"Đang OCR: {item['name']}")
             run_item_ocr(item)
+            st.session_state.image_items = items
         progress.empty()
         clear_analysis()
         st.rerun()
@@ -259,16 +269,28 @@ if st.session_state.analysis:
         st.subheader("Từ vựng quan trọng")
         st.dataframe(analysis["vocabulary_important"], width="stretch")
     with tab3:
-        st.dataframe(analysis["kanji_analysis"], width="stretch")
+        if analysis["kanji_analysis"]:
+            st.dataframe(analysis["kanji_analysis"], width="stretch")
+        else:
+            st.info("Chưa trích xuất được bảng Kanji riêng. Xem nội dung gốc bên dưới.")
+            st.markdown(analysis.get("section_markdown", {}).get("kanji") or "Không có dữ liệu Kanji.")
     with tab4:
         st.subheader("Từ nối câu")
-        st.dataframe(analysis["connectors"], width="stretch")
+        if analysis["connectors"]:
+            st.dataframe(analysis["connectors"], width="stretch")
+        else:
+            st.info("Chưa trích xuất được bảng từ nối riêng.")
+            st.markdown(analysis.get("section_markdown", {}).get("connectors") or "Không có dữ liệu từ nối.")
         st.subheader("Điểm ngữ pháp")
-        for point in analysis["grammar_points"]:
-            with st.expander(f"📌 {point['name']}"):
-                st.write(f"**Quy tắc:** {point['rule']}")
-                st.code(point["example"], language=None)
-                st.write(f"**Giải thích:** {point['explanation']}")
+        if analysis["grammar_points"]:
+            for point in analysis["grammar_points"]:
+                with st.expander(f"📌 {point['name']}"):
+                    st.write(f"**Quy tắc:** {point['rule']}")
+                    st.code(point["example"], language=None)
+                    st.write(f"**Giải thích:** {point['explanation']}")
+        else:
+            st.info("Chưa trích xuất được mục ngữ pháp riêng. Xem nội dung gốc bên dưới.")
+            st.markdown(analysis.get("section_markdown", {}).get("grammar") or "Không có dữ liệu ngữ pháp.")
     with tab5:
         filename = st.text_input("Tên file:", value="japanese_multi_image_analysis.docx")
         docx_bytes = export_to_docx(analysis["full_markdown"], filename)
