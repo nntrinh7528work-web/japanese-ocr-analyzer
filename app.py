@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib
+
 import streamlit as st
 
 from config import (
@@ -17,7 +19,10 @@ from modules.doc_exporter import export_to_docx
 from modules.multi_image_workflow import add_upload_items, combined_notes, combined_text, move_image_item
 from modules.ocr_engine import run_ocr
 from modules.result_exporter import analysis_json_bytes, default_export_stem, markdown_bytes, safe_export_stem
-from modules.text_analyzer import run_analysis
+import modules.text_analyzer as text_analyzer
+
+
+text_analyzer = importlib.reload(text_analyzer)
 
 
 st.set_page_config(page_title="Japanese / English OCR Analyzer", page_icon="🔍", layout="wide")
@@ -281,7 +286,11 @@ else:
     if st.button("🧠 Phân tích tất cả ảnh đã OCR", type="primary", width="stretch"):
         try:
             with st.spinner("Đang phân tích nội dung từ nhiều ảnh..."):
-                st.session_state.analysis = run_analysis(analysis_text, combined_notes(items), analysis_language)
+                st.session_state.analysis = text_analyzer.run_analysis(
+                    analysis_text,
+                    combined_notes(items),
+                    analysis_language=analysis_language,
+                )
         except Exception as exc:
             st.error(f"❌ Lỗi phân tích: {exc}")
 
