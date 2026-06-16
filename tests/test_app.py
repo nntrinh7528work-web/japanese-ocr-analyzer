@@ -38,3 +38,41 @@ def test_app_renders_two_independent_image_flows():
     assert labels.count("🔍 OCR ảnh này") == 2
     assert "🔍 OCR tất cả ảnh chưa xử lý" in labels
     assert "Ảnh/trang PDF trong bộ phân tích (2)" in [heading.value for heading in app.subheader]
+
+
+def test_app_renders_analysis_download_options():
+    item = create_image_item(_image_bytes("white"), "page-1.png")
+    item["ocr_result"] = {
+        "clean_text": "日本語",
+        "ocr_notes": [],
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+        "confidence": "high",
+        "text_direction": "horizontal",
+        "has_furigana": False,
+    }
+    item["edited_text"] = "日本語"
+
+    app = AppTest.from_file("app.py")
+    app.session_state["image_items"] = [item]
+    app.session_state["analysis"] = {
+        "confirmed_text": "日本語",
+        "summary": "Tóm tắt",
+        "vocabulary_all": [],
+        "vocabulary_important": [],
+        "kanji_analysis": [],
+        "connectors": [],
+        "grammar_points": [],
+        "section_markdown": {},
+        "full_markdown": "# Báo cáo\n日本語",
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+    app.session_state["upload_messages"] = []
+    app.session_state["upload_errors"] = []
+    app.session_state["uploader_version"] = 0
+    app.session_state["camera_version"] = 0
+    app.run(timeout=20)
+
+    assert not app.exception
+    assert "Tên file lưu:" in [field.label for field in app.text_input]
+    assert "💾 Lưu kết quả phân tích" in [expander.label for expander in app.get("expander")]
+    assert any("JSON lưu dữ liệu có cấu trúc" in caption.value for caption in app.caption)

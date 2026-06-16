@@ -16,6 +16,7 @@ from modules.cost_estimator import estimate_cost, format_cost, sum_costs
 from modules.doc_exporter import export_to_docx
 from modules.multi_image_workflow import add_upload_items, combined_notes, combined_text, move_image_item
 from modules.ocr_engine import run_ocr
+from modules.result_exporter import analysis_json_bytes, default_export_stem, markdown_bytes, safe_export_stem
 from modules.text_analyzer import run_analysis
 
 
@@ -256,8 +257,40 @@ if st.session_state.analysis:
                 "Free Tier hiện tính $0. Giá trị tương đương Paid Tier: "
                 + format_cost(session_cost["paid_equivalent_usd"], usd_to_vnd)
             )
+    with st.expander("💾 Lưu kết quả phân tích", expanded=True):
+        st.caption("Tải file về máy/điện thoại để xem lại sau. JSON lưu dữ liệu có cấu trúc, không nhúng ảnh gốc.")
+        export_stem = safe_export_stem(
+            st.text_input("Tên file lưu:", value=default_export_stem(items), key="analysis_export_stem")
+        )
+        docx_name = f"{export_stem}.docx"
+        md_name = f"{export_stem}.md"
+        json_name = f"{export_stem}.json"
+        docx_bytes = export_to_docx(analysis["full_markdown"], docx_name)
+        json_bytes = analysis_json_bytes(items, analysis, session_cost, billing_tier, usd_to_vnd)
+        save_col1, save_col2, save_col3 = st.columns(3)
+        save_col1.download_button(
+            "⬇️ Word .docx",
+            data=docx_bytes,
+            file_name=docx_name,
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            width="stretch",
+        )
+        save_col2.download_button(
+            "⬇️ Markdown .md",
+            data=markdown_bytes(analysis),
+            file_name=md_name,
+            mime="text/markdown",
+            width="stretch",
+        )
+        save_col3.download_button(
+            "⬇️ Dữ liệu .json",
+            data=json_bytes,
+            file_name=json_name,
+            mime="application/json",
+            width="stretch",
+        )
     tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["📝 Tóm tắt", "📊 Từ vựng", "漢字 Kanji", "🔗 Từ nối & Ngữ pháp", "💾 Xuất Word"]
+        ["📝 Tóm tắt", "📊 Từ vựng", "漢字 Kanji", "🔗 Từ nối & Ngữ pháp", "💾 Xem bản lưu"]
     )
     with tab1:
         st.subheader("Văn bản đã xác nhận")
@@ -292,12 +325,5 @@ if st.session_state.analysis:
             st.info("Chưa trích xuất được mục ngữ pháp riêng. Xem nội dung gốc bên dưới.")
             st.markdown(analysis.get("section_markdown", {}).get("grammar") or "Không có dữ liệu ngữ pháp.")
     with tab5:
-        filename = st.text_input("Tên file:", value="japanese_multi_image_analysis.docx")
-        docx_bytes = export_to_docx(analysis["full_markdown"], filename)
-        st.download_button(
-            "⬇️ Tải xuống .docx",
-            data=docx_bytes,
-            file_name=filename,
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
+        st.info("Dùng mục '💾 Lưu kết quả phân tích' phía trên để tải Word, Markdown hoặc JSON.")
         st.markdown(analysis["full_markdown"])
