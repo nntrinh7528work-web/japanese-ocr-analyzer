@@ -17,7 +17,8 @@ def _set_font(style, name: str, size: int, bold: bool = False, color: str | None
     style.font.name = name
     style.font.size = Pt(size)
     style.font.bold = bold
-    style.element.rPr.rFonts.set(qn("w:eastAsia"), name)
+    rpr = style.element.get_or_add_rPr()
+    rpr.get_or_add_rFonts().set(qn("w:eastAsia"), name)
     if color:
         style.font.color.rgb = RGBColor.from_string(color)
 
@@ -51,7 +52,7 @@ def create_document() -> Document:
     run.bold = True
     run.font.size = Pt(22)
     run.font.name = "Yu Mincho"
-    run._element.rPr.rFonts.set(qn("w:eastAsia"), "Yu Mincho")
+    run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "Yu Mincho")
     created = doc.add_paragraph(date.today().isoformat())
     created.alignment = WD_ALIGN_PARAGRAPH.CENTER
     doc.add_page_break()
@@ -106,7 +107,7 @@ def add_markdown_table(doc: Document, table_lines: list[str]) -> None:
             for run in cell.paragraphs[0].runs:
                 run.bold = row_index == 0
                 run.font.name = "Yu Mincho"
-                run._element.rPr.rFonts.set(qn("w:eastAsia"), "Yu Mincho")
+                run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "Yu Mincho")
 
 
 def _add_inline(paragraph, text: str) -> None:
@@ -181,4 +182,3 @@ def export_to_docx(markdown_content: str, output_filename: str = "analysis.docx"
     doc.save(buffer)
     buffer.seek(0)
     return buffer.getvalue()
-

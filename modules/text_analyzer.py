@@ -22,7 +22,7 @@ def build_analysis_prompt(japanese_text: str, ocr_notes: list) -> str:
 
 
 def _section(text: str, number: int) -> str:
-    pattern = rf"(?ms)^##\s+{number}(?:[\.\):\-])?\s+.*?\n(.*?)(?=^##\s+\d+(?:[\.\):\-])?\s+|\Z)"
+    pattern = rf"(?ms)^##\s+{number}(?:[\.\):\-])?\s+.*?\n(.*?)(?=^##\s+\d+(?:[\.\):\-])?\s+|\n?\Z)"
     match = re.search(pattern, text)
     return match.group(1).strip() if match else ""
 

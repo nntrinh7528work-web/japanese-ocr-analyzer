@@ -30,11 +30,11 @@ def build_ocr_prompt(preprocessing_report: dict) -> str:
     """Build the OCR prompt with preprocessing context."""
     issues = preprocessing_report.get("issues") or []
     image_info = "\n".join(
-        (
+        [
             f"- Chất lượng ảnh: {preprocessing_report.get('quality_level', 'unknown')}",
             f"- Rotation đã chỉnh: {preprocessing_report.get('rotation_detected', 0)}°",
             f"- Các vấn đề đã phát hiện: {', '.join(issues) if issues else 'Không có'}",
-        )
+        ]
     )
     return PROMPT_PATH.read_text(encoding="utf-8").replace("{image_info}", image_info)
 

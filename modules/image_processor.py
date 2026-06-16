@@ -64,17 +64,7 @@ def analyze_quality(img: np.ndarray) -> dict[str, Any]:
 
 
 def detect_rotation(img: np.ndarray) -> int:
-    """Detect a right-angle rotation using Tesseract OSD, then an OpenCV fallback."""
-    try:
-        import pytesseract
-
-        osd = pytesseract.image_to_osd(img, output_type=pytesseract.Output.DICT)
-        rotation = int(osd.get("rotate", 0))
-        if rotation in (0, 90, 180, 270):
-            return rotation
-    except Exception:
-        pass
-
+    """Detect right-angle rotation using OpenCV minAreaRect."""
     try:
         gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
         _, threshold = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
@@ -89,6 +79,8 @@ def detect_rotation(img: np.ndarray) -> int:
             return 0
         if 75 <= abs(angle) <= 90:
             return 90 if angle < 0 else 270
+        if 165 <= abs(angle) <= 180:
+            return 180
     except (ValueError, cv2.error):
         pass
     return 0
@@ -195,4 +187,3 @@ def process_image(source: str | bytes | bytearray) -> dict[str, Any]:
             "applied_fixes": fixes,
         },
     }
-
