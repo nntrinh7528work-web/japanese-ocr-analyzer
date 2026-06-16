@@ -12,7 +12,7 @@ from config import (
     MAX_PDF_SIZE_MB,
     SUPPORTED_UPLOAD_FORMATS,
 )
-from modules.cost_estimator import budget_status, estimate_cost, format_cost, sum_costs
+from modules.cost_estimator import estimate_cost, format_cost, sum_costs
 from modules.doc_exporter import export_to_docx
 from modules.multi_image_workflow import add_upload_items, combined_notes, combined_text, move_image_item
 from modules.ocr_engine import run_ocr
@@ -73,6 +73,29 @@ def run_item_ocr(item: dict) -> None:
         item["edited_text"] = result["clean_text"]
     except Exception as exc:
         item["ocr_error"] = str(exc)
+
+
+def current_budget_status(
+    budget_vnd: float,
+    spent_before_vnd: float,
+    session_cost_usd: float,
+    usd_to_vnd: float,
+) -> dict[str, float]:
+    """Estimate remaining API budget in VND for the current app session."""
+    budget_value = max(0.0, float(budget_vnd or 0))
+    spent_before = max(0.0, float(spent_before_vnd or 0))
+    session_spent = max(0.0, float(session_cost_usd or 0) * float(usd_to_vnd or 0))
+    total_spent = spent_before + session_spent
+    remaining = max(0.0, budget_value - total_spent)
+    return {
+        "budget_vnd": budget_value,
+        "spent_before_vnd": spent_before,
+        "session_spent_vnd": session_spent,
+        "total_spent_vnd": total_spent,
+        "remaining_vnd": remaining,
+        "used_ratio": total_spent / budget_value if budget_value else 0.0,
+        "remaining_ratio": remaining / budget_value if budget_value else 0.0,
+    }
 
 
 st.title("🔍 Japanese OCR Analyzer")
@@ -262,7 +285,7 @@ if st.session_state.analysis:
     ]
     analysis_cost = estimate_cost(analysis.get("usage"), GEMINI_MODEL_TEXT, billing_tier)
     session_cost = sum_costs([*ocr_costs, analysis_cost])
-    budget = budget_status(api_budget_vnd, api_spent_before_vnd, session_cost["total_cost_usd"], usd_to_vnd)
+    budget = current_budget_status(api_budget_vnd, api_spent_before_vnd, session_cost["total_cost_usd"], usd_to_vnd)
     with st.expander("💰 Tổng chi phí phiên phân tích", expanded=True):
         cost1, cost2, cost3, cost4 = st.columns(4)
         cost1.metric("OCR ảnh", format_cost(sum(float(cost["total_cost_usd"]) for cost in ocr_costs), usd_to_vnd))
