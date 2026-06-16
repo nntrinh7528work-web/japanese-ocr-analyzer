@@ -32,6 +32,7 @@ def test_markdown_and_json_exports_are_readable():
         {"total_cost_usd": 0.01},
         "paid",
         25500,
+        {"remaining_vnd": 99_745},
         datetime(2026, 6, 16, 9, 30, 5),
     )
     payload = json.loads(data.decode("utf-8"))
@@ -40,3 +41,4 @@ def test_markdown_and_json_exports_are_readable():
     assert payload["sources"][0]["ocr_text"] == "日本語"
     assert "original_image_bytes" not in payload["sources"][0]
     assert payload["analysis"]["summary"] == "Tóm tắt"
+    assert payload["budget"]["remaining_vnd"] == 99_745

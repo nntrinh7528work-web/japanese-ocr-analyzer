@@ -12,7 +12,7 @@ from config import (
     MAX_PDF_SIZE_MB,
     SUPPORTED_UPLOAD_FORMATS,
 )
-from modules.cost_estimator import estimate_cost, format_cost, sum_costs
+from modules.cost_estimator import budget_status, estimate_cost, format_cost, sum_costs
 from modules.doc_exporter import export_to_docx
 from modules.multi_image_workflow import add_upload_items, combined_notes, combined_text, move_image_item
 from modules.ocr_engine import run_ocr
@@ -102,6 +102,22 @@ billing_tier = st.sidebar.radio(
 usd_to_vnd = st.sidebar.number_input("Tỷ giá USD → VND", min_value=1.0, value=25_500.0, step=100.0)
 st.sidebar.caption("Gemini 2.5 Flash: input $0.30/M token, output $2.50/M token.")
 st.sidebar.markdown("[Xem bảng giá Gemini chính thức](https://ai.google.dev/gemini-api/docs/pricing)")
+st.sidebar.subheader("🏦 Theo dõi ngân sách API")
+api_budget_vnd = st.sidebar.number_input(
+    "Số tiền đã nạp/ngân sách (VND)",
+    min_value=0.0,
+    value=0.0,
+    step=10_000.0,
+    help="Nhập số tiền bạn đã nạp hoặc muốn dùng làm ngân sách theo dõi.",
+)
+api_spent_before_vnd = st.sidebar.number_input(
+    "Đã dùng trước đó (VND)",
+    min_value=0.0,
+    value=0.0,
+    step=1_000.0,
+    help="Nhập thủ công số tiền đã dùng trước phiên hiện tại nếu bạn muốn theo dõi nhiều lần dùng.",
+)
+st.sidebar.caption("Số dư này là ước tính trong app, không phải số dư chính thức từ Google Billing.")
 with st.sidebar.expander("💡 Luồng sử dụng"):
     st.write("1. Thêm ảnh hoặc PDF từ máy/ứng dụng Files.")
     st.write("2. Mỗi trang PDF sẽ được chuyển thành một ảnh.")
@@ -246,12 +262,26 @@ if st.session_state.analysis:
     ]
     analysis_cost = estimate_cost(analysis.get("usage"), GEMINI_MODEL_TEXT, billing_tier)
     session_cost = sum_costs([*ocr_costs, analysis_cost])
+    budget = budget_status(api_budget_vnd, api_spent_before_vnd, session_cost["total_cost_usd"], usd_to_vnd)
     with st.expander("💰 Tổng chi phí phiên phân tích", expanded=True):
         cost1, cost2, cost3, cost4 = st.columns(4)
         cost1.metric("OCR ảnh", format_cost(sum(float(cost["total_cost_usd"]) for cost in ocr_costs), usd_to_vnd))
         cost2.metric("Phân tích văn bản", format_cost(analysis_cost["total_cost_usd"], usd_to_vnd))
         cost3.metric("Tổng token", f"{session_cost['input_tokens'] + session_cost['output_tokens']:,}")
         cost4.metric("Tổng ước tính", format_cost(session_cost["total_cost_usd"], usd_to_vnd))
+        if api_budget_vnd > 0:
+            st.divider()
+            b1, b2, b3, b4 = st.columns(4)
+            b1.metric("Ngân sách API", f"{budget['budget_vnd']:,.0f} VND")
+            b2.metric("Đã dùng trước đó", f"{budget['spent_before_vnd']:,.0f} VND")
+            b3.metric("Phiên này", f"{budget['session_spent_vnd']:,.0f} VND")
+            b4.metric("Ước tính còn lại", f"{budget['remaining_vnd']:,.0f} VND")
+            st.progress(min(1.0, budget["used_ratio"]), text=f"Đã dùng khoảng {budget['used_ratio'] * 100:.1f}% ngân sách")
+            if budget["remaining_vnd"] <= 0:
+                st.error("Ngân sách ước tính đã hết hoặc vượt mức. Hãy kiểm tra Google Billing trước khi tiếp tục dùng API.")
+            elif budget["remaining_ratio"] <= 0.2:
+                st.warning("Ngân sách ước tính còn dưới 20%. Nên nạp thêm hoặc giảm số lần phân tích.")
+            st.caption("Theo dõi này dựa trên chi phí ước tính từ token app ghi nhận; Google Billing có thể chênh lệch nhẹ.")
         if billing_tier == "free":
             st.caption(
                 "Free Tier hiện tính $0. Giá trị tương đương Paid Tier: "
@@ -266,7 +296,7 @@ if st.session_state.analysis:
         md_name = f"{export_stem}.md"
         json_name = f"{export_stem}.json"
         docx_bytes = export_to_docx(analysis["full_markdown"], docx_name)
-        json_bytes = analysis_json_bytes(items, analysis, session_cost, billing_tier, usd_to_vnd)
+        json_bytes = analysis_json_bytes(items, analysis, session_cost, billing_tier, usd_to_vnd, budget)
         save_col1, save_col2, save_col3 = st.columns(3)
         save_col1.download_button(
             "⬇️ Word .docx",

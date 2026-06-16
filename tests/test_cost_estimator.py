@@ -1,4 +1,4 @@
-from modules.cost_estimator import estimate_cost, format_cost, sum_costs
+from modules.cost_estimator import budget_status, estimate_cost, format_cost, sum_costs
 
 
 def test_paid_cost_uses_gemini_flash_rates():
@@ -36,3 +36,12 @@ def test_output_cost_can_include_thinking_tokens():
     )
     assert cost["output_tokens"] == 500
     assert cost["output_cost_usd"] == 500 * 2.50 / 1_000_000
+
+
+def test_budget_status_tracks_remaining_vnd():
+    status = budget_status(100_000, 20_000, 1.0, 25_000)
+
+    assert status["session_spent_vnd"] == 25_000
+    assert status["total_spent_vnd"] == 45_000
+    assert status["remaining_vnd"] == 55_000
+    assert status["remaining_ratio"] == 0.55

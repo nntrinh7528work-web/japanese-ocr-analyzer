@@ -38,6 +38,7 @@ def analysis_json_bytes(
     session_cost: dict[str, Any],
     billing_tier: str,
     usd_to_vnd: float,
+    budget: dict[str, Any] | None = None,
     created_at: datetime | None = None,
 ) -> bytes:
     """Return a compact JSON archive of the session without embedding image bytes."""
@@ -46,6 +47,7 @@ def analysis_json_bytes(
         "billing_tier": billing_tier,
         "usd_to_vnd": usd_to_vnd,
         "session_cost": session_cost,
+        "budget": budget or {},
         "sources": [
             {
                 "name": item.get("name", ""),
