@@ -90,12 +90,19 @@ If none found: | — | — | — | Không có | — | — |
 ## 5. Grammar Points
 
 **[Grammar Name]**
+- Structure: (short grammar pattern)
 - Rule: (concise Vietnamese rule)
+- Meaning: (Vietnamese meaning/function)
 - Example from text: (exact quote)
-- Explanation: (Vietnamese explanation of function and meaning in context)
+- Example analysis: (Vietnamese breakdown of the example)
+- Example 1: (new sentence in everyday context)
+- Example 2: (new sentence in formal or academic context)
+- Common mistake: (typical mistake Vietnamese learners make — if none, write None)
+- Level: (A2 / B1 / B2 / C1 / C2)
 
-Cover: tense, modal verbs, passive voice, conditionals, relative clauses
-— only if present. Skip absent structures entirely.
+Cover: tense, modal verbs, passive voice, conditionals, relative clauses,
+comparatives, gerunds/infinitives, participle clauses, inversion, emphasis,
+and noun/verb/adjective patterns — only if present. Skip absent structures entirely.
 
 ---
 

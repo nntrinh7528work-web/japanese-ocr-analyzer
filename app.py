@@ -131,6 +131,42 @@ def render_important_vocabulary(items: list[dict]) -> None:
                 st.warning(f"⚠️ **Common mistake:** {item['mistake']}")
 
 
+def render_grammar_points(items: list[dict]) -> None:
+    if not items:
+        st.info("Chưa trích xuất được mục ngữ pháp riêng. Xem nội dung gốc bên dưới.")
+        return
+
+    for point in items:
+        level = point.get("level") or ""
+        with st.expander(f"📌 {point.get('name', '')}   {level}".strip()):
+            col1, col2 = st.columns(2)
+            with col1:
+                if point.get("structure"):
+                    st.markdown(f"**Công thức / Structure:** `{point['structure']}`")
+                if point.get("rule"):
+                    st.markdown(f"**Quy tắc:** {point['rule']}")
+                if point.get("meaning"):
+                    st.markdown(f"**Ý nghĩa:** {point['meaning']}")
+                if point.get("usage"):
+                    st.markdown(f"**Cách dùng:** {point['usage']}")
+                if point.get("explanation"):
+                    st.markdown(f"**Giải thích:** {point['explanation']}")
+            with col2:
+                if point.get("example"):
+                    st.markdown("**📌 Ví dụ trong bài:**")
+                    st.code(point["example"], language=None)
+                if point.get("example_analysis"):
+                    st.markdown(f"**Phân tích ví dụ:** {point['example_analysis']}")
+                if point.get("example_1"):
+                    st.markdown(f"**✏️ Ví dụ 1:** {point['example_1']}")
+                if point.get("example_2"):
+                    st.markdown(f"**✏️ Ví dụ 2:** {point['example_2']}")
+            if point.get("note") and point["note"] not in ("Không có", "None", "N/A"):
+                st.warning(f"⚠️ **Lưu ý:** {point['note']}")
+            if point.get("mistake") and point["mistake"] not in ("Không có", "None", "N/A"):
+                st.warning(f"⚠️ **Common mistake:** {point['mistake']}")
+
+
 def clear_analysis() -> None:
     st.session_state.analysis = None
 
@@ -486,11 +522,7 @@ if st.session_state.analysis:
             )
         st.subheader("Điểm ngữ pháp")
         if analysis["grammar_points"]:
-            for point in analysis["grammar_points"]:
-                with st.expander(f"📌 {point['name']}"):
-                    st.write(f"**Quy tắc:** {point['rule']}")
-                    st.code(point["example"], language=None)
-                    st.write(f"**Giải thích:** {point['explanation']}")
+            render_grammar_points(analysis["grammar_points"])
         else:
             st.info("Chưa trích xuất được mục ngữ pháp riêng. Xem nội dung gốc bên dưới.")
             st.markdown(analysis.get("section_markdown", {}).get("grammar") or "Không có dữ liệu ngữ pháp.")

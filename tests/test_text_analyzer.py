@@ -184,6 +184,48 @@ def test_parse_english_vocab_detail_blocks():
     assert result[0]["cefr"] == "C1"
 
 
+def test_parse_japanese_detailed_grammar_blocks():
+    mock = """
+**[〜とは限らない]**
+- Công thức: 普通形 + とは限らない
+- Ý nghĩa: không hẳn là, không nhất thiết là
+- Cách dùng: Dùng để phủ định một nhận định tuyệt đối.
+- Ví dụ trong bài: いつも正しいとは限らない
+- Phân tích ví dụ: 正しい là nội dung bị phủ định tính tuyệt đối.
+- Ví dụ 1: 高い物が必ず良いとは限らない。
+- Ví dụ 2: この結果が全体を示すとは限らない。
+- Lưu ý: Khác với とは言えない vì nhấn mạnh ngoại lệ.
+- Mức độ: N2
+"""
+    result = text_analyzer._parse_named_blocks(mock, r"^\s*\*\*(?!Mẫu:)(.+?)\*\*\s*$", "grammar")
+
+    assert result[0]["name"] == "〜とは限らない"
+    assert result[0]["structure"] == "普通形 + とは限らない"
+    assert result[0]["example_analysis"].startswith("正しい")
+    assert result[0]["level"] == "N2"
+
+
+def test_parse_english_detailed_grammar_blocks():
+    mock = """
+**[Present perfect]**
+- Structure: have/has + past participle
+- Rule: Dùng để nói về trải nghiệm hoặc kết quả liên quan đến hiện tại.
+- Meaning: nhấn mạnh kết quả hiện tại của hành động.
+- Example from text: She has completed the report.
+- Example analysis: has completed cho thấy báo cáo đã xong và kết quả còn liên quan hiện tại.
+- Example 1: I have lost my keys.
+- Example 2: Researchers have identified a new pattern.
+- Common mistake: Không dùng thời gian quá khứ cụ thể như yesterday với present perfect.
+- Level: B1
+"""
+    result = text_analyzer._parse_named_blocks(mock, r"^\s*\*\*(?!Mẫu:)(.+?)\*\*\s*$", "grammar")
+
+    assert result[0]["name"] == "Present perfect"
+    assert result[0]["structure"] == "have/has + past participle"
+    assert result[0]["mistake"].startswith("Không dùng")
+    assert result[0]["level"] == "B1"
+
+
 def test_run_analysis_and_long_text_merge(monkeypatch):
     class Model:
         def generate_content(self, _prompt, generation_config):

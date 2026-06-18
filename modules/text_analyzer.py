@@ -70,9 +70,18 @@ def _parse_named_blocks(section: str, heading_pattern: str, kind: str) -> list[d
             results.append(
                 {
                     "name": match.group(1).strip("[] "),
+                    "structure": _field(block, r"Structure|Công thức|Cấu trúc"),
                     "rule": _field(block, r"Rule|Quy tắc"),
+                    "meaning": _field(block, r"Meaning|Ý nghĩa"),
+                    "usage": _field(block, r"Cách dùng|Usage"),
                     "example": _field(block, r"Example from text|Ví dụ trong bài"),
+                    "example_analysis": _field(block, r"Example analysis|Phân tích ví dụ"),
                     "explanation": _field(block, r"Explanation|Giải thích(?: ý nghĩa & cách dùng)?"),
+                    "example_1": _field(block, r"Example 1|Ví dụ 1"),
+                    "example_2": _field(block, r"Example 2|Ví dụ 2"),
+                    "note": _field(block, r"Lưu ý"),
+                    "mistake": _field(block, r"Common mistake"),
+                    "level": _field(block, r"Level|Mức độ"),
                 }
             )
         elif kind == "vocab_detail":
@@ -116,9 +125,18 @@ def _parse_grammar(section: str) -> list[dict[str, str]]:
         results.append(
             {
                 "name": match.group(1).strip("[] "),
+                "structure": _field(block, r"Structure|Công thức|Cấu trúc|Mẫu câu"),
                 "rule": _field(block, r"Rule|Quy tắc|Cấu trúc|Mẫu câu"),
+                "meaning": _field(block, r"Meaning|Ý nghĩa"),
+                "usage": _field(block, r"Cách dùng|Usage"),
                 "example": _field(block, r"Example from text|Ví dụ(?: trong bài)?"),
+                "example_analysis": _field(block, r"Example analysis|Phân tích ví dụ"),
                 "explanation": _field(block, r"Explanation|Giải thích(?: ý nghĩa & cách dùng)?|Ý nghĩa|Cách dùng"),
+                "example_1": _field(block, r"Example 1|Ví dụ 1"),
+                "example_2": _field(block, r"Example 2|Ví dụ 2"),
+                "note": _field(block, r"Lưu ý"),
+                "mistake": _field(block, r"Common mistake"),
+                "level": _field(block, r"Level|Mức độ"),
             }
         )
     return [item for item in results if any(item.values())]
@@ -247,7 +265,17 @@ Trả lời đúng Markdown theo các tiêu đề sau nếu được yêu cầu:
 |---|---|---|---|---|---|---|
 
 ## 5. PHÂN TÍCH NGỮ PHÁP
-Với mỗi điểm: **[Tên cấu trúc]**, rồi `- Quy tắc:`, `- Ví dụ trong bài:`, `- Giải thích ý nghĩa & cách dùng:`.
+Với mỗi điểm:
+**[Tên cấu trúc]**
+- Công thức:
+- Ý nghĩa:
+- Cách dùng:
+- Ví dụ trong bài:
+- Phân tích ví dụ:
+- Ví dụ 1:
+- Ví dụ 2:
+- Lưu ý:
+- Mức độ:
 
 ## 6. MẪU CÂU ĐẶC TRƯNG
 Với mỗi mẫu: **Mẫu:** `[công thức / pattern]`, rồi `- Ví dụ trong bài:` và `- Giải thích:`.
@@ -272,7 +300,17 @@ Use these exact section formats when requested:
 |---|---|---|---|---|---|
 
 ## 5. Grammar Points
-For each point: **[Grammar Name]**, then `- Rule:` in Vietnamese, `- Example from text:` as the exact English quote, `- Explanation:` in Vietnamese.
+For each point:
+**[Grammar Name]**
+- Structure:
+- Rule: in Vietnamese
+- Meaning: in Vietnamese
+- Example from text: exact English quote
+- Example analysis: in Vietnamese
+- Example 1:
+- Example 2:
+- Common mistake:
+- Level:
 
 ## 6. Sentence Patterns &amp; Structures
 For each pattern: **Pattern:** `pattern description`, then `- Example from text:` as the exact English quote and `- Explanation:` in Vietnamese.
