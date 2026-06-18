@@ -145,6 +145,45 @@ def test_build_and_parse_japanese_mode():
     assert result["discourse_markers"] == []
 
 
+def test_parse_japanese_vocab_detail_blocks():
+    mock = """
+**[一概に・いちがいに]**
+- Loại từ: trạng từ
+- Ý nghĩa: nói chung, một cách cào bằng
+- Ví dụ trong bài: 一概には言えない
+- Ví dụ 1: 人の性格は一概には決められない。
+- Ví dụ 2: この問題は一概に悪いとは言えない。
+- Từ liên quan: 総じて、概して
+- Lưu ý: Thường dùng trong câu phủ định
+- Mức độ: N2
+"""
+    result = text_analyzer._parse_named_blocks(mock, r"^\s*\*\*\[(.+?)\]\*\*\s*$", "vocab_detail")
+
+    assert result[0]["word"] == "一概に・いちがいに"
+    assert result[0]["example_1"] == "人の性格は一概には決められない。"
+    assert result[0]["jlpt"] == "N2"
+
+
+def test_parse_english_vocab_detail_blocks():
+    mock = """
+**[meticulous (adjective)]**
+- Vietnamese Meaning: tỉ mỉ, cẩn thận từng chi tiết nhỏ
+- Definition: showing great attention to detail; very careful and precise
+- Example from text: She was meticulous in her research.
+- Example 1: He is meticulous about keeping his desk tidy.
+- Example 2: The scientist conducted a meticulous analysis of the data.
+- Related words: thorough, precise, painstaking; antonym: careless
+- Common mistake: Confusing with careful — meticulous implies extreme detail
+- CEFR Level: C1
+"""
+    result = text_analyzer._parse_named_blocks(mock, r"^\s*\*\*\[(.+?)\]\*\*\s*$", "vocab_detail")
+
+    assert result[0]["word"] == "meticulous (adjective)"
+    assert result[0]["vn_meaning"].startswith("tỉ mỉ")
+    assert result[0]["example_1"] == "He is meticulous about keeping his desk tidy."
+    assert result[0]["cefr"] == "C1"
+
+
 def test_run_analysis_and_long_text_merge(monkeypatch):
     class Model:
         def generate_content(self, _prompt, generation_config):

@@ -47,11 +47,21 @@ List every content word (nouns, verbs, adjectives, adverbs).
 
 CEFR levels: A1, A2, B1, B2, C1, C2
 
-### 2.2 Key Vocabulary (B2–C2, idioms, academic, domain-specific)
+### 2.2 Key Vocabulary — Detailed Explanation (B2–C2 & difficult words)
 
-| Word | Base Form | Part of Speech | Vietnamese Meaning | Example from Text | Difficulty |
-|------|-----------|----------------|--------------------|-------------------|------------|
-| word | word | noun | từ | "..." | B2 |
+Include: B2–C2 words, idioms, academic vocabulary, domain-specific terms,
+easily confused words, or words a Vietnamese learner might misuse.
+Present each word as a separate block.
+
+**[word (part of speech)]**
+- Vietnamese Meaning: (full meaning in Vietnamese, all common senses)
+- Definition: (clear English definition written in simple words)
+- Example from text: (exact quote from the analyzed text)
+- Example 1: (new sentence using this word in everyday context)
+- Example 2: (new sentence using this word in formal or academic context)
+- Related words: (synonyms, antonyms, collocations — if none, write None)
+- Common mistake: (typical error Vietnamese learners make — if none, write None)
+- CEFR Level: (A2 / B1 / B2 / C1 / C2)
 
 ---
 

@@ -75,6 +75,24 @@ def _parse_named_blocks(section: str, heading_pattern: str, kind: str) -> list[d
                     "explanation": _field(block, r"Explanation|Giải thích(?: ý nghĩa & cách dùng)?"),
                 }
             )
+        elif kind == "vocab_detail":
+            results.append(
+                {
+                    "word": match.group(1).strip("[] "),
+                    "type": _field(block, r"Loại từ"),
+                    "meaning": _field(block, r"Ý nghĩa"),
+                    "vn_meaning": _field(block, r"Vietnamese Meaning"),
+                    "definition": _field(block, r"Definition"),
+                    "example_text": _field(block, r"Ví dụ trong bài|Example from text"),
+                    "example_1": _field(block, r"Ví dụ 1|Example 1"),
+                    "example_2": _field(block, r"Ví dụ 2|Example 2"),
+                    "related": _field(block, r"Từ liên quan|Related words"),
+                    "note": _field(block, r"Lưu ý"),
+                    "mistake": _field(block, r"Common mistake"),
+                    "jlpt": _field(block, r"Mức độ"),
+                    "cefr": _field(block, r"CEFR Level"),
+                }
+            )
         else:
             results.append(
                 {
@@ -132,9 +150,16 @@ def parse_analysis_response(response_text: str, analysis_language: str = "englis
         vocab_all = _parse_table(
             _subsection(sections[2], "2.1"), ["num", "word", "reading", "type", "meaning", "jlpt"]
         )
-        vocab_important = _parse_table(
-            _subsection(sections[2], "2.2"), ["word", "reading", "type", "meaning", "example", "difficulty"]
+        vocab_important_section = _subsection(sections[2], "2.2")
+        vocab_important = _parse_named_blocks(
+            vocab_important_section,
+            r"^\s*\*\*\[(.+?)\]\*\*\s*$",
+            "vocab_detail",
         )
+        if not vocab_important:
+            vocab_important = _parse_table(
+                vocab_important_section, ["word", "reading", "type", "meaning", "example", "difficulty"]
+            )
         kanji = _parse_table(
             sections[3], ["kanji", "onyomi", "kunyomi", "meaning", "jlpt", "vocab", "example", "role"]
         )
@@ -147,9 +172,17 @@ def parse_analysis_response(response_text: str, analysis_language: str = "englis
         vocab_all = _parse_table(
             _subsection(sections[2], "2.1"), ["num", "word", "base_form", "part_of_speech", "meaning", "cefr"]
         )
-        vocab_important = _parse_table(
-            _subsection(sections[2], "2.2"), ["word", "base_form", "part_of_speech", "meaning", "example", "difficulty"]
+        vocab_important_section = _subsection(sections[2], "2.2")
+        vocab_important = _parse_named_blocks(
+            vocab_important_section,
+            r"^\s*\*\*\[(.+?)\]\*\*\s*$",
+            "vocab_detail",
         )
+        if not vocab_important:
+            vocab_important = _parse_table(
+                vocab_important_section,
+                ["word", "base_form", "part_of_speech", "meaning", "example", "difficulty"],
+            )
         phrasal_collocations = _parse_table(
             sections[3], ["phrase", "type", "meaning", "example", "note"]
         )

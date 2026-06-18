@@ -90,6 +90,47 @@ def display_rows(rows: list[dict], language: str) -> list[dict]:
     return [{labels.get(key, key): value for key, value in row.items()} for row in rows]
 
 
+def render_important_vocabulary(items: list[dict]) -> None:
+    if not items:
+        st.info("Chưa trích xuất được từ vựng quan trọng.")
+        return
+
+    st.subheader("⭐ Từ vựng khó — Giải thích chi tiết")
+    for item in items:
+        level = item.get("jlpt") or item.get("cefr") or item.get("difficulty") or ""
+        label = item.get("word", "")
+        if item.get("reading"):
+            label = f"{label}・{item['reading']}"
+        with st.expander(f"📖 {label}   {level}".strip()):
+            col1, col2 = st.columns(2)
+            with col1:
+                if item.get("type") or item.get("part_of_speech"):
+                    st.markdown(f"**Loại từ:** {item.get('type') or item.get('part_of_speech')}")
+                if item.get("meaning"):
+                    st.markdown(f"**Ý nghĩa:** {item['meaning']}")
+                if item.get("vn_meaning"):
+                    st.markdown(f"**Nghĩa tiếng Việt:** {item['vn_meaning']}")
+                if item.get("definition"):
+                    st.markdown(f"**Definition:** {item['definition']}")
+                if item.get("base_form"):
+                    st.markdown(f"**Dạng gốc:** {item['base_form']}")
+                if item.get("related") and item["related"] not in ("Không có", "None", "N/A"):
+                    st.markdown(f"**Từ liên quan / Related:** {item['related']}")
+            with col2:
+                example_text = item.get("example_text") or item.get("example")
+                if example_text:
+                    st.markdown("**📌 Ví dụ trong bài:**")
+                    st.info(example_text)
+                if item.get("example_1"):
+                    st.markdown(f"**✏️ Ví dụ 1:** {item['example_1']}")
+                if item.get("example_2"):
+                    st.markdown(f"**✏️ Ví dụ 2:** {item['example_2']}")
+            if item.get("note") and item["note"] not in ("Không có", "None", "N/A"):
+                st.warning(f"⚠️ **Lưu ý:** {item['note']}")
+            if item.get("mistake") and item["mistake"] not in ("Không có", "None", "N/A"):
+                st.warning(f"⚠️ **Common mistake:** {item['mistake']}")
+
+
 def clear_analysis() -> None:
     st.session_state.analysis = None
 
@@ -414,8 +455,7 @@ if st.session_state.analysis:
         st.info(analysis["summary"])
     with tab2:
         st.dataframe(display_rows(analysis["vocabulary_all"], result_language), width="stretch")
-        st.subheader("Từ vựng quan trọng")
-        st.dataframe(display_rows(analysis["vocabulary_important"], result_language), width="stretch")
+        render_important_vocabulary(analysis["vocabulary_important"])
     with tab3:
         if result_language == "japanese":
             if analysis["kanji_analysis"]:

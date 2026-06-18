@@ -22,9 +22,20 @@ Trình bày lại văn bản, ghi các sửa lỗi theo dạng `[Sửa: XXX → 
 | # | Từ gốc | Phiên âm | Loại từ | Nghĩa tiếng Việt | Cấp JLPT |
 |---|---|---|---|---|---|
 
-### 2.2 Từ vựng quan trọng / từ mới / từ chuyên ngành
-| Từ gốc | Phiên âm | Loại từ | Nghĩa tiếng Việt | Ví dụ trong bài | Mức độ khó |
-|---|---|---|---|---|---|
+### 2.2 Từ vựng quan trọng / khó (giải thích chi tiết)
+
+Chỉ liệt kê các từ ở mức N3 trở lên, thành ngữ, từ Hán-Nhật phức tạp,
+hoặc từ dễ dùng sai. Mỗi từ trình bày theo block riêng biệt.
+
+**[từ・よみ]**
+- Loại từ: (danh từ / động từ / tính từ / trạng từ / thành ngữ...)
+- Ý nghĩa: (giải thích bằng tiếng Việt, đầy đủ các nghĩa phổ biến)
+- Ví dụ trong bài: (trích nguyên văn từ văn bản đang phân tích)
+- Ví dụ 1: (câu ví dụ tự tạo, ngữ cảnh hàng ngày)
+- Ví dụ 2: (câu ví dụ tự tạo, ngữ cảnh học thuật hoặc trang trọng)
+- Từ liên quan: (từ đồng nghĩa, trái nghĩa, cùng chữ Hán — nếu không có thì ghi Không có)
+- Lưu ý: (lỗi thường gặp, cách phân biệt với từ dễ nhầm — nếu không có thì ghi Không có)
+- Mức độ: (JLPT N5 / N4 / N3 / N2 / N1)
 
 ## 3. PHÂN TÍCH KANJI
 | Kanji | Onyomi | Kunyomi | Nghĩa cơ bản | JLPT | Từ vựng trong bài (≤5 từ) | Câu ví dụ trong bài | Vai trò trong từ |
