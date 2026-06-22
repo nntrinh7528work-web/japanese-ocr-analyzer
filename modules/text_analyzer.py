@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import re
 import time
 from pathlib import Path
@@ -444,17 +445,15 @@ def _split_text(text: str, max_chars: int = 4000) -> list[str]:
     return [chunk for chunk in chunks if chunk]
 
 
-def run_analysis(japanese_text: str, ocr_notes: list, analysis_language: str = "english") -> dict[str, Any]:
-    """Analyze Japanese or English text, splitting and merging input longer than 4,000 chars."""
-    if not japanese_text or not japanese_text.strip():
-        raise ValueError("Văn bản phân tích không được rỗng.")
+def _merge_analysis_results(results: list[dict[str, Any]], analysis_language: str = "english") -> dict[str, Any]:
+    """Merge already parsed analysis results without losing per-result detail."""
+    if not results:
+        raise ValueError("Không có kết quả phân tích để gộp.")
     language = _analysis_language(analysis_language)
-    model = _init_model()
-    results = [_analyze_chunk(model, chunk, ocr_notes, language) for chunk in _split_text(japanese_text.strip())]
     if len(results) == 1:
-        return results[0]
+        return copy.deepcopy(results[0])
 
-    merged = results[0]
+    merged = copy.deepcopy(results[0])
     list_fields = (
         "ocr_corrections",
         "vocabulary_all",
@@ -467,9 +466,10 @@ def run_analysis(japanese_text: str, ocr_notes: list, analysis_language: str = "
         "sentence_patterns",
     )
     for field in list_fields:
-        merged[field] = [item for result in results for item in result[field]]
-    merged["kanji_analysis"] = merged["phrasal_collocations"]
-    merged["connectors"] = merged["discourse_markers"]
+        merged[field] = [item for result in results for item in result.get(field, [])]
+    if language == "english":
+        merged["kanji_analysis"] = merged["phrasal_collocations"]
+        merged["connectors"] = merged["discourse_markers"]
     merged["confirmed_text"] = "\n\n".join(result["confirmed_text"] for result in results)
     merged["summary"] = " ".join(result["summary"] for result in results)
     merged["full_markdown"] = "\n\n".join(result["full_markdown"] for result in results)
@@ -483,4 +483,57 @@ def run_analysis(japanese_text: str, ocr_notes: list, analysis_language: str = "
         "candidate_tokens": sum(result["usage"].get("candidate_tokens", 0) for result in results),
         "thinking_tokens": sum(result["usage"].get("thinking_tokens", 0) for result in results),
     }
+    return merged
+
+
+def run_analysis(japanese_text: str, ocr_notes: list, analysis_language: str = "english") -> dict[str, Any]:
+    """Analyze Japanese or English text, splitting and merging input longer than 4,000 chars."""
+    if not japanese_text or not japanese_text.strip():
+        raise ValueError("Văn bản phân tích không được rỗng.")
+    language = _analysis_language(analysis_language)
+    model = _init_model()
+    results = [_analyze_chunk(model, chunk, ocr_notes, language) for chunk in _split_text(japanese_text.strip())]
+    return _merge_analysis_results(results, language)
+
+
+def run_page_analyses(pages: list[dict[str, Any]], analysis_language: str = "english") -> dict[str, Any]:
+    """Analyze each OCR page independently, then return a merged report with per-page details."""
+    language = _analysis_language(analysis_language)
+    prepared_pages = [
+        {
+            "page_index": int(page.get("page_index", index)),
+            "page_name": str(page.get("page_name") or f"Trang {index}"),
+            "text": str(page.get("text") or "").strip(),
+            "notes": list(page.get("notes") or []),
+        }
+        for index, page in enumerate(pages, 1)
+        if str(page.get("text") or "").strip()
+    ]
+    if not prepared_pages:
+        raise ValueError("Không có trang nào có văn bản OCR để phân tích.")
+
+    model = _init_model()
+    page_analyses = []
+    for page in prepared_pages:
+        page_results = [
+            _analyze_chunk(model, chunk, page["notes"], language)
+            for chunk in _split_text(page["text"])
+        ]
+        page_analysis = _merge_analysis_results(page_results, language)
+        page_analysis["page_index"] = page["page_index"]
+        page_analysis["page_name"] = page["page_name"]
+        page_analysis["source_label"] = f"Trang {page['page_index']}: {page['page_name']}"
+        page_analyses.append(page_analysis)
+
+    merged = _merge_analysis_results(page_analyses, language)
+    merged["page_analyses"] = page_analyses
+    merged["confirmed_text"] = "\n\n".join(
+        f"## {page['source_label']}\n{page['confirmed_text']}" for page in page_analyses
+    )
+    merged["summary"] = "\n\n".join(
+        f"**{page['source_label']}:** {page['summary']}" for page in page_analyses
+    )
+    merged["full_markdown"] = "\n\n---\n\n".join(
+        f"# {page['source_label']}\n\n{page['full_markdown']}" for page in page_analyses
+    )
     return merged

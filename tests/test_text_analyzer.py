@@ -245,6 +245,36 @@ def test_run_analysis_and_long_text_merge(monkeypatch):
     assert result["usage"]["thinking_tokens"] == 0
 
 
+def test_run_page_analyses_keeps_per_page_results(monkeypatch):
+    class Model:
+        prompts = []
+
+        def generate_content(self, prompt, generation_config):
+            self.prompts.append(prompt)
+            return SimpleNamespace(
+                text=RESPONSE,
+                usage_metadata=SimpleNamespace(prompt_token_count=3, candidates_token_count=5),
+            )
+
+    model = Model()
+    monkeypatch.setattr(text_analyzer, "_init_model", lambda: model)
+    result = text_analyzer.run_page_analyses(
+        [
+            {"page_index": 1, "page_name": "page-1.png", "text": "First page text.", "notes": ["note 1"]},
+            {"page_index": 2, "page_name": "page-2.png", "text": "Second page text.", "notes": ["note 2"]},
+        ]
+    )
+
+    assert len(model.prompts) == 2
+    assert "First page text." in model.prompts[0]
+    assert "Second page text." not in model.prompts[0]
+    assert "Second page text." in model.prompts[1]
+    assert len(result["page_analyses"]) == 2
+    assert result["page_analyses"][0]["source_label"] == "Trang 1: page-1.png"
+    assert result["usage"]["input_tokens"] == 6
+    assert result["usage"]["output_tokens"] == 10
+
+
 def test_empty_text_rejected():
     with pytest.raises(ValueError):
         text_analyzer.run_analysis(" ", [])

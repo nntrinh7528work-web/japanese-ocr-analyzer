@@ -16,7 +16,7 @@ from config import (
 )
 from modules.cost_estimator import estimate_cost, format_cost, sum_costs
 from modules.doc_exporter import export_to_docx
-from modules.multi_image_workflow import add_upload_items, combined_notes, combined_text, move_image_item
+from modules.multi_image_workflow import add_upload_items, combined_text, move_image_item
 from modules.ocr_engine import run_ocr
 from modules.result_exporter import analysis_json_bytes, default_export_stem, markdown_bytes, safe_export_stem
 import modules.text_analyzer as text_analyzer
@@ -169,6 +169,24 @@ def render_grammar_points(items: list[dict]) -> None:
 
 def clear_analysis() -> None:
     st.session_state.analysis = None
+
+
+def analysis_pages(items: list[dict]) -> list[dict]:
+    pages = []
+    for index, item in enumerate(items, 1):
+        text = str(item.get("edited_text") or "").strip()
+        if not text:
+            continue
+        result = item.get("ocr_result") or {}
+        pages.append(
+            {
+                "page_index": index,
+                "page_name": item.get("name") or f"Trang {index}",
+                "text": text,
+                "notes": result.get("ocr_notes", []),
+            }
+        )
+    return pages
 
 
 def add_sources(sources: list[tuple[str, bytes]]) -> bool:
@@ -393,19 +411,23 @@ for index, item in enumerate(items, 1):
                     )
 
 st.divider()
-st.subheader("🧠 Phân tích chung nhiều ảnh")
+st.subheader("🧠 Phân tích theo từng trang")
 analysis_text = combined_text(items)
+pages_to_analyze = analysis_pages(items)
 if not analysis_text:
     st.warning("Chưa có văn bản OCR. Hãy OCR ít nhất một ảnh trước khi phân tích.")
 else:
-    with st.expander("Xem văn bản sẽ được gộp để phân tích"):
+    with st.expander("Xem văn bản OCR theo thứ tự trang"):
         st.text_area("Nội dung gộp theo thứ tự ảnh", value=analysis_text, height=260, disabled=True)
-    if st.button("🧠 Phân tích tất cả ảnh đã OCR", type="primary", width="stretch"):
+        st.caption(
+            "Khi bấm phân tích, app sẽ gọi Gemini riêng cho từng trang/ảnh rồi mới tổng hợp. "
+            "Cách này tránh việc file nhiều trang bị dồn quá tải và chỉ phân tích trang đầu."
+        )
+    if st.button("🧠 Phân tích từng trang đã OCR", type="primary", width="stretch"):
         try:
-            with st.spinner("Đang phân tích nội dung từ nhiều ảnh..."):
-                st.session_state.analysis = text_analyzer.run_analysis(
-                    analysis_text,
-                    combined_notes(items),
+            with st.spinner(f"Đang phân tích chi tiết {len(pages_to_analyze)} trang/ảnh..."):
+                st.session_state.analysis = text_analyzer.run_page_analyses(
+                    pages_to_analyze,
                     analysis_language=analysis_language,
                 )
         except Exception as exc:
@@ -479,16 +501,31 @@ if st.session_state.analysis:
             width="stretch",
         )
     detail_tabs = (
-        ["📝 Tóm tắt", "📊 Từ vựng", "漢字 Kanji", "🔗 Từ nối & Ngữ pháp", "💾 Xem bản lưu"]
+        ["📝 Tóm tắt", "📄 Từng trang", "📊 Từ vựng", "漢字 Kanji", "🔗 Từ nối & Ngữ pháp", "💾 Xem bản lưu"]
         if result_language == "japanese"
-        else ["📝 Tóm tắt", "📊 Từ vựng", "🔗 Cụm từ & Thành ngữ", "🧩 Từ nối & Ngữ pháp", "💾 Xem bản lưu"]
+        else ["📝 Tóm tắt", "📄 Từng trang", "📊 Từ vựng", "🔗 Cụm từ & Thành ngữ", "🧩 Từ nối & Ngữ pháp", "💾 Xem bản lưu"]
     )
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(detail_tabs)
+    tab1, tab_pages, tab2, tab3, tab4, tab5 = st.tabs(detail_tabs)
     with tab1:
         st.subheader("Văn bản đã xác nhận")
         st.write(analysis["confirmed_text"])
         st.subheader("Tóm tắt")
         st.info(analysis["summary"])
+    with tab_pages:
+        page_analyses = analysis.get("page_analyses") or []
+        if not page_analyses:
+            st.info("Kết quả này chưa có dữ liệu phân tích từng trang.")
+        for page in page_analyses:
+            with st.expander(page.get("source_label") or page.get("page_name") or "Trang", expanded=False):
+                st.subheader("Tóm tắt trang")
+                st.info(page.get("summary") or "Không có tóm tắt.")
+                st.subheader("Từ vựng trang")
+                st.dataframe(display_rows(page.get("vocabulary_all", []), result_language), width="stretch")
+                render_important_vocabulary(page.get("vocabulary_important", []))
+                st.subheader("Ngữ pháp trang")
+                render_grammar_points(page.get("grammar_points", []))
+                with st.expander("Xem Markdown đầy đủ của trang"):
+                    st.markdown(page.get("full_markdown") or "Không có dữ liệu.")
     with tab2:
         st.dataframe(display_rows(analysis["vocabulary_all"], result_language), width="stretch")
         render_important_vocabulary(analysis["vocabulary_important"])

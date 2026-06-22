@@ -6,7 +6,7 @@ from PIL import Image, ImageDraw
 from modules import ocr_engine, text_analyzer
 from modules.doc_exporter import export_to_docx
 from modules.image_processor import process_image
-from modules.multi_image_workflow import add_image_items, combined_notes, combined_text
+from modules.multi_image_workflow import add_image_items
 
 
 OCR_RESPONSE = """TEXT_DIRECTION: horizontal
@@ -117,13 +117,15 @@ def test_two_images_ocr_and_combined_analysis(monkeypatch):
             return SimpleNamespace(text=OCR_RESPONSE, usage_metadata=None)
 
     class AnalysisModel:
+        prompts = []
+
         def generate_content(self, prompt, generation_config):
-            assert "=== ẢNH 1: page-1.jpg ===" in prompt
-            assert "=== ẢNH 2: page-2.jpg ===" in prompt
+            self.prompts.append(prompt)
             return SimpleNamespace(text=ANALYSIS_RESPONSE, usage_metadata=None)
 
+    analysis_model = AnalysisModel()
     monkeypatch.setattr(ocr_engine, "init_gemini", lambda: OcrModel())
-    monkeypatch.setattr(text_analyzer, "_init_model", lambda: AnalysisModel())
+    monkeypatch.setattr(text_analyzer, "_init_model", lambda: analysis_model)
 
     items, added, errors = add_image_items(
         [],
@@ -136,5 +138,18 @@ def test_two_images_ocr_and_combined_analysis(monkeypatch):
         item["ocr_result"] = ocr_engine.run_ocr(item["processed_image_bytes"], item["report"])
         item["edited_text"] = item["ocr_result"]["clean_text"]
 
-    analysis = text_analyzer.run_analysis(combined_text(items), combined_notes(items))
+    pages = [
+        {
+            "page_index": index,
+            "page_name": item["name"],
+            "text": item["edited_text"],
+            "notes": item["ocr_result"].get("ocr_notes", []),
+        }
+        for index, item in enumerate(items, 1)
+    ]
+    analysis = text_analyzer.run_page_analyses(pages)
     assert analysis["summary"]
+    assert len(analysis["page_analyses"]) == 2
+    assert len(analysis_model.prompts) == 2
+    assert "page-1.jpg" not in analysis_model.prompts[0]
+    assert "=== ẢNH 2: page-2.jpg ===" not in analysis_model.prompts[0]
