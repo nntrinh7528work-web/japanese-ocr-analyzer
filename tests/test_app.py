@@ -37,6 +37,7 @@ def test_app_renders_two_independent_image_flows():
     labels = [button.label for button in app.button]
     assert labels.count("🔍 OCR ảnh này") == 2
     assert "🔍 OCR tất cả ảnh chưa xử lý" in labels
+    assert "🔁 OCR/OCR lại toàn bộ ảnh" in labels
     assert "Ảnh/trang PDF trong bộ phân tích (2)" in [heading.value for heading in app.subheader]
 
 

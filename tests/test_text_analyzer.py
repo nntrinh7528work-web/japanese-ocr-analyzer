@@ -151,8 +151,11 @@ def test_parse_japanese_vocab_detail_blocks():
 - Loại từ: trạng từ
 - Ý nghĩa: nói chung, một cách cào bằng
 - Ví dụ trong bài: 一概には言えない
+- Hiragana ví dụ trong bài: いちがいにはいえない
 - Ví dụ 1: 人の性格は一概には決められない。
+- Hiragana ví dụ 1: ひとのせいかくはいちがいにはきめられない。
 - Ví dụ 2: この問題は一概に悪いとは言えない。
+- Hiragana ví dụ 2: このもんだいはいちがいにわるいとはいえない。
 - Từ liên quan: 総じて、概して
 - Lưu ý: Thường dùng trong câu phủ định
 - Mức độ: N2
@@ -160,7 +163,9 @@ def test_parse_japanese_vocab_detail_blocks():
     result = text_analyzer._parse_named_blocks(mock, r"^\s*\*\*\[(.+?)\]\*\*\s*$", "vocab_detail")
 
     assert result[0]["word"] == "一概に・いちがいに"
+    assert result[0]["example_text_hiragana"] == "いちがいにはいえない"
     assert result[0]["example_1"] == "人の性格は一概には決められない。"
+    assert result[0]["example_1_hiragana"] == "ひとのせいかくはいちがいにはきめられない。"
     assert result[0]["jlpt"] == "N2"
 
 

@@ -90,6 +90,15 @@ def display_rows(rows: list[dict], language: str) -> list[dict]:
     return [{labels.get(key, key): value for key, value in row.items()} for row in rows]
 
 
+def render_example(label: str, text: str | None, hiragana: str | None = None) -> None:
+    if not text:
+        return
+    st.markdown(label)
+    st.info(text)
+    if hiragana:
+        st.caption(f"ひらがな: {hiragana}")
+
+
 def render_important_vocabulary(items: list[dict]) -> None:
     if not items:
         st.info("Chưa trích xuất được từ vựng quan trọng.")
@@ -118,13 +127,9 @@ def render_important_vocabulary(items: list[dict]) -> None:
                     st.markdown(f"**Từ liên quan / Related:** {item['related']}")
             with col2:
                 example_text = item.get("example_text") or item.get("example")
-                if example_text:
-                    st.markdown("**📌 Ví dụ trong bài:**")
-                    st.info(example_text)
-                if item.get("example_1"):
-                    st.markdown(f"**✏️ Ví dụ 1:** {item['example_1']}")
-                if item.get("example_2"):
-                    st.markdown(f"**✏️ Ví dụ 2:** {item['example_2']}")
+                render_example("**📌 Ví dụ trong bài:**", example_text, item.get("example_text_hiragana"))
+                render_example("**✏️ Ví dụ 1:**", item.get("example_1"), item.get("example_1_hiragana"))
+                render_example("**✏️ Ví dụ 2:**", item.get("example_2"), item.get("example_2_hiragana"))
             if item.get("note") and item["note"] not in ("Không có", "None", "N/A"):
                 st.warning(f"⚠️ **Lưu ý:** {item['note']}")
             if item.get("mistake") and item["mistake"] not in ("Không có", "None", "N/A"):
@@ -332,13 +337,26 @@ if not items:
     st.stop()
 
 st.subheader(f"Ảnh/trang PDF trong bộ phân tích ({len(items)})")
-controls_left, controls_right = st.columns(2)
+controls_left, controls_middle, controls_right = st.columns(3)
 with controls_left:
     if st.button("🔍 OCR tất cả ảnh chưa xử lý", type="primary", width="stretch"):
         pending = [item for item in items if not item["ocr_result"]]
-        progress = st.progress(0, text="Đang OCR...")
-        for index, item in enumerate(pending, 1):
-            progress.progress(index / len(pending), text=f"Đang OCR: {item['name']}")
+        if not pending:
+            st.info("Tất cả ảnh/trang đã có OCR.")
+        else:
+            progress = st.progress(0, text="Đang OCR...")
+            for index, item in enumerate(pending, 1):
+                progress.progress(index / len(pending), text=f"Đang OCR: {item['name']}")
+                run_item_ocr(item)
+                st.session_state.image_items = items
+            progress.empty()
+            clear_analysis()
+            st.rerun()
+with controls_middle:
+    if st.button("🔁 OCR/OCR lại toàn bộ ảnh", width="stretch"):
+        progress = st.progress(0, text="Đang OCR toàn bộ...")
+        for index, item in enumerate(items, 1):
+            progress.progress(index / len(items), text=f"Đang OCR: {item['name']}")
             run_item_ocr(item)
             st.session_state.image_items = items
         progress.empty()
@@ -517,13 +535,44 @@ if st.session_state.analysis:
             st.info("Kết quả này chưa có dữ liệu phân tích từng trang.")
         for page in page_analyses:
             with st.expander(page.get("source_label") or page.get("page_name") or "Trang", expanded=False):
+                st.subheader("Văn bản đã xác nhận")
+                st.write(page.get("confirmed_text") or "Không có văn bản xác nhận.")
                 st.subheader("Tóm tắt trang")
                 st.info(page.get("summary") or "Không có tóm tắt.")
                 st.subheader("Từ vựng trang")
                 st.dataframe(display_rows(page.get("vocabulary_all", []), result_language), width="stretch")
                 render_important_vocabulary(page.get("vocabulary_important", []))
+                if result_language == "japanese":
+                    st.subheader("Kanji trang")
+                    if page.get("kanji_analysis"):
+                        st.dataframe(display_rows(page.get("kanji_analysis", []), result_language), width="stretch")
+                    else:
+                        st.info("Trang này chưa có dữ liệu Kanji riêng.")
+                else:
+                    st.subheader("Cụm từ & thành ngữ trang")
+                    if page.get("phrasal_collocations"):
+                        st.dataframe(display_rows(page.get("phrasal_collocations", []), result_language), width="stretch")
+                    else:
+                        st.info("Trang này chưa có cụm động từ/collocation riêng.")
+                st.subheader("Từ nối trang" if result_language == "japanese" else "Từ nối & dấu hiệu diễn ngôn trang")
+                page_marker_key = "connectors" if result_language == "japanese" else "discourse_markers"
+                if page.get(page_marker_key):
+                    st.dataframe(display_rows(page.get(page_marker_key, []), result_language), width="stretch")
+                else:
+                    st.info("Trang này chưa có dữ liệu từ nối riêng.")
                 st.subheader("Ngữ pháp trang")
                 render_grammar_points(page.get("grammar_points", []))
+                st.subheader("Mẫu câu trang")
+                if page.get("sentence_patterns"):
+                    for pattern in page.get("sentence_patterns", []):
+                        with st.expander(f"🔎 {pattern.get('pattern', 'Mẫu câu')}"):
+                            if pattern.get("example"):
+                                st.markdown("**Ví dụ trong bài:**")
+                                st.code(pattern["example"], language=None)
+                            if pattern.get("explanation"):
+                                st.markdown(f"**Giải thích:** {pattern['explanation']}")
+                else:
+                    st.info("Trang này chưa có mẫu câu riêng.")
                 with st.expander("Xem Markdown đầy đủ của trang"):
                     st.markdown(page.get("full_markdown") or "Không có dữ liệu.")
     with tab2:

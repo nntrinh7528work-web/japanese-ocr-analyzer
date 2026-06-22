@@ -94,8 +94,11 @@ def _parse_named_blocks(section: str, heading_pattern: str, kind: str) -> list[d
                     "vn_meaning": _field(block, r"Vietnamese Meaning"),
                     "definition": _field(block, r"Definition"),
                     "example_text": _field(block, r"Ví dụ trong bài|Example from text"),
+                    "example_text_hiragana": _field(block, r"Hiragana ví dụ trong bài"),
                     "example_1": _field(block, r"Ví dụ 1|Example 1"),
+                    "example_1_hiragana": _field(block, r"Hiragana ví dụ 1"),
                     "example_2": _field(block, r"Ví dụ 2|Example 2"),
+                    "example_2_hiragana": _field(block, r"Hiragana ví dụ 2"),
                     "related": _field(block, r"Từ liên quan|Related words"),
                     "note": _field(block, r"Lưu ý"),
                     "mistake": _field(block, r"Common mistake"),
@@ -280,6 +283,10 @@ Với mỗi điểm:
 
 ## 6. MẪU CÂU ĐẶC TRƯNG
 Với mỗi mẫu: **Mẫu:** `[công thức / pattern]`, rồi `- Ví dụ trong bài:` và `- Giải thích:`.
+
+Nếu cần bổ sung mục từ vựng khó ở định dạng 2.2 trong các lần sau, luôn thêm:
+`- Hiragana ví dụ trong bài:`, `- Hiragana ví dụ 1:`, `- Hiragana ví dụ 2:`
+ngay sau từng câu ví dụ tiếng Nhật.
 """
     return f"""You are an English language analyst for Vietnamese learners.
 Return ONLY the missing Markdown sections requested here: {requested}.
