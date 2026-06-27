@@ -5,8 +5,9 @@ from __future__ import annotations
 import copy
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 PROMPT_DIR = Path(__file__).resolve().parents[1] / "prompts"
@@ -417,7 +418,7 @@ def _analyze_chunk(model: Any, text: str, notes: list, analysis_language: str = 
         try:
             response = model.generate_content(
                 prompt,
-                generation_config={"temperature": 0.1, "max_output_tokens": 16384},
+                generation_config={"temperature": 0.1, "max_output_tokens": 65536},
             )
             if not response.text or not response.text.strip():
                 raise ValueError("Gemini không trả về nội dung phân tích.")
@@ -436,7 +437,7 @@ def _analyze_chunk(model: Any, text: str, notes: list, analysis_language: str = 
     raise RuntimeError(f"Phân tích thất bại sau 3 lần thử: {last_error}") from last_error
 
 
-def _split_text(text: str, max_chars: int = 4000) -> list[str]:
+def _split_text(text: str, max_chars: int = 8000) -> list[str]:
     if len(text) <= max_chars:
         return [text]
     chunks = []
@@ -450,6 +451,32 @@ def _split_text(text: str, max_chars: int = 4000) -> list[str]:
         chunks.append(remaining[:split_at].strip())
         remaining = remaining[split_at:].strip()
     return [chunk for chunk in chunks if chunk]
+
+
+def _deduplicate_rows(rows: list[dict[str, str]], key_fields: tuple[str, ...]) -> list[dict[str, str]]:
+    """Remove duplicate rows based on the first matching key field value."""
+    seen: set[str] = set()
+    unique: list[dict[str, str]] = []
+    for row in rows:
+        identifier = ""
+        for key in key_fields:
+            value = row.get(key, "").strip()
+            if value and value not in ("—", "--", "N/A"):
+                identifier = value.lower()
+                break
+        if not identifier or identifier not in seen:
+            if identifier:
+                seen.add(identifier)
+            unique.append(row)
+    return unique
+
+
+def _renumber_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Re-assign sequential STT numbers to rows that have a 'num' field."""
+    for index, row in enumerate(rows, 1):
+        if "num" in row:
+            row["num"] = str(index)
+    return rows
 
 
 def _merge_analysis_results(results: list[dict[str, Any]], analysis_language: str = "english") -> dict[str, Any]:
@@ -472,8 +499,25 @@ def _merge_analysis_results(results: list[dict[str, Any]], analysis_language: st
         "grammar_points",
         "sentence_patterns",
     )
+    # Deduplication key fields for each list type.
+    dedup_keys: dict[str, tuple[str, ...]] = {
+        "vocabulary_all": ("word",),
+        "vocabulary_important": ("word",),
+        "phrasal_collocations": ("phrase",),
+        "discourse_markers": ("phrase",),
+        "kanji_analysis": ("kanji", "phrase"),
+        "connectors": ("phrase",),
+        "grammar_points": ("name",),
+        "sentence_patterns": ("pattern",),
+    }
     for field in list_fields:
-        merged[field] = [item for result in results for item in result.get(field, [])]
+        combined = [item for result in results for item in result.get(field, [])]
+        keys = dedup_keys.get(field)
+        if keys:
+            combined = _deduplicate_rows(combined, keys)
+        merged[field] = combined
+    # Renumber vocabulary STT after merge.
+    _renumber_rows(merged["vocabulary_all"])
     if language == "english":
         merged["kanji_analysis"] = merged["phrasal_collocations"]
         merged["connectors"] = merged["discourse_markers"]
@@ -494,7 +538,7 @@ def _merge_analysis_results(results: list[dict[str, Any]], analysis_language: st
 
 
 def run_analysis(japanese_text: str, ocr_notes: list, analysis_language: str = "english") -> dict[str, Any]:
-    """Analyze Japanese or English text, splitting and merging input longer than 4,000 chars."""
+    """Analyze Japanese or English text, splitting and merging input longer than 8,000 chars."""
     if not japanese_text or not japanese_text.strip():
         raise ValueError("Văn bản phân tích không được rỗng.")
     language = _analysis_language(analysis_language)
@@ -503,35 +547,30 @@ def run_analysis(japanese_text: str, ocr_notes: list, analysis_language: str = "
     return _merge_analysis_results(results, language)
 
 
-def run_page_analyses(pages: list[dict[str, Any]], analysis_language: str = "english") -> dict[str, Any]:
-    """Analyze each OCR page independently, then return a merged report with per-page details."""
+def analyze_single_page(
+    model: Any,
+    page: dict[str, Any],
+    analysis_language: str = "english",
+) -> dict[str, Any]:
+    """Analyze a single prepared page dict and return the parsed result."""
     language = _analysis_language(analysis_language)
-    prepared_pages = [
-        {
-            "page_index": int(page.get("page_index", index)),
-            "page_name": str(page.get("page_name") or f"Trang {index}"),
-            "text": str(page.get("text") or "").strip(),
-            "notes": list(page.get("notes") or []),
-        }
-        for index, page in enumerate(pages, 1)
-        if str(page.get("text") or "").strip()
+    page_results = [
+        _analyze_chunk(model, chunk, page["notes"], language)
+        for chunk in _split_text(page["text"])
     ]
-    if not prepared_pages:
-        raise ValueError("Không có trang nào có văn bản OCR để phân tích.")
+    page_analysis = _merge_analysis_results(page_results, language)
+    page_analysis["page_index"] = page["page_index"]
+    page_analysis["page_name"] = page["page_name"]
+    page_analysis["source_label"] = f"Trang {page['page_index']}: {page['page_name']}"
+    return page_analysis
 
-    model = _init_model()
-    page_analyses = []
-    for page in prepared_pages:
-        page_results = [
-            _analyze_chunk(model, chunk, page["notes"], language)
-            for chunk in _split_text(page["text"])
-        ]
-        page_analysis = _merge_analysis_results(page_results, language)
-        page_analysis["page_index"] = page["page_index"]
-        page_analysis["page_name"] = page["page_name"]
-        page_analysis["source_label"] = f"Trang {page['page_index']}: {page['page_name']}"
-        page_analyses.append(page_analysis)
 
+def merge_page_analyses(
+    page_analyses: list[dict[str, Any]],
+    analysis_language: str = "english",
+) -> dict[str, Any]:
+    """Merge a list of per-page analysis results into a single combined report."""
+    language = _analysis_language(analysis_language)
     merged = _merge_analysis_results(page_analyses, language)
     merged["page_analyses"] = page_analyses
     merged["confirmed_text"] = "\n\n".join(
@@ -544,3 +583,76 @@ def run_page_analyses(pages: list[dict[str, Any]], analysis_language: str = "eng
         f"# {page['source_label']}\n\n{page['full_markdown']}" for page in page_analyses
     )
     return merged
+
+
+def prepare_pages(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Validate and normalise raw page dicts for analysis."""
+    prepared = [
+        {
+            "page_index": int(page.get("page_index", index)),
+            "page_name": str(page.get("page_name") or f"Trang {index}"),
+            "text": str(page.get("text") or "").strip(),
+            "notes": list(page.get("notes") or []),
+        }
+        for index, page in enumerate(pages, 1)
+        if str(page.get("text") or "").strip()
+    ]
+    if not prepared:
+        raise ValueError("Không có trang nào có văn bản OCR để phân tích.")
+    return prepared
+
+
+def run_page_analyses(
+    pages: list[dict[str, Any]],
+    analysis_language: str = "english",
+    progress_callback: Callable[[int, int, str], None] | None = None,
+    page_done_callback: Callable[[dict[str, Any]], None] | None = None,
+    max_workers: int = 3,
+) -> dict[str, Any]:
+    """Analyze each OCR page concurrently, then return a merged report with per-page details.
+
+    Args:
+        pages: Raw page dicts with text and notes.
+        analysis_language: ``"japanese"`` or ``"english"``.
+        progress_callback: ``(done, total, page_name)`` called after each page.
+        page_done_callback: ``(page_result)`` called after each page finishes so
+            callers can persist partial results for resume on interruption.
+        max_workers: Maximum number of concurrent API calls.
+    """
+    language = _analysis_language(analysis_language)
+    prepared_pages = prepare_pages(pages)
+    model = _init_model()
+    total = len(prepared_pages)
+
+    if total == 1:
+        # Fast path: no threading overhead for a single page.
+        result = analyze_single_page(model, prepared_pages[0], language)
+        if page_done_callback:
+            page_done_callback(result)
+        if progress_callback:
+            progress_callback(1, 1, prepared_pages[0]["page_name"])
+        return merge_page_analyses([result], language)
+
+    # Concurrent analysis with ThreadPoolExecutor.
+    page_analyses: list[dict[str, Any] | None] = [None] * total
+    completed = 0
+
+    def _work(index: int, page: dict) -> tuple[int, dict[str, Any]]:
+        return index, analyze_single_page(model, page, language)
+
+    workers = min(max_workers, total)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(_work, idx, page): idx
+            for idx, page in enumerate(prepared_pages)
+        }
+        for future in as_completed(futures):
+            idx, page_result = future.result()
+            page_analyses[idx] = page_result
+            completed += 1
+            if page_done_callback:
+                page_done_callback(page_result)
+            if progress_callback:
+                progress_callback(completed, total, page_result["page_name"])
+
+    return merge_page_analyses([p for p in page_analyses if p is not None], language)

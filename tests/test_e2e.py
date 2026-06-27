@@ -151,5 +151,7 @@ def test_two_images_ocr_and_combined_analysis(monkeypatch):
     assert analysis["summary"]
     assert len(analysis["page_analyses"]) == 2
     assert len(analysis_model.prompts) == 2
-    assert "page-1.jpg" not in analysis_model.prompts[0]
-    assert "=== ẢNH 2: page-2.jpg ===" not in analysis_model.prompts[0]
+    # With concurrent execution prompts may arrive in any order.
+    all_prompts = "\n".join(analysis_model.prompts)
+    assert "page-1.jpg" not in all_prompts  # page names are not sent as part of the prompt
+    assert "=== ẢNH 2: page-2.jpg ===" not in all_prompts

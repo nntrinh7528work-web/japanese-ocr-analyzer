@@ -1,5 +1,6 @@
 [server]
 maxUploadSize = 50
+scriptHealthCheckEnabled = false
 
 [browser]
 gatherUsageStats = false

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import streamlit as st
 
@@ -41,6 +43,7 @@ st.markdown(
 for key, default in {
     "image_items": [],
     "analysis": None,
+    "partial_page_analyses": [],
     "upload_messages": [],
     "upload_errors": [],
     "uploader_version": 0,
@@ -174,6 +177,7 @@ def render_grammar_points(items: list[dict]) -> None:
 
 def clear_analysis() -> None:
     st.session_state.analysis = None
+    st.session_state.partial_page_analyses = []
 
 
 def analysis_pages(items: list[dict]) -> list[dict]:
@@ -345,20 +349,51 @@ with controls_left:
             st.info("Tất cả ảnh/trang đã có OCR.")
         else:
             progress = st.progress(0, text="Đang OCR...")
-            for index, item in enumerate(pending, 1):
-                progress.progress(index / len(pending), text=f"Đang OCR: {item['name']}")
-                run_item_ocr(item)
-                st.session_state.image_items = items
+            lock = threading.Lock()
+            done_count = 0
+
+            def _ocr_work(item_to_ocr: dict) -> dict:
+                item_to_ocr["ocr_error"] = None
+                try:
+                    result = run_ocr(item_to_ocr["processed_image_bytes"], item_to_ocr["report"])
+                    item_to_ocr["ocr_result"] = result
+                    item_to_ocr["edited_text"] = result["clean_text"]
+                except Exception as exc:
+                    item_to_ocr["ocr_error"] = str(exc)
+                return item_to_ocr
+
+            with ThreadPoolExecutor(max_workers=min(3, len(pending))) as pool:
+                futures = {pool.submit(_ocr_work, p): p for p in pending}
+                for future in as_completed(futures):
+                    future.result()
+                    done_count += 1
+                    progress.progress(done_count / len(pending), text=f"Đã OCR {done_count}/{len(pending)}")
+            st.session_state.image_items = list(items)
             progress.empty()
             clear_analysis()
             st.rerun()
 with controls_middle:
     if st.button("🔁 OCR/OCR lại toàn bộ ảnh", width="stretch"):
         progress = st.progress(0, text="Đang OCR toàn bộ...")
-        for index, item in enumerate(items, 1):
-            progress.progress(index / len(items), text=f"Đang OCR: {item['name']}")
-            run_item_ocr(item)
-            st.session_state.image_items = items
+        done_count = 0
+
+        def _ocr_work_all(item_to_ocr: dict) -> dict:
+            item_to_ocr["ocr_error"] = None
+            try:
+                result = run_ocr(item_to_ocr["processed_image_bytes"], item_to_ocr["report"])
+                item_to_ocr["ocr_result"] = result
+                item_to_ocr["edited_text"] = result["clean_text"]
+            except Exception as exc:
+                item_to_ocr["ocr_error"] = str(exc)
+            return item_to_ocr
+
+        with ThreadPoolExecutor(max_workers=min(3, len(items))) as pool:
+            futures = {pool.submit(_ocr_work_all, it): it for it in items}
+            for future in as_completed(futures):
+                future.result()
+                done_count += 1
+                progress.progress(done_count / len(items), text=f"Đã OCR {done_count}/{len(items)}")
+        st.session_state.image_items = list(items)
         progress.empty()
         clear_analysis()
         st.rerun()
@@ -432,6 +467,7 @@ st.divider()
 st.subheader("🧠 Phân tích theo từng trang")
 analysis_text = combined_text(items)
 pages_to_analyze = analysis_pages(items)
+partial = st.session_state.partial_page_analyses
 if not analysis_text:
     st.warning("Chưa có văn bản OCR. Hãy OCR ít nhất một ảnh trước khi phân tích.")
 else:
@@ -441,13 +477,78 @@ else:
             "Khi bấm phân tích, app sẽ gọi Gemini riêng cho từng trang/ảnh rồi mới tổng hợp. "
             "Cách này tránh việc file nhiều trang bị dồn quá tải và chỉ phân tích trang đầu."
         )
-    if st.button("🧠 Phân tích từng trang đã OCR", type="primary", width="stretch"):
-        try:
-            with st.spinner(f"Đang phân tích chi tiết {len(pages_to_analyze)} trang/ảnh..."):
-                st.session_state.analysis = text_analyzer.run_page_analyses(
-                    pages_to_analyze,
-                    analysis_language=analysis_language,
+
+    # Show resume button if there is a partial analysis from a previous interrupted run.
+    done_page_indices = {p["page_index"] for p in partial}
+    remaining_pages = [p for p in pages_to_analyze if p["page_index"] not in done_page_indices]
+    if partial and remaining_pages:
+        st.info(
+            f"⏸️ Phân tích trước đó bị gián đoạn: đã hoàn thành {len(partial)}/{len(pages_to_analyze)} trang."
+        )
+        resume_col, restart_col = st.columns(2)
+        do_resume = resume_col.button(
+            f"🔄 Tiếp tục phân tích {len(remaining_pages)} trang còn lại",
+            type="primary", width="stretch",
+        )
+        do_restart = restart_col.button("🔁 Phân tích lại từ đầu", width="stretch")
+        if do_restart:
+            st.session_state.partial_page_analyses = []
+            st.rerun()
+        if do_resume:
+            try:
+                progress = st.progress(
+                    len(partial) / len(pages_to_analyze),
+                    text=f"Đang tiếp tục phân tích ({len(partial)}/{len(pages_to_analyze)})...",
                 )
+
+                def _resume_cb(done: int, total: int, name: str) -> None:
+                    overall = len(partial) + done
+                    progress.progress(
+                        overall / len(pages_to_analyze),
+                        text=f"Đã phân tích {overall}/{len(pages_to_analyze)}: {name}",
+                    )
+
+                def _resume_page_done(page_result: dict) -> None:
+                    st.session_state.partial_page_analyses = list(partial) + [page_result]
+
+                new_results = text_analyzer.run_page_analyses(
+                    remaining_pages,
+                    analysis_language=analysis_language,
+                    progress_callback=_resume_cb,
+                    page_done_callback=_resume_page_done,
+                )
+                all_page_analyses = partial + new_results.get("page_analyses", [])
+                st.session_state.analysis = text_analyzer.merge_page_analyses(
+                    all_page_analyses, analysis_language=analysis_language,
+                )
+                st.session_state.partial_page_analyses = []
+                progress.empty()
+                st.rerun()
+            except Exception as exc:
+                st.error(f"❌ Lỗi phân tích: {exc}")
+
+    if st.button("🧠 Phân tích từng trang đã OCR", type="primary", width="stretch"):
+        st.session_state.partial_page_analyses = []
+        try:
+            progress = st.progress(0, text=f"Đang phân tích chi tiết {len(pages_to_analyze)} trang/ảnh...")
+
+            def _progress_cb(done: int, total: int, name: str) -> None:
+                progress.progress(done / total, text=f"Đã phân tích {done}/{total}: {name}")
+
+            def _page_done(page_result: dict) -> None:
+                st.session_state.partial_page_analyses = list(
+                    st.session_state.partial_page_analyses
+                ) + [page_result]
+
+            st.session_state.analysis = text_analyzer.run_page_analyses(
+                pages_to_analyze,
+                analysis_language=analysis_language,
+                progress_callback=_progress_cb,
+                page_done_callback=_page_done,
+            )
+            st.session_state.partial_page_analyses = []
+            progress.empty()
+            st.rerun()
         except Exception as exc:
             st.error(f"❌ Lỗi phân tích: {exc}")
 

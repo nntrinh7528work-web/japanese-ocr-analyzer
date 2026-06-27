@@ -241,9 +241,11 @@ def test_run_analysis_and_long_text_merge(monkeypatch):
             )
 
     monkeypatch.setattr(text_analyzer, "_init_model", lambda: Model())
-    result = text_analyzer.run_analysis("A" * 4001, [])
-    assert len(result["vocabulary_all"]) == 6
-    assert len(result["phrasal_collocations"]) == 2
+    # Text must exceed 8000 chars to trigger chunk splitting.
+    result = text_analyzer.run_analysis("A" * 8001, [])
+    # Deduplication removes identical vocab/phrasal rows across chunks.
+    assert len(result["vocabulary_all"]) == 3
+    assert len(result["phrasal_collocations"]) == 1
     assert result["usage"]["input_tokens"] == 20
     assert result["usage"]["output_tokens"] == 40
     assert result["usage"]["candidate_tokens"] == 40
@@ -263,21 +265,37 @@ def test_run_page_analyses_keeps_per_page_results(monkeypatch):
 
     model = Model()
     monkeypatch.setattr(text_analyzer, "_init_model", lambda: model)
+
+    progress_calls = []
+    page_done_calls = []
+
+    def _on_progress(done, total, name):
+        progress_calls.append((done, total, name))
+
+    def _on_page_done(page_result):
+        page_done_calls.append(page_result)
+
     result = text_analyzer.run_page_analyses(
         [
             {"page_index": 1, "page_name": "page-1.png", "text": "First page text.", "notes": ["note 1"]},
             {"page_index": 2, "page_name": "page-2.png", "text": "Second page text.", "notes": ["note 2"]},
-        ]
+        ],
+        progress_callback=_on_progress,
+        page_done_callback=_on_page_done,
     )
 
     assert len(model.prompts) == 2
-    assert "First page text." in model.prompts[0]
-    assert "Second page text." not in model.prompts[0]
-    assert "Second page text." in model.prompts[1]
+    # With concurrent execution prompts may arrive in any order.
+    all_prompt_text = "\n".join(model.prompts)
+    assert "First page text." in all_prompt_text
+    assert "Second page text." in all_prompt_text
     assert len(result["page_analyses"]) == 2
     assert result["page_analyses"][0]["source_label"] == "Trang 1: page-1.png"
     assert result["usage"]["input_tokens"] == 6
     assert result["usage"]["output_tokens"] == 10
+    # Progress and page_done callbacks should have been called.
+    assert len(progress_calls) == 2
+    assert len(page_done_calls) == 2
 
 
 def test_empty_text_rejected():
@@ -295,7 +313,7 @@ Content was cut before section 7.
 
     class Model:
         def generate_content(self, _prompt, generation_config):
-            assert generation_config["max_output_tokens"] == 16384
+            assert generation_config["max_output_tokens"] == 65536
             return SimpleNamespace(text=truncated, usage_metadata=None)
 
     monkeypatch.setattr(text_analyzer, "_init_model", lambda: Model())
@@ -341,3 +359,63 @@ Summary: The text describes a decision.
     assert result["phrasal_collocations"][0]["phrase"] == "carry out"
     assert result["grammar_points"][0]["name"] == "Past simple"
     assert "Missing section supplement" in result["full_markdown"]
+
+
+def test_deduplicate_rows():
+    rows = [
+        {"word": "team", "meaning": "đội nhóm"},
+        {"word": "decide", "meaning": "quyết định"},
+        {"word": "team", "meaning": "đội nhóm (duplicate)"},
+    ]
+    result = text_analyzer._deduplicate_rows(rows, ("word",))
+    assert len(result) == 2
+    assert result[0]["word"] == "team"
+    assert result[1]["word"] == "decide"
+
+
+def test_deduplicate_rows_keeps_placeholder_rows():
+    rows = [
+        {"word": "—", "meaning": "N/A"},
+        {"word": "—", "meaning": "N/A"},
+    ]
+    result = text_analyzer._deduplicate_rows(rows, ("word",))
+    assert len(result) == 2
+
+
+def test_renumber_rows():
+    rows = [{"num": "1", "word": "a"}, {"num": "1", "word": "b"}, {"num": "3", "word": "c"}]
+    text_analyzer._renumber_rows(rows)
+    assert [r["num"] for r in rows] == ["1", "2", "3"]
+
+
+def test_merge_deduplicates_vocabulary(monkeypatch):
+    parsed1 = text_analyzer.parse_analysis_response(RESPONSE)
+    parsed1["usage"] = {"input_tokens": 5, "output_tokens": 10, "candidate_tokens": 10, "thinking_tokens": 0}
+    parsed2 = text_analyzer.parse_analysis_response(RESPONSE)
+    parsed2["usage"] = {"input_tokens": 5, "output_tokens": 10, "candidate_tokens": 10, "thinking_tokens": 0}
+    merged = text_analyzer._merge_analysis_results([parsed1, parsed2])
+    vocab_words = [r["word"] for r in merged["vocabulary_all"]]
+    assert vocab_words == ["team", "decided", "approaching"]
+    assert [r["num"] for r in merged["vocabulary_all"]] == ["1", "2", "3"]
+
+
+def test_analyze_single_page_and_merge(monkeypatch):
+    class Model:
+        def generate_content(self, _prompt, generation_config):
+            return SimpleNamespace(
+                text=RESPONSE,
+                usage_metadata=SimpleNamespace(prompt_token_count=4, candidates_token_count=6),
+            )
+
+    model = Model()
+    monkeypatch.setattr(text_analyzer, "_init_model", lambda: model)
+
+    page = {"page_index": 1, "page_name": "test.png", "text": "Sample text.", "notes": []}
+    result = text_analyzer.analyze_single_page(model, page)
+    assert result["page_index"] == 1
+    assert result["source_label"] == "Trang 1: test.png"
+    assert result["vocabulary_all"]
+
+    merged = text_analyzer.merge_page_analyses([result])
+    assert merged["page_analyses"] == [result]
+    assert "test.png" in merged["confirmed_text"]
