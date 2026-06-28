@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 from pathlib import Path
 
 import fitz
@@ -14,7 +15,12 @@ def pdf_to_image_sources(
     filename: str,
     max_pages: int = MAX_PDF_PAGES,
 ) -> list[tuple[str, bytes]]:
-    """Return PDF pages as compact named JPEG byte sources."""
+    """Return PDF pages as compact named JPEG byte sources.
+
+    Memory optimisation: each page pixmap is explicitly deleted and garbage
+    collected immediately after conversion so that large multi-page PDFs
+    (20-50 MB) do not accumulate RAM on servers with limited memory.
+    """
     if not data:
         raise ValueError("PDF trống.")
     if len(data) > MAX_PDF_SIZE_MB * 1024 * 1024:
@@ -36,11 +42,17 @@ def pdf_to_image_sources(
         stem = Path(filename).stem or "document"
         digits = max(2, len(str(document.page_count)))
         sources = []
-        matrix = fitz.Matrix(1.3, 1.3)
+        # Use lower scaling for large documents to reduce memory usage.
+        scale = 1.1 if document.page_count > 20 else 1.3
+        matrix = fitz.Matrix(scale, scale)
         for page_number, page in enumerate(document, 1):
             pixmap = page.get_pixmap(matrix=matrix, alpha=False)
             page_name = f"{stem} - trang {page_number:0{digits}d}.jpg"
             sources.append((page_name, pixmap.tobytes("jpeg", jpg_quality=85)))
+            # Free pixmap memory immediately to avoid accumulation.
+            del pixmap
+            gc.collect()
         return sources
     finally:
         document.close()
+

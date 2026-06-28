@@ -21,6 +21,7 @@ from modules.doc_exporter import export_to_docx
 from modules.multi_image_workflow import add_upload_items, combined_text, move_image_item
 from modules.ocr_engine import run_ocr
 from modules.result_exporter import analysis_json_bytes, default_export_stem, markdown_bytes, safe_export_stem
+from modules import session_store
 import modules.text_analyzer as text_analyzer
 
 
@@ -48,9 +49,61 @@ for key, default in {
     "upload_errors": [],
     "uploader_version": 0,
     "camera_version": 0,
+    "session_id": None,
+    "session_restored": False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
+
+# ── Session persistence: restore or create ──────────────────────────────
+session_store.cleanup_old_sessions(max_age_hours=24)
+
+query_sid = st.query_params.get("session", "").strip()
+
+if not st.session_state.session_restored:
+    if query_sid and session_store.session_exists(query_sid):
+        # Restore previous session from SQLite.
+        st.session_state.session_id = query_sid
+        saved_items = session_store.load_image_items(query_sid)
+        if saved_items:
+            st.session_state.image_items = saved_items
+        saved_analysis, saved_partial = session_store.load_analysis(query_sid)
+        if saved_analysis:
+            st.session_state.analysis = saved_analysis
+        if saved_partial:
+            st.session_state.partial_page_analyses = saved_partial
+        session_store.update_session_timestamp(query_sid)
+    else:
+        # Create a brand-new session.
+        new_sid = session_store.generate_session_id()
+        session_store.create_session(new_sid)
+        st.session_state.session_id = new_sid
+        st.query_params["session"] = new_sid
+    st.session_state.session_restored = True
+
+# Ensure query param stays in sync.
+if st.session_state.session_id and st.query_params.get("session") != st.session_state.session_id:
+    st.query_params["session"] = st.session_state.session_id
+
+
+def _persist_items() -> None:
+    """Save current image items to SQLite."""
+    sid = st.session_state.session_id
+    if sid:
+        session_store.save_image_items(sid, st.session_state.image_items)
+        session_store.update_session_timestamp(sid)
+
+
+def _persist_analysis() -> None:
+    """Save current analysis and partial results to SQLite."""
+    sid = st.session_state.session_id
+    if sid:
+        session_store.save_analysis(
+            sid,
+            st.session_state.analysis,
+            st.session_state.partial_page_analyses,
+        )
+        session_store.update_session_timestamp(sid)
 
 
 COLUMN_LABELS = {
@@ -178,6 +231,7 @@ def render_grammar_points(items: list[dict]) -> None:
 def clear_analysis() -> None:
     st.session_state.analysis = None
     st.session_state.partial_page_analyses = []
+    _persist_analysis()
 
 
 def analysis_pages(items: list[dict]) -> list[dict]:
@@ -206,12 +260,14 @@ def add_sources(sources: list[tuple[str, bytes]]) -> bool:
     if added:
         clear_analysis()
         st.session_state.upload_messages.append(f"Đã thêm {len(added)} ảnh/trang PDF.")
+        _persist_items()
     return bool(added)
 
 
 def remove_image(item_id: str) -> None:
     st.session_state.image_items = [item for item in st.session_state.image_items if item["id"] != item_id]
     clear_analysis()
+    _persist_items()
 
 
 def run_item_ocr(item: dict) -> None:
@@ -259,7 +315,19 @@ if items and st.sidebar.button("🗑️ Xóa toàn bộ bộ ảnh", width="stre
     st.session_state.analysis = None
     st.session_state.uploader_version += 1
     st.session_state.camera_version += 1
+    _persist_items()
+    _persist_analysis()
     st.rerun()
+
+# ── Session info in sidebar ──
+if st.session_state.session_id:
+    st.sidebar.divider()
+    st.sidebar.subheader("💾 Phiên làm việc")
+    st.sidebar.code(st.session_state.session_id, language=None)
+    st.sidebar.caption(
+        "Mã phiên tự động. Khi thoát app, mở lại link có mã này để khôi phục toàn bộ tiến trình. "
+        "Phiên được giữ tối đa 24 giờ."
+    )
 st.sidebar.divider()
 st.sidebar.header("⚙️ Settings")
 show_preprocessing = st.sidebar.toggle("Hiển thị chi tiết tiền xử lý", value=True)
@@ -369,6 +437,7 @@ with controls_left:
                     done_count += 1
                     progress.progress(done_count / len(pending), text=f"Đã OCR {done_count}/{len(pending)}")
             st.session_state.image_items = list(items)
+            _persist_items()
             progress.empty()
             clear_analysis()
             st.rerun()
@@ -394,6 +463,7 @@ with controls_middle:
                 done_count += 1
                 progress.progress(done_count / len(items), text=f"Đã OCR {done_count}/{len(items)}")
         st.session_state.image_items = list(items)
+        _persist_items()
         progress.empty()
         clear_analysis()
         st.rerun()
@@ -423,6 +493,7 @@ for index, item in enumerate(items, 1):
         if action1.button("🔍 OCR ảnh này", key=f"ocr_{item['id']}", width="stretch"):
             with st.spinner(f"Đang OCR {item['name']}..."):
                 run_item_ocr(item)
+            _persist_items()
             clear_analysis()
             st.rerun()
         if action2.button("⬆️ Lên", key=f"up_{item['id']}", disabled=index == 1, width="stretch"):
@@ -510,6 +581,7 @@ else:
 
                 def _resume_page_done(page_result: dict) -> None:
                     st.session_state.partial_page_analyses = list(partial) + [page_result]
+                    _persist_analysis()
 
                 new_results = text_analyzer.run_page_analyses(
                     remaining_pages,
@@ -522,6 +594,7 @@ else:
                     all_page_analyses, analysis_language=analysis_language,
                 )
                 st.session_state.partial_page_analyses = []
+                _persist_analysis()
                 progress.empty()
                 st.rerun()
             except Exception as exc:
@@ -539,6 +612,7 @@ else:
                 st.session_state.partial_page_analyses = list(
                     st.session_state.partial_page_analyses
                 ) + [page_result]
+                _persist_analysis()
 
             st.session_state.analysis = text_analyzer.run_page_analyses(
                 pages_to_analyze,
@@ -547,6 +621,7 @@ else:
                 page_done_callback=_page_done,
             )
             st.session_state.partial_page_analyses = []
+            _persist_analysis()
             progress.empty()
             st.rerun()
         except Exception as exc:
