@@ -166,7 +166,8 @@ def render_important_vocabulary(items: list[dict]) -> None:
         label = item.get("word", "")
         if item.get("reading"):
             label = f"{label}・{item['reading']}"
-        with st.expander(f"📖 {label}   {level}".strip()):
+        page_tag = f" — {item['page_label']}" if item.get("page_label") else ""
+        with st.expander(f"📖 {label}   {level}{page_tag}".strip()):
             col1, col2 = st.columns(2)
             with col1:
                 if item.get("type") or item.get("part_of_speech"):
@@ -199,7 +200,8 @@ def render_grammar_points(items: list[dict]) -> None:
 
     for point in items:
         level = point.get("level") or ""
-        with st.expander(f"📌 {point.get('name', '')}   {level}".strip()):
+        page_tag = f" — {point['page_label']}" if point.get("page_label") else ""
+        with st.expander(f"📌 {point.get('name', '')}   {level}{page_tag}".strip()):
             col1, col2 = st.columns(2)
             with col1:
                 if point.get("structure"):

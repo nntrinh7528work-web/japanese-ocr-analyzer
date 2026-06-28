@@ -71,7 +71,7 @@ def _parse_named_blocks(section: str, heading_pattern: str, kind: str) -> list[d
         if kind == "grammar":
             results.append(
                 {
-                    "name": match.group(1).strip("[] "),
+                    "name": re.sub(r"^\d+[\.\)]\s*", "", match.group(1).strip("[] ")),
                     "structure": _field(block, r"Structure|Công thức|Cấu trúc"),
                     "rule": _field(block, r"Rule|Quy tắc"),
                     "meaning": _field(block, r"Meaning|Ý nghĩa"),
@@ -89,7 +89,7 @@ def _parse_named_blocks(section: str, heading_pattern: str, kind: str) -> list[d
         elif kind == "vocab_detail":
             results.append(
                 {
-                    "word": match.group(1).strip("[] "),
+                    "word": re.sub(r"^\d+[\.\)]\s*", "", match.group(1).strip("[] ")),
                     "type": _field(block, r"Loại từ"),
                     "meaning": _field(block, r"Ý nghĩa"),
                     "vn_meaning": _field(block, r"Vietnamese Meaning"),
@@ -110,7 +110,7 @@ def _parse_named_blocks(section: str, heading_pattern: str, kind: str) -> list[d
         else:
             results.append(
                 {
-                    "pattern": match.group(1).strip("` "),
+                    "pattern": re.sub(r"^\d+[\.\)]\s*", "", match.group(1).strip("` ")),
                     "example": _field(block, r"Example from text|Ví dụ trong bài"),
                     "explanation": _field(block, r"Explanation|Giải thích"),
                 }
@@ -129,7 +129,7 @@ def _parse_grammar(section: str) -> list[dict[str, str]]:
         block = section[match.end() : heading_matches[index + 1].start() if index + 1 < len(heading_matches) else None]
         results.append(
             {
-                "name": match.group(1).strip("[] "),
+                "name": re.sub(r"^\d+[\.\)]\s*", "", match.group(1).strip("[] ")),
                 "structure": _field(block, r"Structure|Công thức|Cấu trúc|Mẫu câu"),
                 "rule": _field(block, r"Rule|Quy tắc|Cấu trúc|Mẫu câu"),
                 "meaning": _field(block, r"Meaning|Ý nghĩa"),
@@ -571,6 +571,15 @@ def merge_page_analyses(
 ) -> dict[str, Any]:
     """Merge a list of per-page analysis results into a single combined report."""
     language = _analysis_language(analysis_language)
+    
+    # Inject source page label so we can show which page a word/grammar came from
+    for page in page_analyses:
+        page_label = page.get("source_label", "")
+        for field in ("vocabulary_important", "grammar_points", "sentence_patterns"):
+            for item in page.get(field, []):
+                if "page_label" not in item:
+                    item["page_label"] = page_label
+
     merged = _merge_analysis_results(page_analyses, language)
     merged["page_analyses"] = page_analyses
     merged["confirmed_text"] = "\n\n".join(
