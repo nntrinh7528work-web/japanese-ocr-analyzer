@@ -549,56 +549,51 @@ else:
             "Cách này tránh việc file nhiều trang bị dồn quá tải và chỉ phân tích trang đầu."
         )
 
-    # Show resume button if there is a partial analysis from a previous interrupted run.
+    # Automatically resume if there is a partial analysis from a previous interrupted run.
     done_page_indices = {p["page_index"] for p in partial}
     remaining_pages = [p for p in pages_to_analyze if p["page_index"] not in done_page_indices]
     if partial and remaining_pages:
         st.info(
-            f"⏸️ Phân tích trước đó bị gián đoạn: đã hoàn thành {len(partial)}/{len(pages_to_analyze)} trang."
+            f"🔄 Phát hiện phân tích trước đó bị gián đoạn. Đang tự động chạy tiếp {len(remaining_pages)} trang còn lại..."
         )
-        resume_col, restart_col = st.columns(2)
-        do_resume = resume_col.button(
-            f"🔄 Tiếp tục phân tích {len(remaining_pages)} trang còn lại",
-            type="primary", width="stretch",
-        )
-        do_restart = restart_col.button("🔁 Phân tích lại từ đầu", width="stretch")
-        if do_restart:
+        if st.button("🔁 Hủy và Phân tích lại từ đầu", width="stretch"):
             st.session_state.partial_page_analyses = []
+            _persist_analysis()
             st.rerun()
-        if do_resume:
-            try:
-                progress = st.progress(
-                    len(partial) / len(pages_to_analyze),
-                    text=f"Đang tiếp tục phân tích ({len(partial)}/{len(pages_to_analyze)})...",
+            
+        try:
+            progress = st.progress(
+                len(partial) / len(pages_to_analyze),
+                text=f"Đang tự động phân tích tiếp ({len(partial)}/{len(pages_to_analyze)})...",
+            )
+
+            def _resume_cb(done: int, total: int, name: str) -> None:
+                overall = len(partial) + done
+                progress.progress(
+                    overall / len(pages_to_analyze),
+                    text=f"Đã phân tích {overall}/{len(pages_to_analyze)}: {name}",
                 )
 
-                def _resume_cb(done: int, total: int, name: str) -> None:
-                    overall = len(partial) + done
-                    progress.progress(
-                        overall / len(pages_to_analyze),
-                        text=f"Đã phân tích {overall}/{len(pages_to_analyze)}: {name}",
-                    )
-
-                def _resume_page_done(page_result: dict) -> None:
-                    st.session_state.partial_page_analyses = list(partial) + [page_result]
-                    _persist_analysis()
-
-                new_results = text_analyzer.run_page_analyses(
-                    remaining_pages,
-                    analysis_language=analysis_language,
-                    progress_callback=_resume_cb,
-                    page_done_callback=_resume_page_done,
-                )
-                all_page_analyses = partial + new_results.get("page_analyses", [])
-                st.session_state.analysis = text_analyzer.merge_page_analyses(
-                    all_page_analyses, analysis_language=analysis_language,
-                )
-                st.session_state.partial_page_analyses = []
+            def _resume_page_done(page_result: dict) -> None:
+                st.session_state.partial_page_analyses = list(partial) + [page_result]
                 _persist_analysis()
-                progress.empty()
-                st.rerun()
-            except Exception as exc:
-                st.error(f"❌ Lỗi phân tích: {exc}")
+
+            new_results = text_analyzer.run_page_analyses(
+                remaining_pages,
+                analysis_language=analysis_language,
+                progress_callback=_resume_cb,
+                page_done_callback=_resume_page_done,
+            )
+            all_page_analyses = partial + new_results.get("page_analyses", [])
+            st.session_state.analysis = text_analyzer.merge_page_analyses(
+                all_page_analyses, analysis_language=analysis_language,
+            )
+            st.session_state.partial_page_analyses = []
+            _persist_analysis()
+            progress.empty()
+            st.rerun()
+        except Exception as exc:
+            st.error(f"❌ Lỗi tự động phân tích tiếp tục: {exc}")
 
     if st.button("🧠 Phân tích từng trang đã OCR", type="primary", width="stretch"):
         st.session_state.partial_page_analyses = []
