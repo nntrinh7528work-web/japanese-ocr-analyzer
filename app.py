@@ -691,100 +691,57 @@ if st.session_state.analysis:
             mime="application/json",
             width="stretch",
         )
-    detail_tabs = (
-        ["📝 Tóm tắt", "📄 Từng trang", "📊 Từ vựng", "漢字 Kanji", "🔗 Từ nối & Ngữ pháp", "💾 Xem bản lưu"]
-        if result_language == "japanese"
-        else ["📝 Tóm tắt", "📄 Từng trang", "📊 Từ vựng", "🔗 Cụm từ & Thành ngữ", "🧩 Từ nối & Ngữ pháp", "💾 Xem bản lưu"]
-    )
-    tab1, tab_pages, tab2, tab3, tab4, tab5 = st.tabs(detail_tabs)
-    with tab1:
-        st.subheader("Văn bản đã xác nhận")
-        st.write(analysis["confirmed_text"])
-        st.subheader("Tóm tắt")
-        st.info(analysis["summary"])
-    with tab_pages:
-        page_analyses = analysis.get("page_analyses") or []
-        if not page_analyses:
-            st.info("Kết quả này chưa có dữ liệu phân tích từng trang.")
-        for page in page_analyses:
-            with st.expander(page.get("source_label") or page.get("page_name") or "Trang", expanded=False):
-                st.subheader("Văn bản đã xác nhận")
-                st.write(page.get("confirmed_text") or "Không có văn bản xác nhận.")
-                st.subheader("Tóm tắt trang")
-                st.info(page.get("summary") or "Không có tóm tắt.")
-                st.subheader("Từ vựng trang")
+    page_analyses = analysis.get("page_analyses") or [analysis]
+    tab_titles = [page.get("source_label") or page.get("page_name") or f"Trang {i+1}" for i, page in enumerate(page_analyses)]
+    
+    # Optional: if there's only 1 page, don't show "Trang 1" tab if you don't want, but showing it is fine too.
+    tabs = st.tabs(tab_titles)
+    
+    for index, (tab, page) in enumerate(zip(tabs, page_analyses)):
+        with tab:
+            st.subheader("📝 Tóm tắt nội dung")
+            st.write(page.get("confirmed_text") or "Không có văn bản xác nhận.")
+            st.info(page.get("summary") or "Không có tóm tắt.")
+            
+            st.subheader("📊 Từ vựng")
+            if page.get("vocabulary_all"):
                 st.dataframe(display_rows(page.get("vocabulary_all", []), result_language), width="stretch")
-                render_important_vocabulary(page.get("vocabulary_important", []))
-                if result_language == "japanese":
-                    st.subheader("Kanji trang")
-                    if page.get("kanji_analysis"):
-                        st.dataframe(display_rows(page.get("kanji_analysis", []), result_language), width="stretch")
-                    else:
-                        st.info("Trang này chưa có dữ liệu Kanji riêng.")
+            render_important_vocabulary(page.get("vocabulary_important", []))
+            
+            if result_language == "japanese":
+                st.subheader("漢字 Kanji")
+                if page.get("kanji_analysis"):
+                    st.dataframe(display_rows(page.get("kanji_analysis", []), result_language), width="stretch")
                 else:
-                    st.subheader("Cụm từ & thành ngữ trang")
-                    if page.get("phrasal_collocations"):
-                        st.dataframe(display_rows(page.get("phrasal_collocations", []), result_language), width="stretch")
-                    else:
-                        st.info("Trang này chưa có cụm động từ/collocation riêng.")
-                st.subheader("Từ nối trang" if result_language == "japanese" else "Từ nối & dấu hiệu diễn ngôn trang")
-                page_marker_key = "connectors" if result_language == "japanese" else "discourse_markers"
-                if page.get(page_marker_key):
-                    st.dataframe(display_rows(page.get(page_marker_key, []), result_language), width="stretch")
-                else:
-                    st.info("Trang này chưa có dữ liệu từ nối riêng.")
-                st.subheader("Ngữ pháp trang")
-                render_grammar_points(page.get("grammar_points", []))
-                st.subheader("Mẫu câu trang")
-                if page.get("sentence_patterns"):
-                    for pattern in page.get("sentence_patterns", []):
-                        with st.expander(f"🔎 {pattern.get('pattern', 'Mẫu câu')}"):
-                            if pattern.get("example"):
-                                st.markdown("**Ví dụ trong bài:**")
-                                st.code(pattern["example"], language=None)
-                            if pattern.get("explanation"):
-                                st.markdown(f"**Giải thích:** {pattern['explanation']}")
-                else:
-                    st.info("Trang này chưa có mẫu câu riêng.")
-                with st.expander("Xem Markdown đầy đủ của trang"):
-                    st.markdown(page.get("full_markdown") or "Không có dữ liệu.")
-    with tab2:
-        st.dataframe(display_rows(analysis["vocabulary_all"], result_language), width="stretch")
-        render_important_vocabulary(analysis["vocabulary_important"])
-    with tab3:
-        if result_language == "japanese":
-            if analysis["kanji_analysis"]:
-                st.dataframe(display_rows(analysis["kanji_analysis"], result_language), width="stretch")
+                    st.info("Trang này chưa có dữ liệu Kanji riêng.")
             else:
-                st.info("Chưa trích xuất được bảng Kanji riêng. Xem nội dung gốc bên dưới.")
-                st.markdown(analysis.get("section_markdown", {}).get("kanji") or "Không có dữ liệu Kanji.")
-        elif analysis.get("phrasal_collocations"):
-            st.subheader("Cụm động từ, collocation, idiom")
-            st.dataframe(display_rows(analysis["phrasal_collocations"], result_language), width="stretch")
-        else:
-            st.info("Chưa trích xuất được bảng cụm động từ/collocation riêng. Xem nội dung gốc bên dưới.")
-            st.markdown(
-                analysis.get("section_markdown", {}).get("phrasal_collocations")
-                or "Không có dữ liệu cụm động từ/collocation."
-            )
-    with tab4:
-        st.subheader("Từ nối câu" if result_language == "japanese" else "Từ nối & dấu hiệu diễn ngôn")
-        marker_key = "connectors" if result_language == "japanese" else "discourse_markers"
-        marker_markdown_key = "connectors" if result_language == "japanese" else "discourse_markers"
-        if analysis.get(marker_key):
-            st.dataframe(display_rows(analysis[marker_key], result_language), width="stretch")
-        else:
-            st.info("Chưa trích xuất được bảng từ nối/dấu hiệu diễn ngôn riêng.")
-            st.markdown(
-                analysis.get("section_markdown", {}).get(marker_markdown_key)
-                or "Không có dữ liệu từ nối/dấu hiệu diễn ngôn."
-            )
-        st.subheader("Điểm ngữ pháp")
-        if analysis["grammar_points"]:
-            render_grammar_points(analysis["grammar_points"])
-        else:
-            st.info("Chưa trích xuất được mục ngữ pháp riêng. Xem nội dung gốc bên dưới.")
-            st.markdown(analysis.get("section_markdown", {}).get("grammar") or "Không có dữ liệu ngữ pháp.")
-    with tab5:
-        st.info("Dùng mục '💾 Lưu kết quả phân tích' phía trên để tải Word, Markdown hoặc JSON.")
-        st.markdown(analysis["full_markdown"])
+                st.subheader("🔗 Cụm từ & thành ngữ")
+                if page.get("phrasal_collocations"):
+                    st.dataframe(display_rows(page.get("phrasal_collocations", []), result_language), width="stretch")
+                else:
+                    st.info("Trang này chưa có cụm động từ/collocation riêng.")
+                    
+            st.subheader("🔗 Từ nối" if result_language == "japanese" else "🔗 Từ nối & dấu hiệu diễn ngôn")
+            page_marker_key = "connectors" if result_language == "japanese" else "discourse_markers"
+            if page.get(page_marker_key):
+                st.dataframe(display_rows(page.get(page_marker_key, []), result_language), width="stretch")
+            else:
+                st.info("Trang này chưa có dữ liệu từ nối riêng.")
+                
+            st.subheader("🧩 Ngữ pháp")
+            render_grammar_points(page.get("grammar_points", []))
+            
+            st.subheader("🔎 Mẫu câu")
+            if page.get("sentence_patterns"):
+                for pattern in page.get("sentence_patterns", []):
+                    with st.expander(f"🔎 {pattern.get('pattern', 'Mẫu câu')}"):
+                        if pattern.get("example"):
+                            st.markdown("**Ví dụ trong bài:**")
+                            st.code(pattern["example"], language=None)
+                        if pattern.get("explanation"):
+                            st.markdown(f"**Giải thích:** {pattern['explanation']}")
+            else:
+                st.info("Trang này chưa có mẫu câu riêng.")
+                
+            with st.expander("💾 Xem Markdown đầy đủ của trang"):
+                st.markdown(page.get("full_markdown") or "Không có dữ liệu.")
