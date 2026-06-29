@@ -54,6 +54,7 @@ for key, default in {
     "session_restored": False,
     "url_scrape_result": None,
     "url_analysis_result": None,
+    "url_last_fetched": "",
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -760,6 +761,12 @@ with tab_url:
         key="url_input_field",
     )
 
+    # Tự động xóa kết quả cũ khi URL thay đổi so với lần tải trước
+    current_url = (url_input or "").strip()
+    if current_url != st.session_state.url_last_fetched:
+        st.session_state.url_scrape_result = None
+        st.session_state.url_analysis_result = None
+
     col_btn1, col_btn2, col_space = st.columns([1.2, 1.5, 4])
     with col_btn1:
         btn_fetch = st.button("📥 Tải bài báo", key="btn_fetch_url",
@@ -775,6 +782,7 @@ with tab_url:
                 scraped = fetch_article(url_input.strip())
                 st.session_state.url_scrape_result = scraped
                 st.session_state.url_analysis_result = None
+                st.session_state.url_last_fetched = url_input.strip()
                 lang_label = "🇯🇵 Tiếng Nhật" if scraped["lang"] == "ja" else "🇬🇧 Tiếng Anh"
                 st.success(f"Tải thành công! Ngôn ngữ phát hiện: {lang_label} | {scraped['word_count']} từ")
             except Exception as e:
@@ -817,7 +825,10 @@ with tab_url:
                 st.error(f"Lỗi phân tích: {e}")
 
     # --- Hiển thị kết quả ---
-    if st.session_state.url_analysis_result:
+    # Chỉ hiển thị nếu kết quả phân tích khớp với bài báo hiện tại
+    _analysis_url = (st.session_state.url_analysis_result or {}).get("_source", {}).get("source_url", "")
+    _scrape_url = (st.session_state.url_scrape_result or {}).get("source_url", "")
+    if st.session_state.url_analysis_result and _analysis_url == _scrape_url:
         url_result = st.session_state.url_analysis_result
         url_src = url_result.get("_source", {})
         url_result_language = "japanese" if url_src.get("lang") == "ja" else "english"
