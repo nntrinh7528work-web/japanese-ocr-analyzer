@@ -49,23 +49,64 @@ def _scrape_with_trafilatura(url: str) -> str | None:
     downloaded = trafilatura.fetch_url(url)
     if not downloaded:
         return None
+    # favor_precision=True helps trafilatura focus on core text and discard secondary elements
     return trafilatura.extract(
         downloaded,
         include_comments=False,
         include_tables=False,
         no_fallback=False,
+        favor_precision=True,
     )
 
 
 def _scrape_with_bs4(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
-    for tag in soup(["script", "style", "nav", "footer", "header", "aside", "form"]):
+    
+    # 1. Decompose completely irrelevant tags
+    garbage_tags = ["script", "style", "nav", "footer", "header", "aside", "form", "iframe", "noscript", "svg"]
+    for tag in soup(garbage_tags):
         tag.decompose()
-    article = soup.find("article") or soup.find("main") or soup.find("body")
+        
+    # 2. Decompose elements with classes or IDs matching common boilerplate/noise patterns
+    noise_pattern = re.compile(
+        r"sidebar|menu|footer|header|nav|widget|ad-|advertisement|share|social|comment|feedback|"
+        r"recommend|related|popular|trending|tag-cloud|newsletter|author-profile|breadcrumb|pagination|"
+        r"cookie|banner|modal|popup|sub-link|button|btn|subscribe",
+        re.I
+    )
+    
+    for element in soup.find_all(attrs={"class": noise_pattern}):
+        element.decompose()
+    for element in soup.find_all(attrs={"id": noise_pattern}):
+        element.decompose()
+
+    # 3. Try to locate the core article body container
+    article = (
+        soup.find("article") 
+        or soup.find("main") 
+        or soup.find(class_=re.compile(r"article-body|entry-content|post-content|story-content|article-content|main-content", re.I))
+    )
+    
     if not article:
-        return soup.get_text(separator="\n")
-    paragraphs = article.find_all(["p", "h1", "h2", "h3"])
-    return "\n".join(p.get_text(strip=True) for p in paragraphs if p.get_text(strip=True))
+        article = soup.find("body") or soup
+
+    # 4. Extract text from paragraph and heading elements
+    paragraphs = article.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6"])
+    
+    cleaned_paras = []
+    for p in paragraphs:
+        text = p.get_text(strip=True)
+        if not text:
+            continue
+        # Skip very short paragraphs (usually sharing cues or UI noise) unless they are headings
+        if len(text) < 20 and not p.name.startswith("h"):
+            continue
+        # Skip paragraphs containing common social/action triggers
+        if any(trigger in text.lower() for trigger in ["chia sẻ", "share this", "theo dõi", "đăng ký", "click here", "read more", "xem thêm"]):
+            continue
+        cleaned_paras.append(text)
+        
+    return "\n\n".join(cleaned_paras)
 
 
 def _get_title(html: str) -> str:

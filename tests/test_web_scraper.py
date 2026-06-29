@@ -22,17 +22,17 @@ def test_has_japanese_false():
 
 
 def test_scrape_bs4_extracts_paragraphs():
-    html = "<html><body><article><p>First para.</p><p>Second para.</p></article></body></html>"
+    html = "<html><body><article><p>This is the first paragraph of the article body.</p><p>This is the second paragraph of the article body.</p></article></body></html>"
     result = _scrape_with_bs4(html)
-    assert "First para." in result
-    assert "Second para." in result
+    assert "first paragraph" in result
+    assert "second paragraph" in result
 
 
 def test_scrape_bs4_removes_nav():
-    html = "<html><body><nav>Menu</nav><article><p>Article text.</p></article></body></html>"
+    html = "<html><body><nav>Menu</nav><article><p>This is the main article text that should be kept.</p></article></body></html>"
     result = _scrape_with_bs4(html)
     assert "Menu" not in result
-    assert "Article text." in result
+    assert "main article text" in result
 
 
 def test_fetch_article_invalid_url():
