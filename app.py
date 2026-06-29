@@ -23,6 +23,7 @@ from modules.ocr_engine import run_ocr
 from modules.result_exporter import analysis_json_bytes, default_export_stem, markdown_bytes, safe_export_stem
 from modules import session_store
 import modules.text_analyzer as text_analyzer
+from modules.web_scraper import fetch_article
 
 
 text_analyzer = importlib.reload(text_analyzer)
@@ -51,6 +52,8 @@ for key, default in {
     "camera_version": 0,
     "session_id": None,
     "session_restored": False,
+    "url_scrape_result": None,
+    "url_analysis_result": None,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -745,3 +748,131 @@ if st.session_state.analysis:
                 
             with st.expander("💾 Xem Markdown đầy đủ của trang"):
                 st.markdown(page.get("full_markdown") or "Không có dữ liệu.")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🌐 URL Article Analysis Section
+# ═══════════════════════════════════════════════════════════════════════════════
+
+st.divider()
+st.header("🌐 Phân Tích Bài Báo Từ URL")
+st.caption("Hỗ trợ: NHK, Asahi, Mainichi, BBC, Reuters, Japan Times và hầu hết báo lớn")
+
+url_input = st.text_input(
+    "Dán link bài báo:",
+    placeholder="https://www3.nhk.or.jp/news/html/...",
+    key="url_input_field",
+)
+
+col_btn1, col_btn2, col_space = st.columns([1.2, 1.5, 4])
+with col_btn1:
+    btn_fetch = st.button("📥 Tải bài báo", key="btn_fetch_url",
+                          disabled=not url_input)
+with col_btn2:
+    btn_analyze = st.button("🔍 Phân tích", key="btn_analyze_url",
+                            disabled=not st.session_state.url_scrape_result)
+
+# --- BƯỚC 1: Scrape bài báo ---
+if btn_fetch and url_input:
+    with st.spinner("Đang tải nội dung bài báo..."):
+        try:
+            scraped = fetch_article(url_input.strip())
+            st.session_state.url_scrape_result = scraped
+            st.session_state.url_analysis_result = None
+            lang_label = "🇯🇵 Tiếng Nhật" if scraped["lang"] == "ja" else "🇬🇧 Tiếng Anh"
+            st.success(f"Tải thành công! Ngôn ngữ phát hiện: {lang_label} | {scraped['word_count']} từ")
+        except Exception as e:
+            st.error(f"Lỗi: {e}")
+
+# --- Preview nội dung ---
+if st.session_state.url_scrape_result:
+    r = st.session_state.url_scrape_result
+    lang_badge = "🇯🇵 Tiếng Nhật" if r["lang"] == "ja" else "🇬🇧 Tiếng Anh"
+    st.markdown(f"**📰 Tiêu đề:** {r['title']}")
+    st.markdown(f"**🔗 Nguồn:** {r['source_url']}")
+    st.markdown(f"**🌍 Ngôn ngữ:** {lang_badge} | **Số từ:** {r['word_count']} | **Ký tự:** {r['char_count']}")
+
+    with st.expander("📄 Xem nội dung đã trích xuất (có thể chỉnh sửa trước khi phân tích)"):
+        edited_text = st.text_area(
+            "Nội dung bài báo:",
+            value=r["clean_text"],
+            height=300,
+            key="url_editable_text",
+        )
+        if edited_text != r["clean_text"]:
+            if st.button("💾 Lưu chỉnh sửa", key="btn_save_edit"):
+                st.session_state.url_scrape_result["clean_text"] = edited_text
+                st.session_state.url_scrape_result["word_count"] = len(edited_text.split())
+                st.success("Đã lưu!")
+
+# --- BƯỚC 2: Phân tích ---
+if btn_analyze and st.session_state.url_scrape_result:
+    r = st.session_state.url_scrape_result
+    with st.spinner("Đang phân tích văn bản... (có thể mất 30–60 giây)"):
+        try:
+            url_lang = "japanese" if r["lang"] == "ja" else "english"
+            url_analysis = text_analyzer.run_analysis(
+                r["clean_text"], [], analysis_language=url_lang
+            )
+            url_analysis["_source"] = r
+            st.session_state.url_analysis_result = url_analysis
+            st.success("Phân tích hoàn tất!")
+        except Exception as e:
+            st.error(f"Lỗi phân tích: {e}")
+
+# --- Hiển thị kết quả ---
+if st.session_state.url_analysis_result:
+    url_result = st.session_state.url_analysis_result
+    url_src = url_result.get("_source", {})
+    url_result_language = "japanese" if url_src.get("lang") == "ja" else "english"
+
+    st.divider()
+    st.markdown("### 📊 Báo Cáo Phân Tích")
+    st.markdown(f"**Nguồn:** [{url_src.get('title', url_src.get('source_url', ''))}]({url_src.get('source_url', '')})")
+    st.markdown(f"**Tóm tắt:** {url_result.get('summary', '')}")
+
+    st.subheader("📝 Nội dung xác nhận")
+    st.write(url_result.get("confirmed_text") or "Không có văn bản xác nhận.")
+    st.info(url_result.get("summary") or "Không có tóm tắt.")
+
+    st.subheader("📊 Từ vựng")
+    if url_result.get("vocabulary_all"):
+        st.dataframe(display_rows(url_result.get("vocabulary_all", []), url_result_language), width="stretch")
+    render_important_vocabulary(url_result.get("vocabulary_important", []))
+
+    if url_result_language == "japanese":
+        st.subheader("漢字 Kanji")
+        if url_result.get("kanji_analysis"):
+            st.dataframe(display_rows(url_result.get("kanji_analysis", []), url_result_language), width="stretch")
+        else:
+            st.info("Chưa có dữ liệu Kanji.")
+    else:
+        st.subheader("🔗 Cụm từ & thành ngữ")
+        if url_result.get("phrasal_collocations"):
+            st.dataframe(display_rows(url_result.get("phrasal_collocations", []), url_result_language), width="stretch")
+        else:
+            st.info("Chưa có cụm động từ/collocation.")
+
+    st.subheader("🔗 Từ nối" if url_result_language == "japanese" else "🔗 Từ nối & dấu hiệu diễn ngôn")
+    url_marker_key = "connectors" if url_result_language == "japanese" else "discourse_markers"
+    if url_result.get(url_marker_key):
+        st.dataframe(display_rows(url_result.get(url_marker_key, []), url_result_language), width="stretch")
+    else:
+        st.info("Chưa có dữ liệu từ nối.")
+
+    st.subheader("🧩 Ngữ pháp")
+    render_grammar_points(url_result.get("grammar_points", []))
+
+    st.subheader("🔎 Mẫu câu")
+    if url_result.get("sentence_patterns"):
+        for pattern in url_result.get("sentence_patterns", []):
+            with st.expander(f"🔎 {pattern.get('pattern', 'Mẫu câu')}"):
+                if pattern.get("example"):
+                    st.markdown("**Ví dụ trong bài:**")
+                    st.code(pattern["example"], language=None)
+                if pattern.get("explanation"):
+                    st.markdown(f"**Giải thích:** {pattern['explanation']}")
+    else:
+        st.info("Chưa có mẫu câu.")
+
+    with st.expander("💾 Xem Markdown đầy đủ"):
+        st.markdown(url_result.get("full_markdown") or "Không có dữ liệu.")
