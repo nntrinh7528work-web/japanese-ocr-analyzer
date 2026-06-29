@@ -49,64 +49,81 @@ def _scrape_with_trafilatura(url: str) -> str | None:
     downloaded = trafilatura.fetch_url(url)
     if not downloaded:
         return None
-    # favor_precision=True helps trafilatura focus on core text and discard secondary elements
     return trafilatura.extract(
         downloaded,
         include_comments=False,
         include_tables=False,
-        no_fallback=False,
-        favor_precision=True,
+        deduplicate=True,
     )
 
 
 def _scrape_with_bs4(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
-    
-    # 1. Decompose completely irrelevant tags
-    garbage_tags = ["script", "style", "nav", "footer", "header", "aside", "form", "iframe", "noscript", "svg"]
-    for tag in soup(garbage_tags):
+
+    # 1. Xóa các thẻ hoàn toàn không liên quan tới nội dung
+    for tag in soup(["script", "style", "form", "iframe", "noscript", "svg"]):
         tag.decompose()
-        
-    # 2. Decompose elements with classes or IDs matching common boilerplate/noise patterns
-    noise_pattern = re.compile(
-        r"sidebar|menu|footer|header|nav|widget|ad-|advertisement|share|social|comment|feedback|"
-        r"recommend|related|popular|trending|tag-cloud|newsletter|author-profile|breadcrumb|pagination|"
-        r"cookie|banner|modal|popup|sub-link|button|btn|subscribe",
-        re.I
-    )
-    
-    for element in soup.find_all(attrs={"class": noise_pattern}):
-        element.decompose()
-    for element in soup.find_all(attrs={"id": noise_pattern}):
-        element.decompose()
 
-    # 3. Try to locate the core article body container
-    article = (
-        soup.find("article") 
-        or soup.find("main") 
-        or soup.find(class_=re.compile(r"article-body|entry-content|post-content|story-content|article-content|main-content", re.I))
+    # 2. Tìm container chứa bài báo TRƯỚC — không lọc noise toàn trang
+    article_container = (
+        soup.find("article")
+        or soup.find("main")
+        or soup.find(class_=re.compile(
+            r"article[_-]body|entry[_-]content|post[_-]content|story[_-]body|"
+            r"article[_-]content|main[_-]content|post[_-]body|news[_-]body|"
+            r"article[_-]text|content[_-]body|story[_-]text",
+            re.I,
+        ))
+        or soup.find(id=re.compile(
+            r"article[_-]body|entry[_-]content|post[_-]content|article[_-]content|"
+            r"main[_-]content|post[_-]body|news[_-]body|article[_-]text|content[_-]body",
+            re.I,
+        ))
     )
-    
-    if not article:
-        article = soup.find("body") or soup
 
-    # 4. Extract text from paragraph and heading elements
-    paragraphs = article.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6"])
-    
+    if article_container:
+        # 3a. Chỉ lọc noise bên TRONG container bài báo (các block phụ nhúng vào bài)
+        inner_noise = re.compile(
+            r"share|social|comment|related|recommend|subscribe|newsletter|"
+            r"advertisement|banner|popup|author[_-]bio|breadcrumb|pagination|"
+            r"tag[_-]list|more[_-]articles|read[_-]next",
+            re.I,
+        )
+        for el in article_container.find_all(attrs={"class": inner_noise}):
+            el.decompose()
+        for el in article_container.find_all(attrs={"id": inner_noise}):
+            el.decompose()
+        for tag in article_container(["nav", "footer", "header", "aside"]):
+            tag.decompose()
+    else:
+        # 3b. Fallback: lọc noise toàn trang rồi dùng body
+        for tag in soup(["nav", "footer", "header", "aside"]):
+            tag.decompose()
+        broad_noise = re.compile(
+            r"sidebar|menu|footer|header|nav|widget|share|social|comment|"
+            r"related|popular|newsletter|cookie|banner|pagination",
+            re.I,
+        )
+        for el in soup.find_all(attrs={"class": broad_noise}):
+            el.decompose()
+        for el in soup.find_all(attrs={"id": broad_noise}):
+            el.decompose()
+        article_container = soup.find("body") or soup
+
+    # 4. Trích xuất đoạn văn bản từ container
+    paragraphs = article_container.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6"])
     cleaned_paras = []
     for p in paragraphs:
         text = p.get_text(strip=True)
         if not text:
             continue
-        # Skip very short paragraphs (usually sharing cues or UI noise) unless they are headings
-        if len(text) < 20 and not p.name.startswith("h"):
-            continue
-        # Skip paragraphs containing common social/action triggers
-        if any(trigger in text.lower() for trigger in ["chia sẻ", "share this", "theo dõi", "đăng ký", "click here", "read more", "xem thêm"]):
+        # Bỏ đoạn quá ngắn (trừ heading) — ngưỡng 10 để tương thích tiếng Nhật (kanji)
+        if len(text) < 10 and not p.name.startswith("h"):
             continue
         cleaned_paras.append(text)
-        
+
     return "\n\n".join(cleaned_paras)
+
 
 
 def _get_title(html: str) -> str:
