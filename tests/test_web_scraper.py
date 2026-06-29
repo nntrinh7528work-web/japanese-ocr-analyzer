@@ -49,21 +49,23 @@ def test_fetch_article_uses_trafilatura(monkeypatch):
         "word_count": 39,
         "char_count": 210,
     }
-    with patch("modules.web_scraper._scrape_with_trafilatura", return_value=mock_result["clean_text"]):
-        with patch("requests.get") as mock_get:
-            mock_get.return_value.text = "<html><head><title>Test Title</title></head></html>"
-            mock_get.return_value.status_code = 200
-            result = fetch_article("https://example.com/article")
-            assert result["lang"] == "en"
-            assert len(result["clean_text"]) > 10
+    with patch("modules.web_scraper._scrape_with_bs4", return_value=""):
+        with patch("modules.web_scraper._scrape_with_trafilatura_html", return_value=mock_result["clean_text"]):
+            with patch("requests.get") as mock_get:
+                mock_get.return_value.text = "<html><head><title>Test Title</title></head></html>"
+                mock_get.return_value.status_code = 200
+                result = fetch_article("https://example.com/article")
+                assert result["lang"] == "en"
+                assert len(result["clean_text"]) > 10
 
 
 def test_fetch_article_short_content_raises():
-    with patch("modules.web_scraper._scrape_with_trafilatura", return_value="too short"):
-        with patch("requests.get") as mock_get:
-            mock_get.return_value.text = "<html><body><p>x</p></body></html>"
-            mock_get.return_value.status_code = 200
-            mock_get.return_value.encoding = "utf-8"
-            mock_get.return_value.apparent_encoding = "utf-8"
-            with pytest.raises(RuntimeError):
-                fetch_article("https://example.com/short")
+    with patch("modules.web_scraper._scrape_with_bs4", return_value=""):
+        with patch("modules.web_scraper._scrape_with_trafilatura_html", return_value="too short"):
+            with patch("requests.get") as mock_get:
+                mock_get.return_value.text = "<html><body><p>x</p></body></html>"
+                mock_get.return_value.status_code = 200
+                mock_get.return_value.encoding = "utf-8"
+                mock_get.return_value.apparent_encoding = "utf-8"
+                with pytest.raises(RuntimeError):
+                    fetch_article("https://example.com/short")
