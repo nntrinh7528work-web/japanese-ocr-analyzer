@@ -418,8 +418,16 @@ def _analyze_chunk(model: Any, text: str, notes: list, analysis_language: str = 
         try:
             response = model.generate_content(
                 prompt,
-                generation_config={"temperature": 0.1, "max_output_tokens": 65536},
+                generation_config={
+                    "temperature": 0.1,
+                    "max_output_tokens": 16384,
+                },
             )
+
+            candidates = getattr(response, "candidates", None)
+            finish_reason = getattr(candidates[0], "finish_reason", None) if candidates else None
+            if finish_reason == 2:  # MAX_TOKENS — response bị cắt giữa đường
+                raise ValueError("Response bị cắt do vượt giới hạn token, cần thử lại.")
             if not response.text or not response.text.strip():
                 raise ValueError("Gemini không trả về nội dung phân tích.")
             parsed = parse_analysis_response(response.text, language)
@@ -437,7 +445,7 @@ def _analyze_chunk(model: Any, text: str, notes: list, analysis_language: str = 
     raise RuntimeError(f"Phân tích thất bại sau 3 lần thử: {last_error}") from last_error
 
 
-def _split_text(text: str, max_chars: int = 8000) -> list[str]:
+def _split_text(text: str, max_chars: int = 2500) -> list[str]:
     if len(text) <= max_chars:
         return [text]
     chunks = []
@@ -538,13 +546,19 @@ def _merge_analysis_results(results: list[dict[str, Any]], analysis_language: st
 
 
 def run_analysis(japanese_text: str, ocr_notes: list, analysis_language: str = "english") -> dict[str, Any]:
-    """Analyze Japanese or English text, splitting and merging input longer than 8,000 chars."""
+    """Analyze Japanese or English text, splitting and merging input longer than 2,500 chars."""
     if not japanese_text or not japanese_text.strip():
         raise ValueError("Văn bản phân tích không được rỗng.")
     language = _analysis_language(analysis_language)
     model = _init_model()
     results = [_analyze_chunk(model, chunk, ocr_notes, language) for chunk in _split_text(japanese_text.strip())]
-    return _merge_analysis_results(results, language)
+    merged = _merge_analysis_results(results, language)
+
+    # Đánh lại số thứ tự liên tục cho vocabulary_all (tránh 1,2,3...1,2,3...)
+    for index, row in enumerate(merged["vocabulary_all"], 1):
+        row["num"] = str(index)
+
+    return merged
 
 
 def analyze_single_page(

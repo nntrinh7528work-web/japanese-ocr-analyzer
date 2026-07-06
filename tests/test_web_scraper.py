@@ -2,7 +2,7 @@
 
 import pytest
 from unittest.mock import patch, MagicMock
-from modules.web_scraper import detect_language, fetch_article, _has_japanese, _scrape_with_bs4
+from modules.web_scraper import detect_language, fetch_article, _has_japanese
 
 
 def test_detect_japanese():
@@ -21,51 +21,46 @@ def test_has_japanese_false():
     assert _has_japanese("Hello world") is False
 
 
-def test_scrape_bs4_extracts_paragraphs():
-    html = "<html><body><article><p>This is the first paragraph of the article body.</p><p>This is the second paragraph of the article body.</p></article></body></html>"
-    result = _scrape_with_bs4(html)
-    assert "first paragraph" in result
-    assert "second paragraph" in result
-
-
-def test_scrape_bs4_removes_nav():
-    html = "<html><body><nav>Menu</nav><article><p>This is the main article text that should be kept.</p></article></body></html>"
-    result = _scrape_with_bs4(html)
-    assert "Menu" not in result
-    assert "main article text" in result
-
-
 def test_fetch_article_invalid_url():
-    with pytest.raises(ValueError, match="http"):
+    with pytest.raises(ValueError, match="URL"):
         fetch_article("not-a-url")
 
 
-def test_fetch_article_uses_trafilatura(monkeypatch):
-    mock_result = {
-        "title": "Test Title",
-        "clean_text": "This is a test article with enough content to pass validation checks. " * 3,
-        "lang": "en",
-        "source_url": "https://example.com/article",
-        "word_count": 39,
-        "char_count": 210,
-    }
-    with patch("modules.web_scraper._scrape_with_bs4", return_value=""):
-        with patch("modules.web_scraper._scrape_with_trafilatura_html", return_value=mock_result["clean_text"]):
-            with patch("requests.get") as mock_get:
-                mock_get.return_value.text = "<html><head><title>Test Title</title></head></html>"
-                mock_get.return_value.status_code = 200
-                result = fetch_article("https://example.com/article")
-                assert result["lang"] == "en"
-                assert len(result["clean_text"]) > 10
+@patch("modules.web_scraper._try_fundus")
+@patch("modules.web_scraper._try_newspaper")
+@patch("modules.web_scraper._try_trafilatura")
+@patch("modules.web_scraper._get_html")
+@patch("modules.web_scraper._try_readability")
+def test_fetch_article_success(
+    mock_readability, mock_get_html, mock_trafilatura, mock_newspaper, mock_fundus
+):
+    # Set all tiers except readability to raise an exception
+    mock_fundus.side_effect = Exception("Fundus error")
+    mock_newspaper.side_effect = Exception("Newspaper error")
+    mock_trafilatura.side_effect = Exception("Trafilatura error")
+    mock_get_html.return_value = ("<html><body>Mock HTML</body></html>", "Mock Title")
+    mock_readability.return_value = ("Mock Title", "This is a mock article content with sufficient length to be valid. " * 3)
+
+    result = fetch_article("https://example.com/article")
+    assert result["title"] == "Mock Title"
+    assert "mock article content" in result["clean_text"]
+    assert result["lang"] == "en"
+    assert result["extraction_method"] == "readability-lxml"
 
 
-def test_fetch_article_short_content_raises():
-    with patch("modules.web_scraper._scrape_with_bs4", return_value=""):
-        with patch("modules.web_scraper._scrape_with_trafilatura_html", return_value="too short"):
-            with patch("requests.get") as mock_get:
-                mock_get.return_value.text = "<html><body><p>x</p></body></html>"
-                mock_get.return_value.status_code = 200
-                mock_get.return_value.encoding = "utf-8"
-                mock_get.return_value.apparent_encoding = "utf-8"
-                with pytest.raises(RuntimeError):
-                    fetch_article("https://example.com/short")
+@patch("modules.web_scraper._try_fundus")
+@patch("modules.web_scraper._try_newspaper")
+@patch("modules.web_scraper._try_trafilatura")
+@patch("modules.web_scraper._get_html")
+@patch("modules.web_scraper._try_readability")
+def test_fetch_article_all_fail(
+    mock_readability, mock_get_html, mock_trafilatura, mock_newspaper, mock_fundus
+):
+    mock_fundus.side_effect = Exception("Fundus error")
+    mock_newspaper.side_effect = Exception("Newspaper error")
+    mock_trafilatura.side_effect = Exception("Trafilatura error")
+    mock_get_html.side_effect = Exception("HTML fetch error")
+    mock_readability.side_effect = Exception("Readability error")
+
+    with pytest.raises(RuntimeError, match="Không thể trích xuất nội dung bài báo"):
+        fetch_article("https://example.com/article")

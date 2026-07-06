@@ -241,14 +241,15 @@ def test_run_analysis_and_long_text_merge(monkeypatch):
             )
 
     monkeypatch.setattr(text_analyzer, "_init_model", lambda: Model())
-    # Text must exceed 8000 chars to trigger chunk splitting.
+    # Text must exceed 2500 chars to trigger chunk splitting.
     result = text_analyzer.run_analysis("A" * 8001, [])
     # Deduplication removes identical vocab/phrasal rows across chunks.
     assert len(result["vocabulary_all"]) == 3
     assert len(result["phrasal_collocations"]) == 1
-    assert result["usage"]["input_tokens"] == 20
-    assert result["usage"]["output_tokens"] == 40
-    assert result["usage"]["candidate_tokens"] == 40
+    # 8001 chars / 2500 max_chars = 4 chunks, each contributing 10 input tokens.
+    assert result["usage"]["input_tokens"] == 40
+    assert result["usage"]["output_tokens"] == 80
+    assert result["usage"]["candidate_tokens"] == 80
     assert result["usage"]["thinking_tokens"] == 0
 
 
@@ -313,7 +314,7 @@ Content was cut before section 7.
 
     class Model:
         def generate_content(self, _prompt, generation_config):
-            assert generation_config["max_output_tokens"] == 65536
+            assert generation_config["max_output_tokens"] == 16384
             return SimpleNamespace(text=truncated, usage_metadata=None)
 
     monkeypatch.setattr(text_analyzer, "_init_model", lambda: Model())
