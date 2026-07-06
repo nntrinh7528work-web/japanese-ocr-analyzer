@@ -23,6 +23,7 @@ from modules.ocr_engine import run_ocr
 from modules.result_exporter import analysis_json_bytes, default_export_stem, markdown_bytes, safe_export_stem
 from modules import session_store
 import modules.text_analyzer as text_analyzer
+from modules.dialogue_generator import generate_dialogue, suggest_topics
 
 import subprocess
 import sys as _sys
@@ -59,6 +60,8 @@ for key, default in {
     "session_id": None,
     "session_restored": False,
     "current_job_id": None,
+    "recent_topics": [],
+    "dialogue_result": None,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -413,7 +416,7 @@ with st.sidebar.expander("💡 Luồng sử dụng"):
     st.write("3. OCR từng trang hoặc OCR toàn bộ.")
     st.write("4. Phân tích chung tất cả nội dung đã OCR.")
 
-tab_ocr = st.container()
+tab_ocr, tab_dialogue = st.tabs(["📷 Phân tích từ Ảnh / PDF", "💬 Luyện Hội Thoại"])
 
 with tab_ocr:
     with st.expander("➕ Thêm ảnh hoặc PDF vào bộ phân tích", expanded=not items):
@@ -779,3 +782,69 @@ with tab_ocr:
                     with st.expander("💾 Xem Markdown đầy đủ của trang"):
                         st.markdown(page.get("full_markdown") or "Không có dữ liệu.")
 
+with tab_dialogue:
+    st.subheader("💬 Luyện Hội Thoại Hằng Ngày")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        dlg_language = st.selectbox("Ngôn ngữ:", ["Tiếng Nhật", "Tiếng Anh"], key="dlg_lang")
+    with col2:
+        dlg_level = st.selectbox("Cấp độ:", ["Sơ cấp", "Trung cấp", "Cao cấp"], key="dlg_level")
+
+    if st.button("🎲 Gợi ý chủ đề hôm nay", key="btn_suggest_topic"):
+        with st.spinner("Đang tìm chủ đề..."):
+            topics = suggest_topics(dlg_language, dlg_level, st.session_state.recent_topics)
+            st.session_state.suggested_topics = topics
+
+    if st.session_state.get("suggested_topics"):
+        for t in st.session_state.suggested_topics:
+            if st.button(f"📌 {t['topic']}", key=f"topic_{t['topic']}"):
+                st.session_state.selected_topic = t["topic"]
+
+    topic_input = st.text_input(
+        "Hoặc nhập chủ đề của riêng bạn:",
+        value=st.session_state.get("selected_topic", ""),
+        key="dlg_topic_input",
+    )
+
+    vocab_input = st.text_area(
+        "Từ vựng muốn luyện (mỗi từ 1 dòng, có thể để trống):",
+        key="dlg_vocab_input", height=80,
+    )
+    grammar_input = st.text_area(
+        "Cấu trúc ngữ pháp muốn luyện (mỗi cấu trúc 1 dòng, có thể để trống):",
+        key="dlg_grammar_input", height=80,
+    )
+
+    if st.button("✨ Tạo hội thoại", key="btn_generate_dialogue", disabled=not topic_input):
+        vocab_list = [v.strip() for v in vocab_input.splitlines() if v.strip()]
+        grammar_list = [g.strip() for g in grammar_input.splitlines() if g.strip()]
+        with st.spinner("Đang tạo hội thoại..."):
+            try:
+                result = generate_dialogue(
+                    topic_input, dlg_language, vocab_list, grammar_list, dlg_level
+                )
+                st.session_state.dialogue_result = result
+                st.session_state.recent_topics.append(topic_input)
+                if not result["fully_covered"]:
+                    st.warning("Một số từ/ngữ pháp chưa được dùng hết, nhưng đây là bản tốt nhất.")
+            except Exception as e:
+                st.error(f"Lỗi: {e}")
+
+    if st.session_state.dialogue_result:
+        r = st.session_state.dialogue_result
+        st.markdown(f"### 📖 Chủ đề: {r['topic']}")
+        for turn in r["dialogue"]:
+            icon = "🗣️" if turn["speaker"] == "A" else "💭"
+            st.markdown(f"**{icon} {turn['speaker']}:** {turn['text']}")
+            st.caption(turn["text_vi"])
+            if turn["highlights"]:
+                st.caption(f"🎯 Dùng: {', '.join(turn['highlights'])}")
+
+        with st.expander("✅ Kiểm tra độ phủ từ vựng/ngữ pháp"):
+            for target, covered in r["coverage_check"].items():
+                icon = "✅" if covered else "❌"
+                st.markdown(f"{icon} {target}")
+
+        if r["notes"]:
+            st.info(r["notes"])

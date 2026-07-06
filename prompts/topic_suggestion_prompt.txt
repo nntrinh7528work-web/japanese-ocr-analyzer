@@ -1,0 +1,14 @@
+Gợi ý 5 chủ đề hội thoại hằng ngày phù hợp để luyện {language},
+cấp độ {level}. Ưu tiên chủ đề thực tế, gần gũi đời sống
+(mua sắm, nhà hàng, công việc, giao thông, sức khỏe, du lịch, thời tiết,
+gia đình, sở thích, công nghệ). Tránh lặp lại các chủ đề đã luyện gần đây: {recent_topics}
+
+Xuất theo format:
+
+---TOPICS_START---
+1. [chủ đề] - [1 câu mô tả ngắn tại sao chủ đề này hữu ích]
+2. [chủ đề] - [mô tả]
+3. [chủ đề] - [mô tả]
+4. [chủ đề] - [mô tả]
+5. [chủ đề] - [mô tả]
+---TOPICS_END---

@@ -1,0 +1,43 @@
+Bạn là giáo viên ngôn ngữ. Hãy tạo một đoạn hội thoại tự nhiên, thực tế,
+sử dụng ĐÚNG các yêu cầu sau:
+
+Chủ đề: {topic}
+Ngôn ngữ: {language}
+Độ dài: 8-12 lượt nói (turns), giữa 2 người A và B
+Cấp độ: {level}
+
+Từ vựng BẮT BUỘC phải xuất hiện (mỗi từ dùng ít nhất 1 lần):
+{vocab_list}
+
+Cấu trúc ngữ pháp BẮT BUỘC phải xuất hiện (mỗi cấu trúc dùng ít nhất 1 lần):
+{grammar_list}
+
+QUY TẮC QUAN TRỌNG:
+- Hội thoại phải tự nhiên như người thật nói, không gượng gạo
+- Mỗi từ vựng/ngữ pháp bắt buộc phải được dùng ĐÚNG NGỮ CẢNH, không nhồi nhét
+- Sau mỗi câu có từ/ngữ pháp mục tiêu, đánh dấu bằng 【 】
+- Cung cấp bản dịch tiếng Việt cho MỖI câu
+
+Xuất kết quả theo format CHÍNH XÁC sau:
+
+---DIALOGUE_START---
+A: [câu tiếng Nhật/Anh có 【từ mục tiêu】nếu có]
+A_VI: [dịch tiếng Việt]
+B: [câu tiếp theo]
+B_VI: [dịch tiếng Việt]
+... (tiếp tục cho đến hết)
+---DIALOGUE_END---
+
+---VOCAB_CHECK_START---
+[từ 1]: đã dùng ở câu số [x]
+[từ 2]: đã dùng ở câu số [x]
+---VOCAB_CHECK_END---
+
+---GRAMMAR_CHECK_START---
+[cấu trúc 1]: đã dùng ở câu số [x]
+[cấu trúc 2]: đã dùng ở câu số [x]
+---GRAMMAR_CHECK_END---
+
+---NOTES_START---
+[Giải thích ngắn về cách dùng từ vựng/ngữ pháp trong ngữ cảnh hội thoại này]
+---NOTES_END---
