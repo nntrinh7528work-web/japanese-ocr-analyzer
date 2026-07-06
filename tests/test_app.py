@@ -17,7 +17,7 @@ def test_app_starts_without_upload():
     assert not app.exception
     assert app.title[0].value == "🔍 Japanese / English OCR Analyzer"
     assert any("một hoặc nhiều ảnh/PDF" in item.value for item in app.info)
-    assert len(app.tabs) == 4
+    assert len(app.tabs) == 2
 
 
 def test_app_renders_two_independent_image_flows():

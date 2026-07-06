@@ -22,14 +22,7 @@ def run_job(job_id: str, text: str, lang: str):
             pages = pages_data.get("pages", [])
             analysis_lang = "japanese" if lang == "pdf_ja" else "english"
             result = run_page_analyses(pages, analysis_language=analysis_lang)
-        elif lang.startswith("url_"):
-            # URL analysis
-            url_data = json.loads(text)
-            url_text = url_data.get("text", "")
-            url_source = url_data.get("source", {})
-            analysis_lang = "japanese" if lang == "url_ja" else "english"
-            result = run_analysis(url_text, [], analysis_language=analysis_lang)
-            result["_source"] = url_source
+
         else:
             # Fallback direct text analysis
             analysis_lang = "japanese" if lang in ("ja", "japanese") else "english"
