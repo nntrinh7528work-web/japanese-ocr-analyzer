@@ -7,4 +7,6 @@ tests/test_output.docx
 .venv/
 *.log
 data/
+jobs.db
+worker_error.log
 

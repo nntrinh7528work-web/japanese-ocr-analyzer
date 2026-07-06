@@ -25,6 +25,13 @@ from modules import session_store
 import modules.text_analyzer as text_analyzer
 from modules.web_scraper import fetch_article
 
+import subprocess
+import sys as _sys
+import json
+from pathlib import Path
+from modules.job_store import create_job, get_job
+
+
 
 text_analyzer = importlib.reload(text_analyzer)
 
@@ -55,6 +62,7 @@ for key, default in {
     "url_scrape_result": None,
     "url_analysis_result": None,
     "url_last_fetched": "",
+    "current_job_id": None,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -108,6 +116,38 @@ def _persist_analysis() -> None:
             st.session_state.partial_page_analyses,
         )
         session_store.update_session_timestamp(sid)
+
+
+_WORKER_PATH = str(Path(__file__).resolve().parent / "worker.py")
+_PROJECT_DIR = str(Path(__file__).resolve().parent)
+
+
+# ── Check background job status if job_id is present ─────────────────────
+job_id_from_url = st.query_params.get("job_id")
+if job_id_from_url:
+    job = get_job(job_id_from_url)
+    if job:
+        if job["status"] == "done":
+            st.success("Phân tích đã hoàn tất!")
+            if job["lang"] in ("pdf_ja", "pdf_en"):
+                if st.session_state.analysis is None:
+                    st.session_state.analysis = job["result"]
+                    _persist_analysis()
+            else:
+                if st.session_state.url_analysis_result is None:
+                    st.session_state.url_analysis_result = job["result"]
+                    st.session_state.url_scrape_result = job["result"].get("_source")
+        elif job["status"] == "running":
+            st.warning("⏳ Đang phân tích trong nền, vui lòng tải lại trang sau vài giây...")
+            st.button("🔄 Tải lại")
+        elif job["status"] == "failed":
+            st.error(f"Phân tích thất bại: {job['error']}")
+            if st.button("🔄 Thử lại"):
+                del st.query_params["job_id"]
+                st.rerun()
+        else:
+            st.info("⏳ Đang chờ xử lý...")
+            st.button("🔄 Tải lại")
 
 
 COLUMN_LABELS = {
@@ -237,6 +277,8 @@ def render_grammar_points(items: list[dict]) -> None:
 def clear_analysis() -> None:
     st.session_state.analysis = None
     st.session_state.partial_page_analyses = []
+    if "job_id" in st.query_params:
+        del st.query_params["job_id"]
     _persist_analysis()
 
 
@@ -605,30 +647,24 @@ with tab_ocr:
 
             if st.button("🧠 Phân tích từng trang đã OCR", type="primary", width="stretch"):
                 st.session_state.partial_page_analyses = []
-                try:
-                    progress = st.progress(0, text=f"Đang phân tích chi tiết {len(pages_to_analyze)} trang/ảnh...")
-
-                    def _progress_cb(done: int, total: int, name: str) -> None:
-                        progress.progress(done / total, text=f"Đã phân tích {done}/{total}: {name}")
-
-                    def _page_done(page_result: dict) -> None:
-                        st.session_state.partial_page_analyses = list(
-                            st.session_state.partial_page_analyses
-                        ) + [page_result]
-                        _persist_analysis()
-
-                    st.session_state.analysis = text_analyzer.run_page_analyses(
-                        pages_to_analyze,
-                        analysis_language=analysis_language,
-                        progress_callback=_progress_cb,
-                        page_done_callback=_page_done,
-                    )
-                    st.session_state.partial_page_analyses = []
-                    _persist_analysis()
-                    progress.empty()
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"❌ Lỗi phân tích: {exc}")
+                _persist_analysis()
+                detected_lang = "pdf_ja" if analysis_language == "japanese" else "pdf_en"
+                input_data = {
+                    "pages": pages_to_analyze
+                }
+                input_text = json.dumps(input_data)
+                job_id = create_job(input_text, detected_lang)
+                subprocess.Popen(
+                    [_sys.executable, _WORKER_PATH, job_id],
+                    stdout=subprocess.DEVNULL,
+                    stderr=open(_PROJECT_DIR + "/worker_error.log", "a"),
+                    cwd=_PROJECT_DIR,
+                )
+                st.session_state.current_job_id = job_id
+                st.query_params["job_id"] = job_id
+                st.success(f"Đã bắt đầu phân tích! Job ID: {job_id}")
+                st.info("Bạn có thể đóng tab này — kết quả sẽ được lưu lại. Mở lại link có job_id để xem kết quả.")
+                st.rerun()
 
         if st.session_state.analysis:
             analysis = st.session_state.analysis
@@ -766,6 +802,8 @@ with tab_url:
     if current_url != st.session_state.url_last_fetched:
         st.session_state.url_scrape_result = None
         st.session_state.url_analysis_result = None
+        if "job_id" in st.query_params:
+            del st.query_params["job_id"]
 
     col_btn1, col_btn2, col_space = st.columns([1.2, 1.5, 4])
     with col_btn1:
@@ -812,17 +850,24 @@ with tab_url:
     # --- BƯỚC 2: Phân tích ---
     if btn_analyze and st.session_state.url_scrape_result:
         r = st.session_state.url_scrape_result
-        with st.spinner("Đang phân tích văn bản... (có thể mất 30–60 giây)"):
-            try:
-                url_lang = "japanese" if r["lang"] == "ja" else "english"
-                url_analysis = text_analyzer.run_analysis(
-                    r["clean_text"], [], analysis_language=url_lang
-                )
-                url_analysis["_source"] = r
-                st.session_state.url_analysis_result = url_analysis
-                st.success("Phân tích hoàn tất!")
-            except Exception as e:
-                st.error(f"Lỗi phân tích: {e}")
+        detected_lang = "url_ja" if r["lang"] == "ja" else "url_en"
+        input_data = {
+            "text": r["clean_text"],
+            "source": r
+        }
+        input_text = json.dumps(input_data)
+        job_id = create_job(input_text, detected_lang)
+        subprocess.Popen(
+            [_sys.executable, _WORKER_PATH, job_id],
+            stdout=subprocess.DEVNULL,
+            stderr=open(_PROJECT_DIR + "/worker_error.log", "a"),
+            cwd=_PROJECT_DIR,
+        )
+        st.session_state.current_job_id = job_id
+        st.query_params["job_id"] = job_id
+        st.success(f"Đã bắt đầu phân tích! Job ID: {job_id}")
+        st.info("Bạn có thể đóng tab này — kết quả sẽ được lưu lại. Mở lại link có job_id để xem kết quả.")
+        st.rerun()
 
     # --- Hiển thị kết quả ---
     # Chỉ hiển thị nếu kết quả phân tích khớp với bài báo hiện tại
