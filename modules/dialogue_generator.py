@@ -46,11 +46,11 @@ def suggest_topics(language: str, level: str = "trung bình", recent_topics: lis
 
 def _parse_dialogue(text: str) -> list[dict[str, str]]:
     section = _section(text, "DIALOGUE")
-    lines = [l for l in section.splitlines() if l.strip()]
+    lines = [l.strip() for l in section.splitlines() if l.strip()]
     turns = []
     i = 0
     while i < len(lines):
-        speaker_match = re.match(r"^([AB]):\s*(.+)$", lines[i])
+        speaker_match = re.match(r"^(?:\*\*)?([AB])(?:\*\*)?\s*:\s*(.+)$", lines[i])
         if speaker_match:
             turn = {
                 "speaker": speaker_match.group(1),
@@ -60,8 +60,8 @@ def _parse_dialogue(text: str) -> list[dict[str, str]]:
                 "text_vi": ""
             }
             i += 1
-            while i < len(lines) and re.match(r"^[AB]_(HIRA|VI):\s*(.+)$", lines[i]):
-                sub_match = re.match(r"^[AB]_(HIRA|VI):\s*(.+)$", lines[i])
+            while i < len(lines) and re.match(r"^(?:\*\*)?[AB]_(HIRA|VI)(?:\*\*)?\s*:\s*(.+)$", lines[i]):
+                sub_match = re.match(r"^(?:\*\*)?[AB]_(HIRA|VI)(?:\*\*)?\s*:\s*(.+)$", lines[i])
                 if sub_match.group(1) == "HIRA":
                     turn["text_hira"] = sub_match.group(2)
                 elif sub_match.group(1) == "VI":

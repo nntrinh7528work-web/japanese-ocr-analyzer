@@ -1,0 +1,98 @@
+{
+  "raw_text": "---DIALOGUE_START---\nA: もしもし、すみません。そちらで今晩の【予約】をしたいのですが。\nA_HIRA: もしもし、すみません。そちらでこんばんのよやくをしたいのですが。\nA_VI: Alo, xin lỗi. Tôi muốn đặt bàn cho tối nay ạ.\nB: はい、かしこまりました。何名様で、何時頃のご希望でしょうか？\nB_HIRA: はい、かしこまりました。なんめいさまで、なんじごろのごきぼうでしょうか？\nB_VI: Vâng, tôi hiểu rồi ạ. Quý khách đi bao nhiêu người và muốn đặt vào khoảng mấy giờ ạ?\nA: 4名で、7時半頃を希望しています。窓際の【テーブル】は空いていますか？\nA_HIRA: よんめいで、しちじはんごろをきぼうしています。まどぎわのテーブルはあいていますか？\nA_VI: Chúng tôi có 4 người, muốn đặt vào khoảng 7 rưỡi. Có bàn cạnh cửa sổ nào trống không ạ?\nB: 7時半の窓際のお席ですが、申し訳ございません、すでに埋まっております。8時でしたら、窓際のお席をご用意できますが、いかがでしょうか？\nB_HIRA: しちじはんのまどぎわのおせきですが、もうしわけございません、すでにもうまっております。はちじでしたら、まどぎわのおせきをごよういできますが、いかがでしょうか？\nB_VI: Ghế cạnh cửa sổ lúc 7 rưỡi thì xin lỗi quý khách, đã có người đặt rồi ạ. Nếu là 8 giờ thì chúng tôi có thể sắp xếp ghế cạnh cửa sổ, quý khách thấy sao ạ?\nA: ああ、そうですか...。では、8時でお願いします。窓際の席で【予約】を【取ってもらえますか】？\nA_HIRA: ああ、そうですか...。では、はちじでおねがいします。まどぎわのせきでよやくをとってもらえますか？\nA_VI: À, vậy à... Vậy thì, tôi muốn đặt lúc 8 giờ. Bạn có thể giúp tôi đặt bàn cạnh cửa sổ không ạ?\nB: はい、かしこまりました。8時の窓際のお席で4名様ですね。お名前をいただけますでしょうか？\nB_HIRA: はい、かしこまりました。はちじのまどぎわのおせきでよんめいさまですね。おなまえをいただけますでしょうか？\nB_VI: Vâng, tôi hiểu rồi ạ. Bàn cạnh cửa sổ lúc 8 giờ cho 4 người phải không ạ? Xin quý khách cho biết tên ạ.\nA: はい、田中と申します。\nA_HIRA: はい、たなかと申します。\nA_VI: Vâng, tôi là Tanaka.\nB: 田中様ですね。それでは、本日8時に窓際の【テーブル】を4名様でご用意いたします。ご来店をお待ちしております。\nB_HIRA: たなかさまですね。それでは、ほんじつはちじにまどぎわのテーブルをよんめいさまでごよういいたします。ごらいてんをおまちしております。\nB_VI: Vâng, anh/chị Tanaka. Vậy thì, hôm nay chúng tôi sẽ sắp xếp bàn cạnh cửa sổ cho 4 người vào lúc 8 giờ. Chúng tôi mong chờ quý khách đến.\nA: ありがとうございます。よろしくお願いします。\nA_HIRA: ありがとうございます。よろしくおねがいします。\nA_VI: Cảm ơn rất nhiều. Xin chào.\nB: はい、失礼いたします。\nB_HIRA: はい、しつれいいたします。\nB_VI: Vâng, xin chào quý khách.\n---DIALOGUE_END---\n\n---VOCAB_CHECK_START---\n予約: đã dùng ở câu số A1, A5\nテーブル: đã dùng ở câu số A3, B8\n---VOCAB_CHECK_END---\n\n---GRAMMAR_CHECK_START---\n〜てもらう: đã dùng ở câu số A5\n---GRAMMAR_CHECK_END---\n\n---SUMMARY_START---\nTóm tắt từ vựng:\n予約 (yoyaku): đặt trước, sự đặt chỗ\nテーブル (teeburu): bàn\nTóm tắt ngữ pháp:\n〜てもらう (temorau): Cấu trúc này dùng để diễn tả việc nhận được một ân huệ hoặc sự giúp đỡ từ người khác. Người nói nhận được lợi ích từ hành động của người khác. Thường được dịch là \"được ai đó làm gì cho mình\", \"nhờ ai đó làm gì\".\n---SUMMARY_END---\n\n---NOTES_START---\nGiải thích ngắn về cách dùng từ vựng/ngữ pháp trong ngữ cảnh hội thoại này:\n- 予約 (yoyaku): Được sử dụng tự nhiên khi khách hàng muốn đặt bàn tại nhà hàng (\"予約をしたい\") và khi yêu cầu nhân viên thực hiện việc đặt chỗ (\"予約を取ってもらえますか\").\n- テーブル (teeburu): Được dùng khi khách hàng hỏi về loại bàn mong muốn (\"窓際のテーブル\") và khi nhân viên nhà hàng xác nhận loại bàn đã đặt (\"窓際のテーブルをご用意いたします\").\n- 〜てもらう (temorau): Được sử dụng khi khách hàng (người nói) yêu cầu nhân viên nhà hàng (người khác) thực hiện hành động đặt chỗ cho mình, thể hiện việc nhận được sự giúp đỡ hoặc ân huệ từ người khác (\"予約を取ってもらえますか\" - \"Bạn có thể giúp tôi đặt chỗ không?\").\n---NOTES_END---",
+  "parsed_dialogue": [
+    {
+      "speaker": "A",
+      "text": "もしもし、〇〇レストランです。予約をお願いしたいのですが。予約",
+      "highlights": [
+        "予約"
+      ],
+      "text_hira": "もしもし、まるまるレストランです。よやくをおねがいしたいのですが。",
+      "text_vi": "Alo, là nhà hàng Marumaru. Tôi muốn đặt bàn ạ."
+    },
+    {
+      "speaker": "B",
+      "text": "はい、かしこまりました。いつ頃のご希望でしょうか？",
+      "highlights": [],
+      "text_hira": "はい、かしこまりました。いつごろのごきぼうでしょうか？",
+      "text_vi": "Vâng, tôi đã hiểu. Anh/chị muốn đặt vào khoảng khi nào ạ?"
+    },
+    {
+      "speaker": "A",
+      "text": "来週の金曜日、19時で2名なんですが、空いていますか？",
+      "highlights": [],
+      "text_hira": "らいしゅうのきんようび、じゅうくじでふためいなんですが、あいていますか？",
+      "text_vi": "Thứ Sáu tuần sau, lúc 7 giờ tối cho 2 người, còn chỗ không ạ?"
+    },
+    {
+      "speaker": "B",
+      "text": "少々お待ちください。…はい、金曜日の19時、2名様ですね。窓側のテーブルが一つ空いております。",
+      "highlights": [
+        "テーブル"
+      ],
+      "text_hira": "しょうしょうおまちください。…はい、きんようびのじゅうくじ、ふためいさまですね。まどがわのテーブルがひとつあいております。",
+      "text_vi": "Xin quý khách đợi một lát. …Vâng, thứ Sáu 7 giờ tối cho 2 người ạ. Có một bàn cạnh cửa sổ còn trống."
+    },
+    {
+      "speaker": "A",
+      "text": "窓側の席、いいですね！ぜひそちらでお願いしたいです。",
+      "highlights": [],
+      "text_hira": "まどがわのせき、いいですね！ぜひそちらでおねがいしたいです。",
+      "text_vi": "Bàn cạnh cửa sổ, tuyệt quá! Tôi rất muốn đặt bàn đó ạ."
+    },
+    {
+      "speaker": "B",
+      "text": "かしこまりました。お名前とご連絡先をいただけますでしょうか？",
+      "highlights": [],
+      "text_hira": "かしこまりました。おなまえとごれんらくさきをいただけますでしょうか？",
+      "text_vi": "Vâng, tôi đã hiểu. Xin quý khách cho tôi tên và số điện thoại liên hệ ạ?"
+    },
+    {
+      "speaker": "A",
+      "text": "はい、山田太郎です。電話番号は090-XXXX-XXXXです。",
+      "highlights": [],
+      "text_hira": "はい、やまだたろうです。でんわばんごうはゼロキューゼロのバツバツバツのバツバツバツバツです。",
+      "text_vi": "Vâng, tôi là Yamada Taro. Số điện thoại là 090-XXXX-XXXX."
+    },
+    {
+      "speaker": "B",
+      "text": "山田様、来週金曜日19時、2名様で窓側のテーブルですね。ご予約承りました。当日、お気をつけてお越しください。",
+      "highlights": [
+        "テーブル",
+        "予約"
+      ],
+      "text_hira": "やまださま、らいしゅうきんようびじゅうくじ、ふためいさまでまどがわのテーブルですね。ごよやくうけたまわりました。とうじつ、おきをつけておこしください。",
+      "text_vi": "Anh Yamada, thứ Sáu tuần sau 7 giờ tối, 2 người tại bàn cạnh cửa sổ đúng không ạ? Chúng tôi đã nhận đặt bàn của quý khách. Xin quý khách lưu ý khi đến vào ngày hôm đó."
+    },
+    {
+      "speaker": "A",
+      "text": "ありがとうございます。もしよろしければ、前日に確認のお電話をしてもらうことは可能でしょうか？",
+      "highlights": [
+        "してもらう"
+      ],
+      "text_hira": "ありがとうございます。もしよろしければ、ぜんじつにかくにんのおでんわをしてもらうことはかのうでしょうか？",
+      "text_vi": "Cảm ơn ạ. Nếu được, liệu nhà hàng có thể gọi điện xác nhận vào ngày hôm trước được không ạ?"
+    },
+    {
+      "speaker": "B",
+      "text": "はい、承知いたしました。前日に改めてお電話させていただきます。",
+      "highlights": [],
+      "text_hira": "はい、しょうちいたしました。ぜんじつにあらためておでんわさせていただきます。",
+      "text_vi": "Vâng, tôi đã hiểu. Chúng tôi sẽ gọi điện lại vào ngày hôm trước."
+    },
+    {
+      "speaker": "A",
+      "text": "助かります。では、よろしくお願いします。",
+      "highlights": [],
+      "text_hira": "たすかります。では、よろしくおねがいします。",
+      "text_vi": "Thật tiện lợi. Vậy thì, xin nhờ nhà hàng nhé."
+    },
+    {
+      "speaker": "B",
+      "text": "はい、お待ちしております。失礼いたします。",
+      "highlights": [],
+      "text_hira": "はい、おまちしております。しつれいいたします。",
+      "text_vi": "Vâng, chúng tôi sẽ chờ quý khách. Xin chào ạ."
+    }
+  ]
+}
