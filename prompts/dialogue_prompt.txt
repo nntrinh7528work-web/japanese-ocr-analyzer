@@ -22,8 +22,10 @@ Xuất kết quả theo format CHÍNH XÁC sau:
 
 ---DIALOGUE_START---
 A: [câu tiếng Nhật/Anh có 【từ mục tiêu】nếu có]
+A_HIRA: [NẾU LÀ TIẾNG NHẬT: câu ghi bằng Hiragana/Katakana để dễ đọc. Nếu ngôn ngữ khác, BỎ QUA dòng này]
 A_VI: [dịch tiếng Việt]
 B: [câu tiếp theo]
+B_HIRA: [NẾU LÀ TIẾNG NHẬT: câu ghi bằng Hiragana/Katakana để dễ đọc. Nếu ngôn ngữ khác, BỎ QUA dòng này]
 B_VI: [dịch tiếng Việt]
 ... (tiếp tục cho đến hết)
 ---DIALOGUE_END---
@@ -37,6 +39,11 @@ B_VI: [dịch tiếng Việt]
 [cấu trúc 1]: đã dùng ở câu số [x]
 [cấu trúc 2]: đã dùng ở câu số [x]
 ---GRAMMAR_CHECK_END---
+
+---SUMMARY_START---
+[Tóm tắt từ vựng: liệt kê các từ vựng đã dùng và nghĩa tiếng Việt]
+[Tóm tắt ngữ pháp: liệt kê các ngữ pháp đã dùng và giải thích ý nghĩa/cách dùng ngắn gọn]
+---SUMMARY_END---
 
 ---NOTES_START---
 [Giải thích ngắn về cách dùng từ vựng/ngữ pháp trong ngữ cảnh hội thoại này]

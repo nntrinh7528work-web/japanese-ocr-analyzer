@@ -49,19 +49,25 @@ def _parse_dialogue(text: str) -> list[dict[str, str]]:
     lines = [l for l in section.splitlines() if l.strip()]
     turns = []
     i = 0
-    while i < len(lines) - 1:
-        speaker_match = re.match(r"^([AB]):\s*(.+)$", lines[i].strip())
-        vi_match = re.match(r"^([AB])_VI:\s*(.+)$", lines[i + 1].strip())
-        if speaker_match and vi_match:
-            highlights = re.findall(r"【(.+?)】", speaker_match.group(2))
-            clean_text = re.sub(r"【|】", "", speaker_match.group(2))
-            turns.append({
+    while i < len(lines):
+        speaker_match = re.match(r"^([AB]):\s*(.+)$", lines[i])
+        if speaker_match:
+            turn = {
                 "speaker": speaker_match.group(1),
-                "text": clean_text,
-                "text_vi": vi_match.group(2),
-                "highlights": highlights,
-            })
-            i += 2
+                "text": re.sub(r"【|】", "", speaker_match.group(2)),
+                "highlights": re.findall(r"【(.+?)】", speaker_match.group(2)),
+                "text_hira": "",
+                "text_vi": ""
+            }
+            i += 1
+            while i < len(lines) and re.match(r"^[AB]_(HIRA|VI):\s*(.+)$", lines[i]):
+                sub_match = re.match(r"^[AB]_(HIRA|VI):\s*(.+)$", lines[i])
+                if sub_match.group(1) == "HIRA":
+                    turn["text_hira"] = sub_match.group(2)
+                elif sub_match.group(1) == "VI":
+                    turn["text_vi"] = sub_match.group(2)
+                i += 1
+            turns.append(turn)
         else:
             i += 1
     return turns
@@ -120,6 +126,7 @@ def generate_dialogue(
         dialogue = _parse_dialogue(response.text)
         vocab_check = _parse_check(response.text, "VOCAB_CHECK")
         grammar_check = _parse_check(response.text, "GRAMMAR_CHECK")
+        summary = _section(response.text, "SUMMARY")
         notes = _section(response.text, "NOTES")
 
         coverage = _validate_coverage(dialogue, targets)
@@ -129,6 +136,7 @@ def generate_dialogue(
             "dialogue": dialogue,
             "vocab_used": vocab_check,
             "grammar_used": grammar_check,
+            "summary": summary,
             "coverage_check": coverage,
             "notes": notes,
             "fully_covered": all(coverage.values()) if targets else True,

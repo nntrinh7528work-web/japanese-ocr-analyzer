@@ -837,9 +837,16 @@ with tab_dialogue:
         for turn in r["dialogue"]:
             icon = "🗣️" if turn["speaker"] == "A" else "💭"
             st.markdown(f"**{icon} {turn['speaker']}:** {turn['text']}")
+            if turn.get("text_hira"):
+                st.caption(f"_{turn['text_hira']}_")
             st.caption(turn["text_vi"])
             if turn["highlights"]:
                 st.caption(f"🎯 Dùng: {', '.join(turn['highlights'])}")
+
+        st.divider()
+        if r.get("summary"):
+            st.markdown("#### 📚 Tóm tắt Từ vựng & Ngữ pháp")
+            st.info(r["summary"])
 
         with st.expander("✅ Kiểm tra độ phủ từ vựng/ngữ pháp"):
             for target, covered in r["coverage_check"].items():
