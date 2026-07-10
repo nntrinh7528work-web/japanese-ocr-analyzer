@@ -10,8 +10,8 @@ from modules.deepseek_client import get_deepseek_client
 
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "deepseek_analysis_prompt.txt"
 
-_REQUIRED_KEYS = {"language", "summary_vi", "ocr_corrections", "vocabulary", "grammar", "kanji"}
-_LIST_KEYS = {"ocr_corrections", "vocabulary", "grammar", "kanji"}
+_REQUIRED_KEYS = {"language", "summary_vi", "ocr_corrections", "vocabulary", "grammar", "kanji", "connectors", "sentence_patterns"}
+_LIST_KEYS = {"ocr_corrections", "vocabulary", "grammar", "kanji", "connectors", "sentence_patterns"}
 
 _LANGUAGE_NAMES = {
     "ja": "tiếng Nhật",

@@ -1,71 +1,95 @@
-Bạn là chuyên gia phân tích văn bản và giảng dạy ngôn ngữ cho người Việt.
+Bạn là chuyên gia phân tích văn bản tiếng Nhật/Anh và giảng dạy ngôn ngữ cho người học tiếng Việt.
+Phân tích văn bản sau và trả lời bằng tiếng Việt. BẮT BUỘC trả về ĐÚNG MỘT OBJECT JSON HỢP LỆ (không dùng markdown code block, không giải thích ngoài JSON).
 
-NHIỆM VỤ:
-Phân tích chi tiết văn bản {language_name} bên dưới sau OCR.
-
-VĂN BẢN GỐC:
----TEXT_START---
+===VĂN BẢN ĐẦU VÀO===
 {source_text}
----TEXT_END---
+======================
 
-QUY TẮC BẮT BUỘC (QUAN TRỌNG):
-1. Chỉ phân tích mục thực sự xuất hiện trong văn bản gốc. Không bịa từ, cấu trúc, ví dụ gốc.
-2. LƯỢC BỎ HOÀN TOÀN các từ quá cơ bản, mạo từ (a, an, the), trợ từ (は, が, を...), dấu câu.
-3. Đối với từ vựng cơ bản (JLPT N5/N4 hoặc CEFR A1/A2): Trả về `null` cho các trường chi tiết (`example_1`, `example_2`, `related_words`, `common_mistake`, `note`) để tiết kiệm độ dài.
-4. Đối với từ vựng khó (N3/N2/N1 hoặc B1/B2/C1/C2, thành ngữ, từ dễ dùng sai): BẮT BUỘC ĐIỀN ĐẦY ĐỦ các trường chi tiết một cách kỹ lưỡng. Các ví dụ tự tạo phải chuẩn xác, tự nhiên.
-5. Ngữ pháp: Chỉ phân tích các mẫu cấu trúc thực sự tạo nên ý nghĩa câu, ưu tiên mẫu N3/B1 trở lên hoặc mẫu dễ dùng sai. Bỏ qua cấu trúc quá căn bản.
-6. Chỉ sửa lỗi OCR khi thực sự chắc chắn.
-7. Trả về đúng MỘT JSON object hợp lệ, KHÔNG dùng format markdown (không dùng ```json), KHÔNG giải thích ngoài JSON.
-8. JSON phải đúng schema chi tiết minh họa dưới đây.
+Thực hiện đúng thứ tự các bước sau và đưa kết quả vào JSON theo schema bên dưới:
 
-Schema đầy đủ:
+## 1. XÁC NHẬN VĂN BẢN GỐC
+Sửa lỗi OCR nếu có. Tóm tắt nội dung 2-3 câu.
+
+## 2. TỪ VỰNG JLPT N4-N1
+Lưu ý quan trọng: Lượt bỏ (KHÔNG ĐƯA VÀO JSON) những từ quá đơn giản như trợ từ (は, が, を, に, で...), dấu câu (。, 、), hoặc các từ quá cơ bản.
+Với các từ quan trọng (N3 trở lên, thành ngữ, từ khó), BẮT BUỘC điền đầy đủ các trường ví dụ tự tạo, từ liên quan, lưu ý.
+
+## 3. PHÂN TÍCH KANJI
+Phân tích các Kanji xuất hiện trong bài.
+
+## 4. TỪ NỐI CÂU & LIÊN TỪ
+Trích xuất từ nối câu và liên từ xuất hiện trong bài.
+
+## 5. PHÂN TÍCH NGỮ PHÁP
+Chỉ phân tích các cấu trúc thật sự xuất hiện trong văn bản. Ưu tiên mẫu N3 trở lên, mẫu dễ dùng sai, hoặc cấu trúc quan trọng.
+
+## 6. MẪU CÂU ĐẶC TRƯNG
+Phân tích các mẫu câu / pattern đặc trưng trong bài.
+
+SCHEMA JSON BẮT BUỘC:
 {
   "language": "ja hoặc en",
-  "summary_vi": "string (Tóm tắt 2-3 câu)",
+  "summary_vi": "Tóm tắt 2-3 câu",
   "ocr_corrections": [
-    {
-      "original": "string",
-      "corrected": "string",
-      "reason_vi": "string"
-    }
+    {"original": "Từ gốc", "corrected": "Từ sửa", "reason_vi": "Lý do sửa"}
   ],
   "vocabulary": [
     {
-      "term": "string (Từ vựng)",
-      "reading_or_ipa": "string hoặc null (Phiên âm Hiragana hoặc IPA)",
-      "part_of_speech": "string (Loại từ)",
-      "meaning_vi": "string (Nghĩa chi tiết)",
-      "level": "string hoặc null",
-      "example_from_text": "string (Câu chứa từ trong bài)",
-      "example_1": "string hoặc null (Ví dụ tự tạo 1 - giao tiếp hàng ngày)",
-      "example_2": "string hoặc null (Ví dụ tự tạo 2 - trang trọng/học thuật)",
-      "related_words": "string hoặc null (Từ đồng nghĩa, trái nghĩa)",
-      "common_mistake": "string hoặc null (Lỗi người Việt hay gặp)",
-      "note": "string hoặc null (Lưu ý khác)"
-    }
-  ],
-  "grammar": [
-    {
-      "name": "string (Tên cấu trúc)",
-      "structure": "string (Công thức)",
-      "meaning_vi": "string (Ý nghĩa tiếng Việt)",
-      "usage_vi": "string (Cách dùng)",
-      "level": "string hoặc null",
-      "example_from_text": "string (Ví dụ trong bài)",
-      "example_analysis": "string hoặc null (Phân tích ví dụ trên)",
-      "example_1": "string hoặc null (Ví dụ tự tạo 1)",
-      "example_2": "string hoặc null (Ví dụ tự tạo 2)",
-      "common_mistake": "string hoặc null (Lỗi thường gặp)",
-      "note": "string hoặc null (Lưu ý khác)"
+      "term": "Từ gốc",
+      "reading_or_ipa": "Phiên âm",
+      "part_of_speech": "Loại từ (Nếu là động từ, ghi rõ Tự/Tha động từ)",
+      "meaning_vi": "Nghĩa tiếng Việt",
+      "level": "Cấp JLPT",
+      "example_from_text": "Câu gốc tiếng Nhật - nghĩa tiếng Việt",
+      "example_1": "Câu tự tạo (hàng ngày) - nghĩa - Hiragana",
+      "example_2": "Câu tự tạo (học thuật) - nghĩa - Hiragana",
+      "related_words": "Từ liên quan (đồng/trái nghĩa, cùng chữ Hán)",
+      "common_mistake": "Lỗi thường gặp/Cách phân biệt",
+      "note": "Lưu ý khác"
     }
   ],
   "kanji": [
     {
-      "kanji": "string",
-      "reading": "string",
-      "meaning_vi": "string",
-      "level": "string hoặc null",
-      "word_from_text": "string"
+      "kanji": "Kanji",
+      "reading": "Onyomi / Kunyomi",
+      "meaning_vi": "Nghĩa cơ bản",
+      "level": "JLPT",
+      "word_from_text": "Từ vựng trong bài (≤5 từ)",
+      "example_from_text": "Câu ví dụ trong bài",
+      "role": "Vai trò trong từ"
+    }
+  ],
+  "connectors": [
+    {
+      "term": "Từ/Cụm",
+      "reading": "Phiên âm",
+      "type": "Loại",
+      "meaning_vi": "Nghĩa tiếng Việt",
+      "example_from_text": "Câu ví dụ trong bài",
+      "role": "Vai trò ngữ nghĩa",
+      "level": "Mức độ khó"
+    }
+  ],
+  "grammar": [
+    {
+      "name": "Tên cấu trúc",
+      "structure": "Công thức",
+      "meaning_vi": "Ý nghĩa",
+      "usage_vi": "Cách dùng",
+      "level": "JLPT N5-N1",
+      "example_from_text": "Câu gốc tiếng Nhật - nghĩa - Hiragana",
+      "example_analysis": "Tách vai trò từng phần trong ví dụ",
+      "example_1": "Câu tự tạo 1 - nghĩa - Hiragana",
+      "example_2": "Câu tự tạo 2 - nghĩa - Hiragana",
+      "common_mistake": "Lỗi thường gặp/cấu trúc dễ nhầm",
+      "note": "Lưu ý khác"
+    }
+  ],
+  "sentence_patterns": [
+    {
+      "pattern": "Mẫu câu / pattern",
+      "example_from_text": "Ví dụ trong bài",
+      "explanation": "Giải thích"
     }
   ]
 }

@@ -45,6 +45,8 @@ VALID_JA_ANALYSIS = {
             "word_from_text": "駅まで",
         }
     ],
+    "connectors": [],
+    "sentence_patterns": [],
 }
 
 
