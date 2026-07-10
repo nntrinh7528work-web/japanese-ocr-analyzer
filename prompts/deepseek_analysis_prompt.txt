@@ -1,4 +1,4 @@
-Bạn là chuyên gia phân tích văn bản phục vụ việc học ngôn ngữ.
+Bạn là chuyên gia phân tích văn bản và giảng dạy ngôn ngữ cho người Việt.
 
 NHIỆM VỤ:
 Phân tích chi tiết văn bản {language_name} bên dưới sau OCR.
@@ -10,26 +10,17 @@ VĂN BẢN GỐC:
 
 QUY TẮC:
 1. Chỉ phân tích mục thực sự xuất hiện trong văn bản gốc.
-2. Không bịa từ, cấu trúc, ví dụ, cách đọc, nghĩa hoặc level.
-3. Nếu không chắc level JLPT/CEFR, trả null.
-4. Chỉ sửa lỗi OCR khi chắc chắn.
-5. Trả về đúng một JSON object hợp lệ, không markdown, không giải thích ngoài JSON.
-6. JSON phải đúng schema minh họa dưới đây.
-
-JSON schema minh họa:
-{
-  "language": "ja",
-  "summary_vi": "string",
-  "ocr_corrections": [],
-  "vocabulary": [],
-  "grammar": [],
-  "kanji": []
-}
+2. Không bịa từ, cấu trúc, ví dụ trong văn bản gốc, cách đọc, nghĩa hoặc level.
+3. Các ví dụ thêm (example_1, example_2) phải chuẩn xác, tự nhiên.
+4. Nếu không chắc level JLPT/CEFR, trả null.
+5. Chỉ sửa lỗi OCR khi chắc chắn.
+6. Trả về đúng một JSON object hợp lệ, không markdown, không giải thích ngoài JSON.
+7. JSON phải đúng schema chi tiết minh họa dưới đây.
 
 Schema đầy đủ:
 {
   "language": "ja hoặc en",
-  "summary_vi": "string",
+  "summary_vi": "string (Tóm tắt 2-3 câu)",
   "ocr_corrections": [
     {
       "original": "string",
@@ -39,22 +30,32 @@ Schema đầy đủ:
   ],
   "vocabulary": [
     {
-      "term": "string",
-      "reading_or_ipa": "string hoặc null",
-      "part_of_speech": "string",
-      "meaning_vi": "string",
+      "term": "string (Từ vựng)",
+      "reading_or_ipa": "string hoặc null (Phiên âm Hiragana hoặc IPA)",
+      "part_of_speech": "string (Loại từ)",
+      "meaning_vi": "string (Nghĩa chi tiết)",
       "level": "string hoặc null",
-      "example_from_text": "string"
+      "example_from_text": "string (Câu chứa từ trong bài)",
+      "example_1": "string hoặc null (Ví dụ tự tạo 1 - giao tiếp hàng ngày)",
+      "example_2": "string hoặc null (Ví dụ tự tạo 2 - trang trọng/học thuật)",
+      "related_words": "string hoặc null (Từ đồng nghĩa, trái nghĩa)",
+      "common_mistake": "string hoặc null (Lỗi người Việt hay gặp)",
+      "note": "string hoặc null (Lưu ý khác)"
     }
   ],
   "grammar": [
     {
-      "name": "string",
-      "structure": "string",
-      "meaning_vi": "string",
-      "usage_vi": "string",
+      "name": "string (Tên cấu trúc)",
+      "structure": "string (Công thức)",
+      "meaning_vi": "string (Ý nghĩa tiếng Việt)",
+      "usage_vi": "string (Cách dùng)",
       "level": "string hoặc null",
-      "example_from_text": "string"
+      "example_from_text": "string (Ví dụ trong bài)",
+      "example_analysis": "string hoặc null (Phân tích ví dụ trên)",
+      "example_1": "string hoặc null (Ví dụ tự tạo 1)",
+      "example_2": "string hoặc null (Ví dụ tự tạo 2)",
+      "common_mistake": "string hoặc null (Lỗi thường gặp)",
+      "note": "string hoặc null (Lưu ý khác)"
     }
   ],
   "kanji": [

@@ -185,6 +185,11 @@ def adapt_for_ui(
             "jlpt": v.get("level", "") or "",
             "cefr": v.get("level", "") or "",
             "example_text": v.get("example_from_text", ""),
+            "example_1": v.get("example_1", ""),
+            "example_2": v.get("example_2", ""),
+            "related": v.get("related_words", ""),
+            "mistake": v.get("common_mistake", ""),
+            "note": v.get("note", ""),
             "difficulty": v.get("level", "") or "",
         })
 
@@ -198,6 +203,11 @@ def adapt_for_ui(
             "usage": g.get("usage_vi", ""),
             "level": g.get("level", "") or "",
             "example": g.get("example_from_text", ""),
+            "example_analysis": g.get("example_analysis", ""),
+            "example_1": g.get("example_1", ""),
+            "example_2": g.get("example_2", ""),
+            "mistake": g.get("common_mistake", ""),
+            "note": g.get("note", ""),
         })
 
     # --- kanji_analysis ---
