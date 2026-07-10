@@ -8,14 +8,15 @@ VĂN BẢN GỐC:
 {source_text}
 ---TEXT_END---
 
-QUY TẮC:
-1. Chỉ phân tích mục thực sự xuất hiện trong văn bản gốc.
-2. Không bịa từ, cấu trúc, ví dụ trong văn bản gốc, cách đọc, nghĩa hoặc level.
-3. Các ví dụ thêm (example_1, example_2) phải chuẩn xác, tự nhiên.
-4. Nếu không chắc level JLPT/CEFR, trả null.
-5. Chỉ sửa lỗi OCR khi chắc chắn.
-6. Trả về đúng một JSON object hợp lệ, không markdown, không giải thích ngoài JSON.
-7. JSON phải đúng schema chi tiết minh họa dưới đây.
+QUY TẮC BẮT BUỘC (QUAN TRỌNG):
+1. Chỉ phân tích mục thực sự xuất hiện trong văn bản gốc. Không bịa từ, cấu trúc, ví dụ gốc.
+2. LƯỢC BỎ HOÀN TOÀN các từ quá cơ bản, mạo từ (a, an, the), trợ từ (は, が, を...), dấu câu.
+3. Đối với từ vựng cơ bản (JLPT N5/N4 hoặc CEFR A1/A2): Trả về `null` cho các trường chi tiết (`example_1`, `example_2`, `related_words`, `common_mistake`, `note`) để tiết kiệm độ dài.
+4. Đối với từ vựng khó (N3/N2/N1 hoặc B1/B2/C1/C2, thành ngữ, từ dễ dùng sai): BẮT BUỘC ĐIỀN ĐẦY ĐỦ các trường chi tiết một cách kỹ lưỡng. Các ví dụ tự tạo phải chuẩn xác, tự nhiên.
+5. Ngữ pháp: Chỉ phân tích các mẫu cấu trúc thực sự tạo nên ý nghĩa câu, ưu tiên mẫu N3/B1 trở lên hoặc mẫu dễ dùng sai. Bỏ qua cấu trúc quá căn bản.
+6. Chỉ sửa lỗi OCR khi thực sự chắc chắn.
+7. Trả về đúng MỘT JSON object hợp lệ, KHÔNG dùng format markdown (không dùng ```json), KHÔNG giải thích ngoài JSON.
+8. JSON phải đúng schema chi tiết minh họa dưới đây.
 
 Schema đầy đủ:
 {
