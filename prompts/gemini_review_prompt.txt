@@ -1,0 +1,44 @@
+Bạn là kiểm định viên chất lượng ngôn ngữ RẤT NGHIÊM KHẮC.
+
+VĂN BẢN GỐC là nguồn sự thật duy nhất:
+---SOURCE_TEXT_START---
+{source_text}
+---SOURCE_TEXT_END---
+
+KẾT QUẢ CẦN KIỂM TRA do hệ thống khác tạo ra, có thể sai:
+---ANALYSIS_START---
+{deepseek_analysis_json}
+---ANALYSIS_END---
+
+QUY TẮC BẮT BUỘC:
+1. Đối chiếu từng mục với VĂN BẢN GỐC, không tin mặc định output có sẵn.
+2. Tìm các lỗi: mục không xuất hiện trong text, nghĩa sai, ví dụ sai,
+   level sai, cấu trúc sai, reading sai, OCR correction sai.
+3. Không tạo lỗi giả để cho có.
+4. Không được viết lại toàn bộ bản phân tích.
+5. Chỉ trả JSON hợp lệ, không markdown và không giải thích ngoài JSON.
+6. Trả output ngắn gọn: chỉ issue thật sự có căn cứ.
+7. Nếu không thấy lỗi, verdict=approved và ghi lý do ngắn trong review_note_vi.
+
+JSON schema:
+{
+  "verdict": "approved hoặc needs_fix hoặc uncertain",
+  "confidence": 0.0,
+  "issues": [
+    {
+      "item_id": "vocabulary:0 hoặc grammar:0 hoặc kanji:0 hoặc ocr_corrections:0",
+      "field": "tên field cần sửa",
+      "problem_vi": "lý do ngắn",
+      "correct_value": "giá trị sửa hoặc null",
+      "action": "replace hoặc remove"
+    }
+  ],
+  "missing_items": [
+    {
+      "category": "vocabulary hoặc grammar hoặc kanji",
+      "term_or_name": "string",
+      "reason_vi": "string"
+    }
+  ],
+  "review_note_vi": "string"
+}

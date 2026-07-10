@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import streamlit as st
 
 from config import (
+    AI_PIPELINE_ENABLED,
     GEMINI_MODEL_TEXT,
     GEMINI_MODEL_VISION,
     MAX_IMAGE_SIZE_MB,
@@ -640,26 +641,59 @@ with tab_ocr:
                 except Exception as exc:
                     st.error(f"❌ Lỗi tự động phân tích tiếp tục: {exc}")
 
-            if st.button("🧠 Phân tích từng trang đã OCR", type="primary", width="stretch"):
-                st.session_state.partial_page_analyses = []
-                _persist_analysis()
-                detected_lang = "pdf_ja" if analysis_language == "japanese" else "pdf_en"
-                input_data = {
-                    "pages": pages_to_analyze
-                }
-                input_text = json.dumps(input_data)
-                job_id = create_job(input_text, detected_lang)
-                subprocess.Popen(
-                    [_sys.executable, _WORKER_PATH, job_id],
-                    stdout=subprocess.DEVNULL,
-                    stderr=open(_PROJECT_DIR + "/worker_error.log", "a"),
-                    cwd=_PROJECT_DIR,
-                )
-                st.session_state.current_job_id = job_id
-                st.query_params["job_id"] = job_id
-                st.success(f"Đã bắt đầu phân tích! Job ID: {job_id}")
-                st.info("Bạn có thể đóng tab này — kết quả sẽ được lưu lại. Mở lại link có job_id để xem kết quả.")
-                st.rerun()
+            if AI_PIPELINE_ENABLED:
+                # ── AI Pipeline: DeepSeek + Gemini review ──
+                if st.button("🤖 Phân tích AI (DeepSeek + Gemini)", type="primary", width="stretch"):
+                    from modules.analysis_pipeline import run_verified_analysis, adapt_for_ui
+
+                    pipeline_lang = "ja" if analysis_language == "japanese" else "en"
+                    try:
+                        with st.status("🤖 AI Pipeline đang chạy...", expanded=True) as status:
+                            st.write("**Bước 1/2:** DeepSeek V4 Pro đang phân tích...")
+                            pipeline_result = run_verified_analysis(analysis_text, pipeline_lang)
+                            st.write("**Bước 2/2:** Gemini đang kiểm tra độ chính xác...")
+                            status.update(label="✅ Hoàn tất!", state="complete")
+
+                        adapted = adapt_for_ui(
+                            pipeline_result["analysis"],
+                            analysis_text,
+                            analysis_language,
+                        )
+                        adapted["_pipeline_result"] = {
+                            "review": pipeline_result["review"],
+                            "quality_status": pipeline_result["quality_status"],
+                            "warnings": pipeline_result["warnings"],
+                        }
+                        st.session_state.analysis = adapted
+                        st.session_state.partial_page_analyses = []
+                        _persist_analysis()
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"❌ Lỗi AI Pipeline: {exc}")
+            else:
+                pass  # Fall through to the original analysis button below.
+
+            if not AI_PIPELINE_ENABLED:
+                if st.button("🧠 Phân tích từng trang đã OCR", type="primary", width="stretch"):
+                    st.session_state.partial_page_analyses = []
+                    _persist_analysis()
+                    detected_lang = "pdf_ja" if analysis_language == "japanese" else "pdf_en"
+                    input_data = {
+                        "pages": pages_to_analyze
+                    }
+                    input_text = json.dumps(input_data)
+                    job_id = create_job(input_text, detected_lang)
+                    subprocess.Popen(
+                        [_sys.executable, _WORKER_PATH, job_id],
+                        stdout=subprocess.DEVNULL,
+                        stderr=open(_PROJECT_DIR + "/worker_error.log", "a"),
+                        cwd=_PROJECT_DIR,
+                    )
+                    st.session_state.current_job_id = job_id
+                    st.query_params["job_id"] = job_id
+                    st.success(f"Đã bắt đầu phân tích! Job ID: {job_id}")
+                    st.info("Bạn có thể đóng tab này — kết quả sẽ được lưu lại. Mở lại link có job_id để xem kết quả.")
+                    st.rerun()
 
         if st.session_state.analysis:
             analysis = st.session_state.analysis
@@ -780,7 +814,47 @@ with tab_ocr:
                         st.info("Trang này chưa có mẫu câu riêng.")
                         
                     with st.expander("💾 Xem Markdown đầy đủ của trang"):
+
                         st.markdown(page.get("full_markdown") or "Không có dữ liệu.")
+
+            # ── AI Quality Review expander ──────────────────────────────────
+            _pipeline_meta = analysis.get("_pipeline_result")
+            if _pipeline_meta:
+                with st.expander("🔍 Kiểm tra chất lượng AI", expanded=False):
+                    _qs = _pipeline_meta.get("quality_status", "unknown")
+                    _status_labels = {
+                        "verified": "✅ Verified — Gemini xác nhận chính xác",
+                        "corrected": "🔧 Corrected — Gemini đã sửa lỗi",
+                        "review_unavailable": "⚠️ Review không khả dụng",
+                    }
+                    st.info(_status_labels.get(_qs, _qs))
+
+                    _review = _pipeline_meta.get("review", {})
+                    if _review.get("review_note_vi"):
+                        st.write(f"**Ghi chú Gemini:** {_review['review_note_vi']}")
+
+                    _issues = _review.get("issues", [])
+                    if _issues:
+                        st.write(f"**Số lỗi Gemini phát hiện:** {len(_issues)}")
+                        for _iss in _issues:
+                            st.caption(
+                                f"• `{_iss.get('item_id', '')}` — {_iss.get('problem_vi', '')} "
+                                f"(action: {_iss.get('action', '')})"
+                            )
+
+                    _warnings = _pipeline_meta.get("warnings", [])
+                    if _warnings:
+                        st.write("**Cảnh báo khi áp dụng sửa lỗi:**")
+                        for _w in _warnings:
+                            st.caption(f"⚠️ {_w}")
+
+                    _missing = _review.get("missing_items", [])
+                    if _missing:
+                        st.write("**Mục Gemini đề nghị xem thêm:**")
+                        for _m in _missing:
+                            st.caption(
+                                f"• [{_m.get('category', '')}] {_m.get('term_or_name', '')} — {_m.get('reason_vi', '')}"
+                            )
 
 with tab_dialogue:
     st.subheader("💬 Luyện Hội Thoại Hằng Ngày")
