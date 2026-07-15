@@ -264,3 +264,107 @@ def adapt_for_ui(
         "section_markdown": {},
         "usage": {"input_tokens": 0, "output_tokens": 0, "candidate_tokens": 0, "thinking_tokens": 0},
     }
+
+
+def run_page_analyses_pipeline(
+    pages: list[dict[str, Any]],
+    analysis_language: str = "japanese",
+    progress_callback: Callable[[int, int, str], None] | None = None,
+    page_done_callback: Callable[[dict[str, Any]], None] | None = None,
+    max_workers: int = 2,
+) -> dict[str, Any]:
+    """Analyze multiple OCR pages concurrently using the 2-AI Pipeline and merge the results."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from typing import Callable
+    from modules.text_analyzer import prepare_pages, merge_page_analyses
+
+    prepared_pages = prepare_pages(pages)
+    total = len(prepared_pages)
+    pipeline_lang = "ja" if analysis_language == "japanese" else "en"
+
+    page_analyses: list[dict[str, Any] | None] = [None] * total
+    completed = 0
+
+    def _work_page(index: int, page: dict) -> tuple[int, dict[str, Any]]:
+        # Run the 2-AI Pipeline
+        pipeline_res = run_verified_analysis(page["text"], pipeline_lang)
+        # Adapt for UI
+        adapted = adapt_for_ui(pipeline_res["analysis"], page["text"], analysis_language)
+        
+        # Attach quality info
+        adapted["_pipeline_result"] = {
+            "review": pipeline_res["review"],
+            "quality_status": pipeline_res["quality_status"],
+            "warnings": pipeline_res["warnings"],
+        }
+        
+        adapted["page_index"] = page["page_index"]
+        adapted["page_name"] = page["page_name"]
+        adapted["source_label"] = f"Trang {page['page_index']}: {page['page_name']}"
+        return index, adapted
+
+    if total == 1:
+        _, result = _work_page(0, prepared_pages[0])
+        if page_done_callback:
+            page_done_callback(result)
+        if progress_callback:
+            progress_callback(1, 1, prepared_pages[0]["page_name"])
+        return merge_page_analyses([result], analysis_language)
+
+    workers = min(max_workers, total)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(_work_page, idx, page): idx
+            for idx, page in enumerate(prepared_pages)
+        }
+        for future in as_completed(futures):
+            idx, page_result = future.result()
+            page_analyses[idx] = page_result
+            completed += 1
+            if page_done_callback:
+                page_done_callback(page_result)
+            if progress_callback:
+                progress_callback(completed, total, page_result["page_name"])
+
+    # Merge page analyses using standard merge function
+    merged = merge_page_analyses(page_analyses, analysis_language)
+
+    # Consolidate _pipeline_result for the entire job
+    page_pipeline_results = [p.get("_pipeline_result") for p in page_analyses if p and p.get("_pipeline_result")]
+    if page_pipeline_results:
+        combined_warnings = []
+        combined_issues = []
+        combined_missing = []
+        combined_status = "verified"
+        review_notes = []
+
+        for idx, meta in enumerate(page_pipeline_results, 1):
+            status = meta.get("quality_status", "unknown")
+            if status == "corrected":
+                combined_status = "corrected"
+            elif status == "review_unavailable" and combined_status != "corrected":
+                combined_status = "review_unavailable"
+
+            rev = meta.get("review", {})
+            if rev.get("review_note_vi"):
+                review_notes.append(f"[Trang {idx}] {rev['review_note_vi']}")
+            for issue in rev.get("issues", []):
+                issue_copy = dict(issue)
+                issue_copy["item_id"] = f"trang_{idx}:{issue.get('item_id', '')}"
+                combined_issues.append(issue_copy)
+            for missing in rev.get("missing_items", []):
+                combined_missing.append(missing)
+            for w in meta.get("warnings", []):
+                combined_warnings.append(f"[Trang {idx}] {w}")
+
+        merged["_pipeline_result"] = {
+            "quality_status": combined_status,
+            "review": {
+                "review_note_vi": "\n".join(review_notes) if review_notes else "Không có ghi chú.",
+                "issues": combined_issues,
+                "missing_items": combined_missing,
+            },
+            "warnings": combined_warnings,
+        }
+
+    return merged

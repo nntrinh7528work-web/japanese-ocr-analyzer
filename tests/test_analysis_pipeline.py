@@ -265,3 +265,54 @@ def test_run_verified_analysis_corrected():
 
     assert result["quality_status"] == "corrected"
     assert result["analysis"]["vocabulary"][0]["meaning_vi"] == "bước đi"
+
+
+def test_run_page_analyses_pipeline():
+    """run_page_analyses_pipeline calls the pipeline for each page and merges the results."""
+    pages = [
+        {"page_index": 1, "page_name": "Page One", "text": "Văn bản trang một", "notes": []},
+        {"page_index": 2, "page_name": "Page Two", "text": "Văn bản trang hai", "notes": []},
+    ]
+
+    pipeline_res_1 = {
+        "analysis": {
+            "language": "ja",
+            "summary_vi": "Tóm tắt trang 1",
+            "ocr_corrections": [],
+            "vocabulary": [{"term": "từ1", "reading_or_ipa": "yomi1", "part_of_speech": "n", "meaning_vi": "nghĩa1", "level": "N3", "example_from_text": "từ1 trong bài"}],
+            "grammar": [],
+            "kanji": [],
+            "connectors": [],
+            "sentence_patterns": [],
+        },
+        "review": {"verdict": "approved", "confidence": 0.9, "issues": [], "missing_items": [], "review_note_vi": "ok"},
+        "quality_status": "verified",
+        "warnings": [],
+    }
+    
+    pipeline_res_2 = {
+        "analysis": {
+            "language": "ja",
+            "summary_vi": "Tóm tắt trang 2",
+            "ocr_corrections": [],
+            "vocabulary": [{"term": "từ2", "reading_or_ipa": "yomi2", "part_of_speech": "n", "meaning_vi": "nghĩa2", "level": "N4", "example_from_text": "từ2 trong bài"}],
+            "grammar": [],
+            "kanji": [],
+            "connectors": [],
+            "sentence_patterns": [],
+        },
+        "review": {"verdict": "approved", "confidence": 0.9, "issues": [], "missing_items": [], "review_note_vi": "ok"},
+        "quality_status": "verified",
+        "warnings": [],
+    }
+
+    with patch.object(pipeline, "run_verified_analysis") as mock_run:
+        mock_run.side_effect = [pipeline_res_1, pipeline_res_2]
+        
+        result = pipeline.run_page_analyses_pipeline(pages, "japanese")
+
+    assert result["summary"] == "**Trang 1: Page One:** Tóm tắt trang 1\n\n**Trang 2: Page Two:** Tóm tắt trang 2"
+    assert len(result["page_analyses"]) == 2
+    assert result["page_analyses"][0]["page_name"] == "Page One"
+    assert result["page_analyses"][1]["page_name"] == "Page Two"
+    assert result["_pipeline_result"]["quality_status"] == "verified"

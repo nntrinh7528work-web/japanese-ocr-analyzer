@@ -67,7 +67,7 @@ def analyze_with_deepseek(
                     {"role": "user", "content": built_prompt},
                 ],
                 temperature=0.1,
-                max_tokens=30000,
+                max_tokens=8192,
                 response_format={"type": "json_object"},
             )
 

@@ -117,7 +117,7 @@ def test_generation_config_params():
 
     call_kwargs = mock_model.generate_content.call_args.kwargs
     gen_config = call_kwargs["generation_config"]
-    assert gen_config["max_output_tokens"] == 2000
+    assert gen_config["max_output_tokens"] == 8192
     assert gen_config["temperature"] == 0.15
 
 

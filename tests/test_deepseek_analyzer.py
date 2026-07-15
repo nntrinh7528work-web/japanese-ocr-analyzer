@@ -149,4 +149,4 @@ def test_api_call_params():
     call_kwargs = mock_client.chat.completions.create.call_args.kwargs
     assert call_kwargs["response_format"] == {"type": "json_object"}
     assert call_kwargs["temperature"] == 0.1
-    assert call_kwargs["max_tokens"] == 30000
+    assert call_kwargs["max_tokens"] == 8192
