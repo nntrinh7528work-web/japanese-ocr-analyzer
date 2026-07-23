@@ -20,12 +20,20 @@ def run_job(job_id: str, text: str, lang: str):
             # PDF/Image page analysis
             pages_data = json.loads(text)
             pages = pages_data.get("pages", [])
+            model_name = pages_data.get("model_name")
             analysis_lang = "japanese" if lang == "pdf_ja" else "english"
-            result = run_page_analyses(pages, analysis_language=analysis_lang)
+            result = run_page_analyses(pages, analysis_language=analysis_lang, model_name=model_name)
         else:
             # Fallback direct text analysis
+            try:
+                data = json.loads(text)
+                raw_text = data.get("text", text)
+                model_name = data.get("model_name")
+            except Exception:
+                raw_text = text
+                model_name = None
             analysis_lang = "japanese" if lang in ("ja", "japanese") else "english"
-            result = run_analysis(text, [], analysis_language=analysis_lang)
+            result = run_analysis(raw_text, [], analysis_language=analysis_lang, model_name=model_name)
             
         update_job(job_id, "done", result=result)
     except Exception as exc:

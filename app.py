@@ -724,9 +724,9 @@ ocr_model_choice = st.sidebar.selectbox(
 
 text_model_choice = st.sidebar.selectbox(
     "Model Phân tích văn bản",
-    options=["gemini-3.1-pro-preview", "gemini-3.5-flash", "gemini-2.5-pro", "gemini-2.5-flash"],
+    options=["gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-2.5-flash", "gemini-2.5-pro"],
     index=0,
-    help="Model được dùng để dịch thuật và giải thích ngữ pháp (Mặc định: gemini-3.1-pro-preview)",
+    help="Model được dùng để dịch thuật và giải thích ngữ pháp (Mặc định: gemini-3.5-flash)",
 )
 
 analysis_language = st.sidebar.radio(
@@ -1237,7 +1237,8 @@ with tab_ocr:
                     _persist_analysis()
                     detected_lang = "pdf_ja"
                     input_data = {
-                        "pages": pages_to_analyze
+                        "pages": pages_to_analyze,
+                        "model_name": text_model_choice,
                     }
                     input_text = json.dumps(input_data)
                     job_id = create_job(input_text, detected_lang)
@@ -1258,7 +1259,8 @@ with tab_ocr:
                     _persist_analysis()
                     detected_lang = "pdf_en"
                     input_data = {
-                        "pages": pages_to_analyze
+                        "pages": pages_to_analyze,
+                        "model_name": text_model_choice,
                     }
                     input_text = json.dumps(input_data)
                     job_id = create_job(input_text, detected_lang)
