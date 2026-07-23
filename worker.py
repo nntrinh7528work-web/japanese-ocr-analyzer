@@ -16,24 +16,16 @@ def run_job(job_id: str, text: str, lang: str):
             text = job_data["input_text"]
             lang = job_data["lang"]
 
-        if lang.startswith("pdf_") or lang == "hybrid_ja":
+        if lang.startswith("pdf_"):
             # PDF/Image page analysis
             pages_data = json.loads(text)
             pages = pages_data.get("pages", [])
-            if lang == "hybrid_ja":
-                from modules.hybrid_analyzer import run_page_analyses_hybrid
-                result = run_page_analyses_hybrid(pages)
-            else:
-                analysis_lang = "japanese" if lang == "pdf_ja" else "english"
-                result = run_page_analyses(pages, analysis_language=analysis_lang)
+            analysis_lang = "japanese" if lang == "pdf_ja" else "english"
+            result = run_page_analyses(pages, analysis_language=analysis_lang)
         else:
             # Fallback direct text analysis
-            if lang == "hybrid_ja_text":
-                from modules.hybrid_analyzer import run_hybrid_analysis
-                result = run_hybrid_analysis(text)
-            else:
-                analysis_lang = "japanese" if lang in ("ja", "japanese") else "english"
-                result = run_analysis(text, [], analysis_language=analysis_lang)
+            analysis_lang = "japanese" if lang in ("ja", "japanese") else "english"
+            result = run_analysis(text, [], analysis_language=analysis_lang)
             
         update_job(job_id, "done", result=result)
     except Exception as exc:
@@ -47,3 +39,4 @@ if __name__ == "__main__":
     text = sys.argv[2] if len(sys.argv) > 2 else ""
     lang = sys.argv[3] if len(sys.argv) > 3 else "ja"
     run_job(job_id, text, lang)
+

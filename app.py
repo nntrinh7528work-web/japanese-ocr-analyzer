@@ -259,7 +259,7 @@ if job_id_from_url:
 
             st.success("Phân tích đã hoàn tất!")
 
-            if job["lang"] in ("pdf_ja", "pdf_en", "ai_ja", "ai_en", "hybrid_ja"):
+            if job["lang"] in ("pdf_ja", "pdf_en", "ai_ja", "ai_en"):
 
                 if st.session_state.analysis is None:
 
@@ -1232,28 +1232,7 @@ with tab_ocr:
 
 
             if analysis_language == "japanese":
-                if st.button("🤖 Phân tích Hybrid (Himotoki + Gemini)", type="primary", width="stretch"):
-                    st.session_state.partial_page_analyses = []
-                    _persist_analysis()
-                    detected_lang = "hybrid_ja"
-                    input_data = {
-                        "pages": pages_to_analyze
-                    }
-                    input_text = json.dumps(input_data)
-                    job_id = create_job(input_text, detected_lang)
-                    subprocess.Popen(
-                        [_sys.executable, _WORKER_PATH, job_id],
-                        stdout=subprocess.DEVNULL,
-                        stderr=open(_PROJECT_DIR + "/worker_error.log", "a"),
-                        cwd=_PROJECT_DIR,
-                    )
-                    st.session_state.current_job_id = job_id
-                    st.query_params["job_id"] = job_id
-                    st.success(f"Đã bắt đầu phân tích Hybrid! Job ID: {job_id}")
-                    st.info("Bạn có thể đóng tab này — kết quả sẽ được lưu lại. Mở lại link có job_id để xem kết quả.")
-                    st.rerun()
-
-                if st.button("🧠 Phân tích bằng Gemini", type="secondary", width="stretch"):
+                if st.button("🧠 Phân tích bằng Gemini", type="primary", width="stretch"):
                     st.session_state.partial_page_analyses = []
                     _persist_analysis()
                     detected_lang = "pdf_ja"
@@ -1293,14 +1272,6 @@ with tab_ocr:
                     st.query_params["job_id"] = job_id
                     st.success(f"Đã bắt đầu phân tích! Job ID: {job_id}")
                     st.info("Bạn có thể đóng tab này — kết quả sẽ được lưu lại. Mở lại link có job_id để xem kết quả.")
-                    st.rerun()
-
-            if analysis_language == "japanese":
-                if st.button("🔬 Phân tích bằng Himotoki (Offline)", type="secondary", width="stretch"):
-                    from modules.himotoki_analyzer import analyze_text_with_himotoki
-                    combined_text = "\n\n".join(item.get("text", "") for item in pages_to_analyze if item.get("text"))
-                    st.session_state.analysis = analyze_text_with_himotoki(combined_text)
-                    _persist_analysis()
                     st.rerun()
 
 
