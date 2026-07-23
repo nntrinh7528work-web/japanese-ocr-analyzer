@@ -90,12 +90,20 @@ def _validate_coverage(dialogue: list[dict], targets: list[str]) -> dict[str, bo
 
 
 def build_dialogue_prompt(
-    topic: str, language: str, vocab: list[str], grammar: list[str], level: str
+    topic: str,
+    language: str,
+    vocab: list[str],
+    grammar: list[str],
+    level: str,
+    situation: str = "Tự nhiên / Thông thường",
+    politeness_level: str = "Lịch sự (です/ます)",
 ) -> str:
     return DIALOGUE_PROMPT_PATH.read_text(encoding="utf-8").format(
         topic=topic,
         language=language,
         level=level,
+        situation=situation,
+        politeness_level=politeness_level,
         vocab_list="\n".join(f"- {v}" for v in vocab) or "Không có yêu cầu cụ thể",
         grammar_list="\n".join(f"- {g}" for g in grammar) or "Không có yêu cầu cụ thể",
     )
@@ -107,7 +115,10 @@ def generate_dialogue(
     vocab: list[str] | None = None,
     grammar: list[str] | None = None,
     level: str = "trung bình",
+    situation: str = "Tự nhiên / Thông thường",
+    politeness_level: str = "Lịch sự (です/ます)",
     max_retries: int = 2,
+    variation_context: str | None = None,
 ) -> dict[str, Any]:
     """Generate a dialogue covering the required vocab/grammar. Retries if coverage incomplete."""
     vocab = vocab or []
@@ -117,12 +128,17 @@ def generate_dialogue(
 
     last_result = None
     for attempt in range(max_retries + 1):
-        prompt = build_dialogue_prompt(topic, language, vocab, grammar, level)
+        prompt = build_dialogue_prompt(
+            topic, language, vocab, grammar, level, situation, politeness_level
+        )
+        if variation_context:
+            prompt += f"\n\nYÊU CẦU BIẾN THỂ: Tạo một biến thể HOÀN TOÀN MỚI về diễn biến/tình huống so với đoạn hội thoại trước đó sau đây, nhưng vẫn đáp ứng đủ từ vựng/ngữ pháp:\n{variation_context}"
+
         if attempt > 0 and last_result:
             missing = [t for t, covered in last_result["coverage_check"].items() if not covered]
             prompt += f"\n\nQUAN TRỌNG: Lần trước bạn CHƯA dùng các từ/ngữ pháp sau: {', '.join(missing)}. Bắt buộc phải dùng lần này."
 
-        response = model.generate_content(prompt, generation_config={"temperature": 0.7})
+        response = model.generate_content(prompt, generation_config={"temperature": 0.8 if variation_context else 0.7})
         dialogue = _parse_dialogue(response.text)
         vocab_check = _parse_check(response.text, "VOCAB_CHECK")
         grammar_check = _parse_check(response.text, "GRAMMAR_CHECK")
@@ -133,6 +149,9 @@ def generate_dialogue(
         last_result = {
             "topic": topic,
             "language": language,
+            "level": level,
+            "situation": situation,
+            "politeness_level": politeness_level,
             "dialogue": dialogue,
             "vocab_used": vocab_check,
             "grammar_used": grammar_check,
@@ -140,9 +159,27 @@ def generate_dialogue(
             "coverage_check": coverage,
             "notes": notes,
             "fully_covered": all(coverage.values()) if targets else True,
+            "raw_text": response.text,
         }
 
         if last_result["fully_covered"]:
             break
 
     return last_result
+
+
+def generate_variation(previous_result: dict[str, Any]) -> dict[str, Any]:
+    """Generate a variation of an existing dialogue with a different twist or situation flow."""
+    prev_turns = "\n".join(f"{t['speaker']}: {t['text']}" for t in previous_result.get("dialogue", []))
+    vocab = list(previous_result.get("coverage_check", {}).keys())
+    return generate_dialogue(
+        topic=previous_result.get("topic", "Hội thoại"),
+        language=previous_result.get("language", "Tiếng Nhật"),
+        vocab=vocab,
+        grammar=[],
+        level=previous_result.get("level", "trung bình"),
+        situation=previous_result.get("situation", "Tự nhiên / Thông thường"),
+        politeness_level=previous_result.get("politeness_level", "Lịch sự (です/ます)"),
+        variation_context=prev_turns,
+    )
+
