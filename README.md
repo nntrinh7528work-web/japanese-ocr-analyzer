@@ -1,6 +1,6 @@
 # Japanese OCR Analyzer
 
-Ứng dụng Streamlit xử lý ảnh, OCR văn bản tiếng Nhật bằng Gemini 2.5 Pro,
+Ứng dụng Streamlit xử lý ảnh, OCR văn bản tiếng Nhật bằng Gemini 3.5 Flash,
 phân tích ngôn ngữ học và xuất báo cáo Word.
 
 ## Chạy ứng dụng
@@ -30,7 +30,7 @@ Không commit file `.env` hoặc `.streamlit/secrets.toml`.
 ## Ước tính chi phí
 
 Ứng dụng hiển thị token và chi phí ước tính cho từng lần OCR, lần phân tích
-văn bản và tổng phiên. Giá mặc định theo Gemini 2.5 Flash Standard Paid Tier:
+văn bản và tổng phiên. Giá mặc định theo Gemini 3.5 Flash Standard Paid Tier:
 input `$0.30/M token`, output gồm thinking token `$2.50/M token`. Có thể chọn
 Free Tier để hiển thị chi phí thực tế `$0` cùng giá trị tương đương Paid Tier.
 

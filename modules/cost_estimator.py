@@ -7,6 +7,7 @@ from typing import Any
 
 # Google Gemini Developer API Standard paid-tier rates, USD per 1M tokens.
 MODEL_PRICING_USD_PER_MILLION = {
+    "gemini-3.5-flash": {"input": 0.30, "output": 2.50},
     "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
     "gemini-2.5-pro": {"input": 2.25, "output": 18.00},
 }

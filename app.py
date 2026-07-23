@@ -787,7 +787,7 @@ billing_tier = st.sidebar.radio(
 
 usd_to_jpy = st.sidebar.number_input("Tỷ giá USD → JPY", min_value=1.0, value=155.0, step=1.0)
 
-st.sidebar.caption("Gemini 2.5 Flash: input $0.30/M token, output $2.50/M token.")
+st.sidebar.caption("Gemini 3.5 Flash: input $0.30/M token, output $2.50/M token.")
 
 st.sidebar.markdown("[Xem bảng giá Gemini chính thức](https://ai.google.dev/gemini-api/docs/pricing)")
 
