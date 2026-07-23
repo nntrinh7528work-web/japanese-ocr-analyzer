@@ -717,16 +717,16 @@ st.sidebar.subheader("🤖 Cấu hình AI Model")
 
 ocr_model_choice = st.sidebar.selectbox(
     "Model OCR (Vision)",
-    options=["gemini-3.5-flash", "gemini-3.1-pro", "gemini-2.5-flash", "gemini-2.5-pro"],
+    options=["gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-2.5-flash", "gemini-2.5-pro"],
     index=0,
     help="Model được dùng để đọc chữ từ ảnh/PDF (Mặc định: gemini-3.5-flash)",
 )
 
 text_model_choice = st.sidebar.selectbox(
     "Model Phân tích văn bản",
-    options=["gemini-3.1-pro", "gemini-3.5-flash", "gemini-2.5-pro", "gemini-2.5-flash"],
+    options=["gemini-3.1-pro-preview", "gemini-3.5-flash", "gemini-2.5-pro", "gemini-2.5-flash"],
     index=0,
-    help="Model được dùng để dịch thuật và giải thích ngữ pháp (Mặc định: gemini-3.1-pro)",
+    help="Model được dùng để dịch thuật và giải thích ngữ pháp (Mặc định: gemini-3.1-pro-preview)",
 )
 
 analysis_language = st.sidebar.radio(
