@@ -31,17 +31,3 @@ MAX_PDF_PAGES = 60
 SUPPORTED_FORMATS = ["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff"]
 SUPPORTED_UPLOAD_FORMATS = [*SUPPORTED_FORMATS, "pdf"]
 
-# ── DeepSeek / AI Pipeline config ────────────────────────────────────────
-DEEPSEEK_API_KEY = (
-    _get_streamlit_secret("DEEPSEEK_API_KEY")
-    or os.getenv("DEEPSEEK_API_KEY", "")
-)
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
-GEMINI_REVIEW_MODEL = os.getenv(
-    "GEMINI_REVIEW_MODEL",
-    "gemini-2.5-flash",
-)
-AI_PIPELINE_ENABLED = os.getenv(
-    "AI_PIPELINE_ENABLED",
-    "true",
-).lower() == "true"
