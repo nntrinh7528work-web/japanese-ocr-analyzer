@@ -1279,9 +1279,9 @@ with tab_ocr:
 
 
         if st.session_state.analysis:
-
             analysis = st.session_state.analysis
-
+            used_model_name = analysis.get("model_used") or text_model_choice
+            st.caption(f"🤖 **Model đã phân tích:** `{used_model_name}` | **Model Vision (OCR):** `{ocr_model_choice}`")
             result_language = analysis.get("analysis_language", analysis_language)
 
             ocr_costs = [

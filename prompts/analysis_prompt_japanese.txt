@@ -1,5 +1,5 @@
-Bạn là chuyên gia phân tích văn bản tiếng Nhật và giảng dạy ngôn ngữ Nhật cho người học tiếng Việt.
-Phân tích văn bản sau và trả lời bằng tiếng Việt, dùng định dạng Markdown.
+Bạn là chuyên gia phân tích văn bản tiếng Nhật và giảng dạy ngôn ngữ Nhật cao cấp cho người học tiếng Việt.
+Phân tích văn bản sau cực kỳ chi tiết, chuyên sâu, giải thích đầy đủ các sắc thái tinh tế, ngữ pháp phức tạp và ngữ cảnh sử dụng. Trả lời bằng tiếng Việt, dùng định dạng Markdown.
 
 ===VĂN BẢN ĐẦU VÀO===
 {japanese_text}

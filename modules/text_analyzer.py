@@ -396,7 +396,9 @@ def _init_model(model_name: str | None = None):
         raise ValueError("Thiếu GEMINI_API_KEY. Hãy cấu hình key trong .env hoặc Streamlit secrets.")
     genai.configure(api_key=GEMINI_API_KEY)
     target_model = model_name or GEMINI_MODEL_TEXT
-    return genai.GenerativeModel(target_model)
+    model = genai.GenerativeModel(target_model)
+    model.target_model_name = target_model
+    return model
 
 
 def _usage(response: Any) -> dict[str, int]:
@@ -437,6 +439,7 @@ def _analyze_chunk(model: Any, text: str, notes: list, analysis_language: str = 
             if not parsed["summary"]:
                 parsed["summary"] = "Không thể trích xuất tóm tắt riêng; xem toàn bộ nội dung phân tích bên dưới."
             parsed["usage"] = _usage(response)
+            parsed["model_used"] = getattr(model, "target_model_name", "gemini-3.5-flash")
             parsed = _fill_missing_sections(model, parsed, text, language)
             return parsed
         except Exception as exc:
@@ -543,6 +546,7 @@ def _merge_analysis_results(results: list[dict[str, Any]], analysis_language: st
         "candidate_tokens": sum(result["usage"].get("candidate_tokens", 0) for result in results),
         "thinking_tokens": sum(result["usage"].get("thinking_tokens", 0) for result in results),
     }
+    merged["model_used"] = results[0].get("model_used", "gemini-3.5-flash") if results else "gemini-3.5-flash"
     return merged
 
 
@@ -611,6 +615,7 @@ def merge_page_analyses(
     merged["full_markdown"] = "\n\n---\n\n".join(
         f"# {page['source_label']}\n\n{page['full_markdown']}" for page in page_analyses
     )
+    merged["model_used"] = page_analyses[0].get("model_used", "gemini-3.5-flash") if page_analyses else "gemini-3.5-flash"
     return merged
 
 
