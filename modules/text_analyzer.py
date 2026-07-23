@@ -387,7 +387,7 @@ def _fill_missing_sections(
     return parsed
 
 
-def _init_model():
+def _init_model(model_name: str | None = None):
     import google.generativeai as genai
 
     from config import GEMINI_API_KEY, GEMINI_MODEL_TEXT
@@ -395,7 +395,8 @@ def _init_model():
     if not GEMINI_API_KEY:
         raise ValueError("Thiếu GEMINI_API_KEY. Hãy cấu hình key trong .env hoặc Streamlit secrets.")
     genai.configure(api_key=GEMINI_API_KEY)
-    return genai.GenerativeModel(GEMINI_MODEL_TEXT)
+    target_model = model_name or GEMINI_MODEL_TEXT
+    return genai.GenerativeModel(target_model)
 
 
 def _usage(response: Any) -> dict[str, int]:
@@ -545,12 +546,17 @@ def _merge_analysis_results(results: list[dict[str, Any]], analysis_language: st
     return merged
 
 
-def run_analysis(japanese_text: str, ocr_notes: list, analysis_language: str = "english") -> dict[str, Any]:
+def run_analysis(
+    japanese_text: str,
+    ocr_notes: list,
+    analysis_language: str = "english",
+    model_name: str | None = None,
+) -> dict[str, Any]:
     """Analyze Japanese or English text, splitting and merging input longer than 2,500 chars."""
     if not japanese_text or not japanese_text.strip():
         raise ValueError("Văn bản phân tích không được rỗng.")
     language = _analysis_language(analysis_language)
-    model = _init_model()
+    model = _init_model(model_name) if model_name else _init_model()
     results = [_analyze_chunk(model, chunk, ocr_notes, language) for chunk in _split_text(japanese_text.strip())]
     merged = _merge_analysis_results(results, language)
 
@@ -631,6 +637,7 @@ def run_page_analyses(
     progress_callback: Callable[[int, int, str], None] | None = None,
     page_done_callback: Callable[[dict[str, Any]], None] | None = None,
     max_workers: int = 3,
+    model_name: str | None = None,
 ) -> dict[str, Any]:
     """Analyze each OCR page concurrently, then return a merged report with per-page details.
 
@@ -641,10 +648,11 @@ def run_page_analyses(
         page_done_callback: ``(page_result)`` called after each page finishes so
             callers can persist partial results for resume on interruption.
         max_workers: Maximum number of concurrent API calls.
+        model_name: Optional Gemini text model name to use.
     """
     language = _analysis_language(analysis_language)
     prepared_pages = prepare_pages(pages)
-    model = _init_model()
+    model = _init_model(model_name) if model_name else _init_model()
     total = len(prepared_pages)
 
     if total == 1:

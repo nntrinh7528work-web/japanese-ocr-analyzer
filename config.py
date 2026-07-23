@@ -23,7 +23,7 @@ if GEMINI_API_KEY == "your_api_key_here":
     GEMINI_API_KEY = None
 
 GEMINI_MODEL_VISION = _get_streamlit_secret("GEMINI_MODEL_VISION") or os.getenv("GEMINI_MODEL_VISION") or "gemini-3.5-flash"
-GEMINI_MODEL_TEXT = _get_streamlit_secret("GEMINI_MODEL_TEXT") or os.getenv("GEMINI_MODEL_TEXT") or "gemini-3.5-flash"
+GEMINI_MODEL_TEXT = _get_streamlit_secret("GEMINI_MODEL_TEXT") or os.getenv("GEMINI_MODEL_TEXT") or "gemini-3.1-pro"
 MAX_UPLOAD_SIZE_MB = 50
 MAX_IMAGE_SIZE_MB = 20
 MAX_PDF_SIZE_MB = 50

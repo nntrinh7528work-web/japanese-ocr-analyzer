@@ -629,13 +629,13 @@ def remove_image(item_id: str) -> None:
 
 
 
-def run_item_ocr(item: dict) -> None:
+def run_item_ocr(item: dict, model_name: str | None = None) -> None:
 
     item["ocr_error"] = None
 
     try:
 
-        result = run_ocr(item["processed_image_bytes"], item["report"])
+        result = run_ocr(item["processed_image_bytes"], item["report"], model_name=model_name)
 
         item["ocr_result"] = result
 
@@ -752,6 +752,22 @@ st.sidebar.header("⚙️ Settings")
 show_preprocessing = st.sidebar.toggle("Hiển thị chi tiết tiền xử lý", value=True)
 
 st.sidebar.caption(f"Ảnh tối đa {MAX_IMAGE_SIZE_MB} MB · PDF tối đa {MAX_PDF_SIZE_MB} MB/{MAX_PDF_PAGES} trang")
+
+st.sidebar.subheader("🤖 Cấu hình AI Model")
+
+ocr_model_choice = st.sidebar.selectbox(
+    "Model OCR (Vision)",
+    options=["gemini-3.5-flash", "gemini-3.1-pro", "gemini-2.5-flash", "gemini-2.5-pro"],
+    index=0,
+    help="Model được dùng để đọc chữ từ ảnh/PDF (Mặc định: gemini-3.5-flash)",
+)
+
+text_model_choice = st.sidebar.selectbox(
+    "Model Phân tích văn bản",
+    options=["gemini-3.1-pro", "gemini-3.5-flash", "gemini-2.5-pro", "gemini-2.5-flash"],
+    index=0,
+    help="Model được dùng để dịch thuật và giải thích ngữ pháp (Mặc định: gemini-3.1-pro)",
+)
 
 analysis_language = st.sidebar.radio(
 
@@ -1259,6 +1275,8 @@ with tab_ocr:
 
                         page_done_callback=_resume_page_done,
 
+                        model_name=text_model_choice,
+
                     )
 
                     all_page_analyses = partial + new_results.get("page_analyses", [])
@@ -1365,7 +1383,7 @@ with tab_ocr:
 
             ocr_costs = [
 
-                estimate_cost(item["ocr_result"].get("usage"), GEMINI_MODEL_VISION, billing_tier)
+                estimate_cost(item["ocr_result"].get("usage"), ocr_model_choice, billing_tier)
 
                 for item in items
 
@@ -1373,7 +1391,7 @@ with tab_ocr:
 
             ]
 
-            analysis_cost = estimate_cost(analysis.get("usage"), GEMINI_MODEL_TEXT, billing_tier)
+            analysis_cost = estimate_cost(analysis.get("usage"), text_model_choice, billing_tier)
 
             session_cost = sum_costs([*ocr_costs, analysis_cost])
 

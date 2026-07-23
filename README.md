@@ -1,7 +1,6 @@
 # Japanese OCR Analyzer
 
-Ứng dụng Streamlit xử lý ảnh, OCR văn bản tiếng Nhật bằng Gemini 3.5 Flash,
-phân tích ngôn ngữ học và xuất báo cáo Word.
+Ứng dụng Streamlit xử lý ảnh, OCR văn bản tiếng Nhật bằng Gemini 3.5 Flash và phân tích ngôn ngữ bằng Gemini 3.1 Pro (hỗ trợ tùy chọn linh hoạt model trên giao diện UI).
 
 ## Chạy ứng dụng
 
