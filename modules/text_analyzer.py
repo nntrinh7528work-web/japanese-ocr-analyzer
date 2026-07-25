@@ -336,6 +336,7 @@ def _fill_missing_sections(
     parsed: dict[str, Any],
     text: str,
     analysis_language: str = "english",
+    reasoning_effort: str = "standard",
 ) -> dict[str, Any]:
     language = _analysis_language(analysis_language)
     missing = []
@@ -356,11 +357,26 @@ def _fill_missing_sections(
     if not missing:
         return parsed
 
+    gen_config: dict[str, Any] = {"temperature": 0.1, "max_output_tokens": 8192}
+    if reasoning_effort == "deep":
+        gen_config["thinking_config"] = {"thinking_budget": 4096}
+
     try:
-        response = model.generate_content(
-            build_missing_sections_prompt(text, missing, language),
-            generation_config={"temperature": 0.1, "max_output_tokens": 8192},
-        )
+        try:
+            response = model.generate_content(
+                build_missing_sections_prompt(text, missing, language),
+                generation_config=gen_config,
+            )
+        except Exception:
+            if "thinking_config" in gen_config:
+                fallback_config = {k: v for k, v in gen_config.items() if k != "thinking_config"}
+                response = model.generate_content(
+                    build_missing_sections_prompt(text, missing, language),
+                    generation_config=fallback_config,
+                )
+            else:
+                raise
+
         if not response.text or not response.text.strip():
             return parsed
         supplemental = parse_analysis_response(response.text, language)
@@ -413,19 +429,40 @@ def _usage(response: Any) -> dict[str, int]:
     }
 
 
-def _analyze_chunk(model: Any, text: str, notes: list, analysis_language: str = "english") -> dict[str, Any]:
+def _analyze_chunk(
+    model: Any,
+    text: str,
+    notes: list,
+    analysis_language: str = "english",
+    reasoning_effort: str = "standard",
+) -> dict[str, Any]:
     language = _analysis_language(analysis_language)
     prompt = build_analysis_prompt(text, notes, language)
     last_error: Exception | None = None
+
+    gen_config: dict[str, Any] = {
+        "temperature": 0.1,
+        "max_output_tokens": 16384,
+    }
+    if reasoning_effort == "deep":
+        gen_config["thinking_config"] = {"thinking_budget": 4096}
+
     for attempt in range(3):
         try:
-            response = model.generate_content(
-                prompt,
-                generation_config={
-                    "temperature": 0.1,
-                    "max_output_tokens": 16384,
-                },
-            )
+            try:
+                response = model.generate_content(
+                    prompt,
+                    generation_config=gen_config,
+                )
+            except Exception as gen_exc:
+                if "thinking_config" in gen_config:
+                    fallback_config = {k: v for k, v in gen_config.items() if k != "thinking_config"}
+                    response = model.generate_content(
+                        prompt,
+                        generation_config=fallback_config,
+                    )
+                else:
+                    raise gen_exc
 
             candidates = getattr(response, "candidates", None)
             finish_reason = getattr(candidates[0], "finish_reason", None) if candidates else None
@@ -440,7 +477,7 @@ def _analyze_chunk(model: Any, text: str, notes: list, analysis_language: str = 
                 parsed["summary"] = "Không thể trích xuất tóm tắt riêng; xem toàn bộ nội dung phân tích bên dưới."
             parsed["usage"] = _usage(response)
             parsed["model_used"] = getattr(model, "target_model_name", "gemini-3.5-flash")
-            parsed = _fill_missing_sections(model, parsed, text, language)
+            parsed = _fill_missing_sections(model, parsed, text, language, reasoning_effort=reasoning_effort)
             return parsed
         except Exception as exc:
             last_error = exc
@@ -555,13 +592,17 @@ def run_analysis(
     ocr_notes: list,
     analysis_language: str = "english",
     model_name: str | None = None,
+    reasoning_effort: str = "standard",
 ) -> dict[str, Any]:
     """Analyze Japanese or English text, splitting and merging input longer than 2,500 chars."""
     if not japanese_text or not japanese_text.strip():
         raise ValueError("Văn bản phân tích không được rỗng.")
     language = _analysis_language(analysis_language)
     model = _init_model(model_name) if model_name else _init_model()
-    results = [_analyze_chunk(model, chunk, ocr_notes, language) for chunk in _split_text(japanese_text.strip())]
+    results = [
+        _analyze_chunk(model, chunk, ocr_notes, language, reasoning_effort=reasoning_effort)
+        for chunk in _split_text(japanese_text.strip())
+    ]
     merged = _merge_analysis_results(results, language)
 
     # Đánh lại số thứ tự liên tục cho vocabulary_all (tránh 1,2,3...1,2,3...)
@@ -575,11 +616,12 @@ def analyze_single_page(
     model: Any,
     page: dict[str, Any],
     analysis_language: str = "english",
+    reasoning_effort: str = "standard",
 ) -> dict[str, Any]:
     """Analyze a single prepared page dict and return the parsed result."""
     language = _analysis_language(analysis_language)
     page_results = [
-        _analyze_chunk(model, chunk, page["notes"], language)
+        _analyze_chunk(model, chunk, page["notes"], language, reasoning_effort=reasoning_effort)
         for chunk in _split_text(page["text"])
     ]
     page_analysis = _merge_analysis_results(page_results, language)
@@ -643,6 +685,7 @@ def run_page_analyses(
     page_done_callback: Callable[[dict[str, Any]], None] | None = None,
     max_workers: int = 3,
     model_name: str | None = None,
+    reasoning_effort: str = "standard",
 ) -> dict[str, Any]:
     """Analyze each OCR page concurrently, then return a merged report with per-page details.
 
@@ -654,6 +697,7 @@ def run_page_analyses(
             callers can persist partial results for resume on interruption.
         max_workers: Maximum number of concurrent API calls.
         model_name: Optional Gemini text model name to use.
+        reasoning_effort: ``"standard"`` or ``"deep"``.
     """
     language = _analysis_language(analysis_language)
     prepared_pages = prepare_pages(pages)
@@ -662,7 +706,7 @@ def run_page_analyses(
 
     if total == 1:
         # Fast path: no threading overhead for a single page.
-        result = analyze_single_page(model, prepared_pages[0], language)
+        result = analyze_single_page(model, prepared_pages[0], language, reasoning_effort=reasoning_effort)
         if page_done_callback:
             page_done_callback(result)
         if progress_callback:
@@ -674,7 +718,7 @@ def run_page_analyses(
     completed = 0
 
     def _work(index: int, page: dict) -> tuple[int, dict[str, Any]]:
-        return index, analyze_single_page(model, page, language)
+        return index, analyze_single_page(model, page, language, reasoning_effort=reasoning_effort)
 
     workers = min(max_workers, total)
     with ThreadPoolExecutor(max_workers=workers) as executor:

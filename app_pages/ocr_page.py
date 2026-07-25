@@ -247,6 +247,8 @@ def render_ocr_tab(
     pages_to_analyze = analysis_pages_fn(items)
     partial = st.session_state.partial_page_analyses
 
+    reasoning_effort = config.get("reasoning_effort", "standard")
+
     if not analysis_text:
         st.warning("Chưa có văn bản OCR. Hãy OCR ít nhất một ảnh trước khi phân tích.")
     else:
@@ -293,6 +295,7 @@ def render_ocr_tab(
                     progress_callback=_resume_cb,
                     page_done_callback=_resume_page_done,
                     model_name=text_model_choice,
+                    reasoning_effort=reasoning_effort,
                 )
                 all_page_analyses = partial + new_results.get("page_analyses", [])
                 st.session_state.analysis = text_analyzer_module.merge_page_analyses(
@@ -313,6 +316,7 @@ def render_ocr_tab(
                 input_data = {
                     "pages": pages_to_analyze,
                     "model_name": text_model_choice,
+                    "reasoning_effort": reasoning_effort,
                 }
                 input_text = json.dumps(input_data)
                 job_id = create_job(input_text, detected_lang)
@@ -335,6 +339,7 @@ def render_ocr_tab(
                 input_data = {
                     "pages": pages_to_analyze,
                     "model_name": text_model_choice,
+                    "reasoning_effort": reasoning_effort,
                 }
                 input_text = json.dumps(input_data)
                 job_id = create_job(input_text, detected_lang)

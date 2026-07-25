@@ -66,6 +66,13 @@ def render_sidebar(
             help="Model được dùng để dịch thuật và giải thích ngữ pháp (Mặc định: gemini-3.5-flash)",
         )
 
+        reasoning_effort = st.radio(
+            "Mức độ suy luận (Reasoning)",
+            options=["standard", "deep"],
+            format_func=lambda val: "⚡ Tiêu chuẩn (Nhanh)" if val == "standard" else "🧠 Chuyên sâu (Deep Reasoning)",
+            help="Chế độ Chuyên sâu giúp Gemini 3.5 Flash & 3.1 Pro lập luận kỹ lưỡng các sắc thái ngữ pháp, từ vựng và câu văn phức tạp.",
+        )
+
         analysis_language = st.radio(
             "Ngôn ngữ phân tích",
             options=["japanese", "english"],
@@ -101,6 +108,7 @@ def render_sidebar(
         "show_preprocessing": show_preprocessing,
         "ocr_model_choice": ocr_model_choice,
         "text_model_choice": text_model_choice,
+        "reasoning_effort": reasoning_effort,
         "analysis_language": analysis_language,
         "billing_tier": billing_tier,
         "usd_to_jpy": usd_to_jpy,

@@ -21,19 +21,33 @@ def run_job(job_id: str, text: str, lang: str):
             pages_data = json.loads(text)
             pages = pages_data.get("pages", [])
             model_name = pages_data.get("model_name")
+            reasoning_effort = pages_data.get("reasoning_effort", "standard")
             analysis_lang = "japanese" if lang == "pdf_ja" else "english"
-            result = run_page_analyses(pages, analysis_language=analysis_lang, model_name=model_name)
+            result = run_page_analyses(
+                pages,
+                analysis_language=analysis_lang,
+                model_name=model_name,
+                reasoning_effort=reasoning_effort,
+            )
         else:
             # Fallback direct text analysis
             try:
                 data = json.loads(text)
                 raw_text = data.get("text", text)
                 model_name = data.get("model_name")
+                reasoning_effort = data.get("reasoning_effort", "standard")
             except Exception:
                 raw_text = text
                 model_name = None
+                reasoning_effort = "standard"
             analysis_lang = "japanese" if lang in ("ja", "japanese") else "english"
-            result = run_analysis(raw_text, [], analysis_language=analysis_lang, model_name=model_name)
+            result = run_analysis(
+                raw_text,
+                [],
+                analysis_language=analysis_lang,
+                model_name=model_name,
+                reasoning_effort=reasoning_effort,
+            )
             
         update_job(job_id, "done", result=result)
     except Exception as exc:
@@ -47,4 +61,3 @@ if __name__ == "__main__":
     text = sys.argv[2] if len(sys.argv) > 2 else ""
     lang = sys.argv[3] if len(sys.argv) > 3 else "ja"
     run_job(job_id, text, lang)
-
