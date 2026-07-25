@@ -58,6 +58,7 @@ from modules.dialogue_history import (
     update_sm2_card,
     get_streak_days,
 )
+from modules.tts_engine import text_to_speech
 
 
 
@@ -1634,11 +1635,15 @@ with tab_dialogue:
         )
 
     # Display Toggles
-    col_t1, col_t2 = st.columns(2)
+    col_t1, col_t2, col_t3, col_t4 = st.columns(4)
     with col_t1:
         show_hiragana = st.toggle("Hiển thị Hiragana", value=True, key="dlg_show_hira")
     with col_t2:
         show_translation = st.toggle("Hiển thị dịch tiếng Việt", value=True, key="dlg_show_vi")
+    with col_t3:
+        enable_tts = st.toggle("🔊 Phát âm thanh", value=False, key="dlg_enable_tts")
+    with col_t4:
+        tts_slow = st.toggle("🐢 Nói chậm", value=False, key="dlg_tts_slow", disabled=not enable_tts)
 
     if st.button("🎲 Gợi ý chủ đề hôm nay", key="btn_suggest_topic"):
         with st.spinner("Đang tìm chủ đề..."):
@@ -1717,12 +1722,35 @@ with tab_dialogue:
             meta_info += f" | Miêu tả hoàn cảnh: _{r['scenario_description']}_"
         st.caption(meta_info)
 
+        # TTS: "Play all" button
+        if enable_tts:
+            if st.button("🔊 Phát toàn bộ hội thoại", key="btn_play_all_tts"):
+                with st.spinner("Đang tạo audio..."):
+                    all_text = "\n".join(t["text"] for t in r["dialogue"] if t.get("text"))
+                    full_audio = text_to_speech(all_text, lang="ja", slow=tts_slow)
+                    if full_audio:
+                        st.session_state["tts_full_audio"] = full_audio
+            if st.session_state.get("tts_full_audio"):
+                st.audio(st.session_state["tts_full_audio"], format="audio/mp3")
+
         for turn_idx, turn in enumerate(r["dialogue"]):
             icon = "🗣️" if turn["speaker"] == "A" else "💭"
             st.markdown(f"**{icon} {turn['speaker']}:** {turn['text']}")
 
             if show_hiragana and turn.get("text_hira"):
                 st.caption(f"_{turn['text_hira']}_")
+
+            # TTS: Per-turn play button
+            if enable_tts:
+                tts_cache_key = f"tts_audio_{turn_idx}_{tts_slow}"
+                if st.button(f"🔊 Nghe câu {turn['speaker']} ({turn_idx + 1})", key=f"tts_{turn_idx}"):
+                    audio_data = text_to_speech(turn["text"], lang="ja", slow=tts_slow)
+                    if audio_data:
+                        st.session_state[tts_cache_key] = audio_data
+                    else:
+                        st.warning("Không thể tạo audio. Kiểm tra kết nối mạng.")
+                if st.session_state.get(tts_cache_key):
+                    st.audio(st.session_state[tts_cache_key], format="audio/mp3")
 
             is_revealed = st.session_state.revealed_turns.get(turn_idx, False)
             if show_translation or is_revealed:
