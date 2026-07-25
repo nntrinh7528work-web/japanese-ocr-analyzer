@@ -1,4 +1,4 @@
-"""Dialogue Practice tab UI component."""
+"""Dialogue Practice page view component."""
 
 from __future__ import annotations
 import streamlit as st

@@ -1,4 +1,4 @@
-"""Sidebar layout and configuration panel for Streamlit UI."""
+"""Sidebar component for Streamlit UI."""
 
 from __future__ import annotations
 import streamlit as st

@@ -7,7 +7,6 @@ import streamlit as st
 def inject_custom_css(dark_mode: bool = False) -> None:
     """Inject modern CSS styles for Light Mode or Youthful Soft Dark Mode."""
     if dark_mode:
-        # ── Youthful Cyber Dark Theme (Electric Violet / Deep Slate) ──
         bg_app = "#0F172A"
         card_bg = "#18182C"
         card_border = "#2E2A5B"
@@ -31,7 +30,6 @@ def inject_custom_css(dark_mode: bool = False) -> None:
         tab_active_bg = "#2E1065"
         tab_active_text = "#C084FC"
     else:
-        # ── Youthful Soft Light Theme (Vibrant Violet / Fresh White) ──
         bg_app = "#FAFAFF"
         card_bg = "#FFFFFF"
         card_border = "#E9D5FF"
@@ -69,7 +67,6 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             color: {text_primary};
         }}
 
-        /* Card & Container Polish - Large Radius & Soft Shadows */
         [data-testid="stExpander"] {{
             border: 1px solid {card_border};
             border-radius: 16px;
@@ -84,7 +81,6 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             border-color: {card_hover_border};
         }}
 
-        /* Metric Box Styling */
         [data-testid="stMetric"] {{
             background: {metric_bg};
             border-radius: 14px;
@@ -102,7 +98,6 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             color: {metric_value};
         }}
 
-        /* Subheader Accent Line with Soft Gradient */
         .stSubheader {{
             border-bottom: 3px solid;
             border-image: linear-gradient(90deg, #A855F7 0%, #C084FC 60%, transparent 100%) 1;
@@ -112,7 +107,6 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             font-weight: 700;
         }}
 
-        /* File Uploader Dropzone */
         [data-testid="stFileUploaderDropzone"] {{
             min-height: 140px;
             border: 2px dashed {dropzone_border};
@@ -130,7 +124,6 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             border-radius: 12px;
         }}
 
-        /* Buttons Styling */
         .stButton > button {{
             border-radius: 12px;
             font-weight: 600;
@@ -152,7 +145,6 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             box-shadow: 0 6px 18px rgba(147, 51, 234, 0.5);
         }}
 
-        /* Dialogue Chat Bubbles */
         .speaker-bubble-a {{
             border-left: 5px solid {bubble_a_border};
             background: {bubble_a_bg};
@@ -172,7 +164,6 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
         }}
 
-        /* Tab Navigation Styling */
         .stTabs [data-baseweb="tab-list"] {{
             gap: 8px;
         }}

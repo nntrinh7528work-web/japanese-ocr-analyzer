@@ -10,17 +10,17 @@ from modules import session_store
 import modules.text_analyzer as text_analyzer
 from modules.job_store import get_job
 
-from ui_styles import inject_custom_css
-from ui_sidebar import render_sidebar
-from ui_ocr_tab import render_ocr_tab
-from ui_dialogue_tab import render_dialogue_tab
-from ui_helpers import (
+from components.styles import inject_custom_css
+from components.sidebar import render_sidebar
+from components.helpers import (
     COLUMN_LABELS,
     display_rows,
     render_example,
     render_important_vocabulary,
     render_grammar_points,
 )
+from app_pages.ocr_page import render_ocr_tab
+from app_pages.dialogue_page import render_dialogue_tab
 
 text_analyzer = importlib.reload(text_analyzer)
 

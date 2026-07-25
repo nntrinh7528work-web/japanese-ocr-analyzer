@@ -1,4 +1,4 @@
-"""OCR and Document Analysis tab UI component."""
+"""OCR and Document Analysis page view component."""
 
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -26,7 +26,7 @@ from modules.result_exporter import (
     safe_export_stem,
 )
 
-from ui_helpers import (
+from components.helpers import (
     display_rows,
     render_grammar_points,
     render_important_vocabulary,
