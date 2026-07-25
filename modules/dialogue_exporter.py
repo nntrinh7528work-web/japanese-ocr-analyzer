@@ -19,6 +19,8 @@ def export_dialogue_to_text(result: dict[str, Any]) -> str:
     lines.append(f"=== HỘI THOẠI: {result.get('topic', 'Chủ đề')} ===")
     lines.append(f"Ngôn ngữ: {result.get('language', 'N/A')} | Cấp độ: {result.get('level', 'N/A')}")
     lines.append(f"Tình huống: {result.get('situation', 'Thông thường')} | Kính ngữ: {result.get('politeness_level', 'Lịch sự')}")
+    if result.get("scenario_description"):
+        lines.append(f"Miêu tả hoàn cảnh: {result['scenario_description']}")
     lines.append("-" * 50)
     lines.append("")
 
@@ -53,6 +55,7 @@ def export_dialogue_to_json(result: dict[str, Any]) -> str:
         "level": result.get("level"),
         "situation": result.get("situation"),
         "politeness_level": result.get("politeness_level"),
+        "scenario_description": result.get("scenario_description", ""),
         "dialogue": result.get("dialogue", []),
         "coverage_check": result.get("coverage_check", {}),
         "summary": result.get("summary"),
@@ -93,10 +96,13 @@ def export_dialogue_to_docx(result: dict[str, Any]) -> bytes:
     # Subtitle / Meta
     meta_p = doc.add_paragraph()
     meta_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    meta_run = meta_p.add_run(
+    meta_text = (
         f"Ngôn ngữ: {result.get('language', 'Tiếng Nhật')} | Cấp độ: {result.get('level', 'Trung bình')} | "
         f"Tình huống: {result.get('situation', 'Thông thường')} | Kính ngữ: {result.get('politeness_level', 'Lịch sự')}"
     )
+    if result.get("scenario_description"):
+        meta_text += f"\nMiêu tả hoàn cảnh: {result['scenario_description']}"
+    meta_run = meta_p.add_run(meta_text)
     meta_run.font.size = Pt(10)
     meta_run.font.italic = True
     meta_run.font.color.rgb = RGBColor(100, 100, 100)

@@ -4,6 +4,7 @@ sử dụng ĐÚNG các yêu cầu sau:
 Chủ đề: {topic}
 Ngôn ngữ: {language}
 Tình huống cụ thể: {situation}
+Miêu tả diễn biến / hoàn cảnh: {scenario_description}
 Mức độ kính ngữ / Phong cách: {politeness_level}
 Độ dài: 8-12 lượt nói (turns), giữa 2 người A và B
 Cấp độ: {level}

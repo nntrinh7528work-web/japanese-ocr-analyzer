@@ -30,12 +30,18 @@ def _get_connection() -> sqlite3.Connection:
                 level TEXT NOT NULL,
                 situation TEXT,
                 politeness_level TEXT,
+                scenario_description TEXT,
                 dialogue_json TEXT NOT NULL,
                 summary TEXT,
                 quiz_score INTEGER
             )
             """
         )
+        try:
+            conn.execute("ALTER TABLE practice_sessions ADD COLUMN scenario_description TEXT;")
+        except Exception:
+            pass
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS sm2_cards (
@@ -62,8 +68,8 @@ def save_dialogue_session(result: dict[str, Any], quiz_score: int | None = None)
     with _LOCK, conn:
         cursor = conn.execute(
             """
-            INSERT INTO practice_sessions (created_at, topic, language, level, situation, politeness_level, dialogue_json, summary, quiz_score)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO practice_sessions (created_at, topic, language, level, situation, politeness_level, scenario_description, dialogue_json, summary, quiz_score)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 now_iso,
@@ -72,6 +78,7 @@ def save_dialogue_session(result: dict[str, Any], quiz_score: int | None = None)
                 result.get("level", "Trung bình"),
                 result.get("situation", "Thông thường"),
                 result.get("politeness_level", "Lịch sự"),
+                result.get("scenario_description", ""),
                 json.dumps(result.get("dialogue", []), ensure_ascii=False),
                 result.get("summary", ""),
                 quiz_score,
@@ -103,7 +110,7 @@ def get_practice_history(limit: int = 20) -> list[dict[str, Any]]:
     with _LOCK:
         cursor = conn.execute(
             """
-            SELECT id, created_at, topic, language, level, situation, politeness_level, quiz_score
+            SELECT id, created_at, topic, language, level, situation, politeness_level, scenario_description, quiz_score
             FROM practice_sessions
             ORDER BY id DESC LIMIT ?
             """,
@@ -120,7 +127,8 @@ def get_practice_history(limit: int = 20) -> list[dict[str, Any]]:
             "level": r[4],
             "situation": r[5],
             "politeness_level": r[6],
-            "quiz_score": r[7],
+            "scenario_description": r[7],
+            "quiz_score": r[8],
         }
         for r in rows
     ]

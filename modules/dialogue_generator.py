@@ -97,6 +97,7 @@ def build_dialogue_prompt(
     level: str,
     situation: str = "Tự nhiên / Thông thường",
     politeness_level: str = "Lịch sự (です/ます)",
+    scenario_description: str = "",
 ) -> str:
     return DIALOGUE_PROMPT_PATH.read_text(encoding="utf-8").format(
         topic=topic,
@@ -104,6 +105,7 @@ def build_dialogue_prompt(
         level=level,
         situation=situation,
         politeness_level=politeness_level,
+        scenario_description=scenario_description.strip() or "Không có yêu cầu đặc biệt, hãy phát triển diễn biến tự nhiên.",
         vocab_list="\n".join(f"- {v}" for v in vocab) or "Không có yêu cầu cụ thể",
         grammar_list="\n".join(f"- {g}" for g in grammar) or "Không có yêu cầu cụ thể",
     )
@@ -117,6 +119,7 @@ def generate_dialogue(
     level: str = "trung bình",
     situation: str = "Tự nhiên / Thông thường",
     politeness_level: str = "Lịch sự (です/ます)",
+    scenario_description: str = "",
     max_retries: int = 2,
     variation_context: str | None = None,
 ) -> dict[str, Any]:
@@ -129,10 +132,10 @@ def generate_dialogue(
     last_result = None
     for attempt in range(max_retries + 1):
         prompt = build_dialogue_prompt(
-            topic, language, vocab, grammar, level, situation, politeness_level
+            topic, language, vocab, grammar, level, situation, politeness_level, scenario_description
         )
         if variation_context:
-            prompt += f"\n\nYÊU CẦU BIẾN THỂ: Tạo một biến thể HOÀN TOÀN MỚI về diễn biến/tình huống so với đoạn hội thoại trước đó sau đây, nhưng vẫn đáp ứng đủ từ vựng/ngữ pháp:\n{variation_context}"
+            prompt += f"\n\nYÊU CẦU BIẾN THỂ: Tạo một biến thể HOÀN TOÀN MỚI về diễn biến/tình huống so với đoạn hội thoại trước đó sau đây, nhưng vẫn đáp ứng đủ từ vựng/ngữ pháp và định hướng diễn biến:\n{variation_context}"
 
         if attempt > 0 and last_result:
             missing = [t for t, covered in last_result["coverage_check"].items() if not covered]
@@ -152,6 +155,7 @@ def generate_dialogue(
             "level": level,
             "situation": situation,
             "politeness_level": politeness_level,
+            "scenario_description": scenario_description,
             "dialogue": dialogue,
             "vocab_used": vocab_check,
             "grammar_used": grammar_check,
@@ -180,6 +184,8 @@ def generate_variation(previous_result: dict[str, Any]) -> dict[str, Any]:
         level=previous_result.get("level", "trung bình"),
         situation=previous_result.get("situation", "Tự nhiên / Thông thường"),
         politeness_level=previous_result.get("politeness_level", "Lịch sự (です/ます)"),
+        scenario_description=previous_result.get("scenario_description", ""),
         variation_context=prev_turns,
     )
+
 

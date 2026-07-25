@@ -1656,6 +1656,14 @@ with tab_dialogue:
         key="dlg_topic_input",
     )
 
+    scenario_input = st.text_area(
+        "Miêu tả diễn biến / trường hợp cụ thể (định hướng hội thoại):",
+        placeholder="Ví dụ: A là khách muốn đổi món do bị dị ứng hải sản, B là bồi bàn lịch sự xin lỗi và gợi ý món thay thế.",
+        help="Nhập hoàn cảnh hoặc hướng diễn biến cụ thể bạn muốn cuộc hội thoại diễn ra",
+        key="dlg_scenario_input",
+        height=80,
+    )
+
     vocab_input = st.text_area(
         "Từ vựng muốn luyện (mỗi từ 1 dòng, có thể để trống):",
         key="dlg_vocab_input",
@@ -1679,7 +1687,7 @@ with tab_dialogue:
         with st.spinner("Đang tạo hội thoại..."):
             try:
                 result = generate_dialogue(
-                    topic_input, dlg_language, vocab_list, grammar_list, dlg_level, dlg_situation, dlg_politeness
+                    topic_input, dlg_language, vocab_list, grammar_list, dlg_level, dlg_situation, dlg_politeness, scenario_input
                 )
                 st.session_state.dialogue_result = result
                 st.session_state.dialogue_quiz = generate_pure_quiz(result)
@@ -1704,7 +1712,10 @@ with tab_dialogue:
     if st.session_state.dialogue_result:
         r = st.session_state.dialogue_result
         st.markdown(f"### 📖 Chủ đề: {r['topic']}")
-        st.caption(f"Tình huống: {r.get('situation', 'Thông thường')} | Kính ngữ: {r.get('politeness_level', 'Lịch sự')}")
+        meta_info = f"Tình huống: {r.get('situation', 'Thông thường')} | Kính ngữ: {r.get('politeness_level', 'Lịch sự')}"
+        if r.get("scenario_description"):
+            meta_info += f" | Miêu tả hoàn cảnh: _{r['scenario_description']}_"
+        st.caption(meta_info)
 
         for turn_idx, turn in enumerate(r["dialogue"]):
             icon = "🗣️" if turn["speaker"] == "A" else "💭"
@@ -1841,6 +1852,7 @@ with tab_dialogue:
                 "level": "Cấp độ",
                 "situation": "Tình huống",
                 "politeness_level": "Kính ngữ",
+                "scenario_description": "Miêu tả hoàn cảnh",
                 "quiz_score": "Điểm Quiz",
             },
             hide_index=True,
