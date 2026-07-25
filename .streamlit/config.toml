@@ -6,4 +6,8 @@ scriptHealthCheckEnabled = false
 gatherUsageStats = false
 
 [theme]
-base = "dark"
+primaryColor = "#7C3AED"
+backgroundColor = "#FAFAFF"
+secondaryBackgroundColor = "#F3F0FF"
+textColor = "#1E1B4B"
+font = "sans serif"
