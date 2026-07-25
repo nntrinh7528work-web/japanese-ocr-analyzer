@@ -40,6 +40,13 @@ def render_sidebar(
     st.sidebar.divider()
     st.sidebar.header("⚙️ Settings")
 
+    dark_mode = st.sidebar.toggle(
+        "🌙 Chế độ tối (Dark Mode)",
+        value=st.session_state.get("dark_mode", False),
+        key="dark_mode_toggle",
+    )
+    st.session_state["dark_mode"] = dark_mode
+
     show_preprocessing = st.sidebar.toggle("Hiển thị chi tiết tiền xử lý", value=True)
     st.sidebar.caption(f"Ảnh tối đa {MAX_IMAGE_SIZE_MB} MB · PDF tối đa {MAX_PDF_SIZE_MB} MB/{MAX_PDF_PAGES} trang")
 
@@ -90,6 +97,7 @@ def render_sidebar(
         st.write("4. Phân tích chung tất cả nội dung đã OCR.")
 
     return {
+        "dark_mode": dark_mode,
         "show_preprocessing": show_preprocessing,
         "ocr_model_choice": ocr_model_choice,
         "text_model_choice": text_model_choice,

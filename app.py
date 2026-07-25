@@ -25,7 +25,6 @@ from ui_helpers import (
 text_analyzer = importlib.reload(text_analyzer)
 
 st.set_page_config(page_title="Japanese / English OCR Analyzer", page_icon="🔍", layout="wide")
-inject_custom_css()
 
 # Session State Initialization
 for key, default in {
@@ -43,6 +42,7 @@ for key, default in {
     "dialogue_result": None,
     "dialogue_quiz": None,
     "revealed_turns": {},
+    "dark_mode": False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -185,13 +185,14 @@ def run_item_ocr(item: dict, model_name: str | None = None) -> None:
 st.title("🔍 Japanese / English OCR Analyzer")
 st.caption("Tải nhiều ảnh hoặc PDF, OCR từng trang hoặc toàn bộ, rồi chọn phân tích tiếng Nhật hoặc tiếng Anh.")
 
-# ── Sidebar ──
+# ── Sidebar & Theme Injection ──
 config = render_sidebar(
     st.session_state.image_items,
     clear_analysis_fn=clear_analysis,
     persist_items_fn=_persist_items,
     persist_analysis_fn=_persist_analysis,
 )
+inject_custom_css(dark_mode=config.get("dark_mode", False))
 
 # ── Main Content Tabs ──
 tab_ocr, tab_dialogue = st.tabs(["📷 Phân tích từ Ảnh / PDF", "💬 Luyện Hội Thoại"])
