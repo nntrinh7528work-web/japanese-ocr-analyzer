@@ -189,3 +189,50 @@ def generate_variation(previous_result: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def suggest_vocab_grammar(topic: str, language: str, level: str) -> dict[str, list[str]]:
+    """Suggest vocabulary and grammar structures appropriate for a given topic, language, and level."""
+    model = _init_model()
+    prompt = f"""Hãy đề xuất khoảng 3-5 từ vựng (kèm nghĩa tiếng Việt) và 2-3 cấu trúc ngữ pháp (kèm công thức hoặc cách dùng/ý nghĩa ngắn gọn bằng tiếng Việt) phù hợp cho việc luyện nói về chủ đề "{topic}" bằng {language} ở trình độ {level}.
+
+Xuất theo định dạng chính xác sau:
+
+---SUGGESTIONS_START---
+VOCAB:
+- [Từ vựng 1] : [Nghĩa và giải thích ngắn]
+- [Từ vựng 2] : [Nghĩa và giải thích ngắn]
+- [Từ vựng 3] : [Nghĩa và giải thích ngắn]
+GRAMMAR:
+- [Ngữ pháp 1] : [Công thức hoặc ý nghĩa ngắn]
+- [Ngữ pháp 2] : [Công thức hoặc ý nghĩa ngắn]
+---SUGGESTIONS_END---"""
+    
+    response = model.generate_content(prompt, generation_config={"temperature": 0.7})
+    section = _section(response.text, "SUGGESTIONS")
+    
+    vocab = []
+    grammar = []
+    
+    current_mode = None
+    for line in section.splitlines():
+        line_str = line.strip()
+        if not line_str:
+            continue
+        if line_str.startswith("VOCAB:"):
+            current_mode = "vocab"
+            continue
+        elif line_str.startswith("GRAMMAR:"):
+            current_mode = "grammar"
+            continue
+        
+        if line_str.startswith("-"):
+            # strip the leading dash and any whitespace
+            item = line_str[1:].strip()
+            if current_mode == "vocab":
+                vocab.append(item)
+            elif current_mode == "grammar":
+                grammar.append(item)
+                
+    return {"vocab": vocab, "grammar": grammar}
+
+
+

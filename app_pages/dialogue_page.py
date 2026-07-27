@@ -8,7 +8,7 @@ from modules.dialogue_exporter import (
     export_dialogue_to_json,
     export_dialogue_to_text,
 )
-from modules.dialogue_generator import generate_dialogue, generate_variation, suggest_topics
+from modules.dialogue_generator import generate_dialogue, generate_variation, suggest_topics, suggest_vocab_grammar
 from modules.dialogue_history import (
     get_due_sm2_cards,
     get_practice_history,
@@ -100,6 +100,57 @@ def render_dialogue_tab() -> None:
         for t in st.session_state.suggested_topics:
             if st.button(f"📌 {t['topic']}", key=f"topic_{t['topic']}"):
                 st.session_state.selected_topic = t["topic"]
+                st.session_state.active_suggested_topic = t["topic"]
+                st.session_state.suggested_vocab_grammar = None
+
+    # Load vocab & grammar suggestions automatically for selected topic
+    if st.session_state.get("active_suggested_topic"):
+        active_topic = st.session_state.active_suggested_topic
+        if not st.session_state.get("suggested_vocab_grammar") or st.session_state.get("suggested_vocab_grammar_topic") != active_topic:
+            with st.spinner(f"Đang gợi ý từ vựng & ngữ pháp cho chủ đề: {active_topic}..."):
+                try:
+                    suggestions = suggest_vocab_grammar(active_topic, dlg_language, dlg_level)
+                    st.session_state.suggested_vocab_grammar = suggestions
+                    st.session_state.suggested_vocab_grammar_topic = active_topic
+                except Exception as e:
+                    st.error(f"Không thể lấy gợi ý: {e}")
+
+    # Display suggestions if loaded
+    if st.session_state.get("suggested_vocab_grammar"):
+        suggestions = st.session_state.suggested_vocab_grammar
+        active_topic = st.session_state.active_suggested_topic
+        
+        with st.container(border=True):
+            st.markdown(f"### 💡 Gợi ý học tập cho chủ đề: **{active_topic}**")
+            col_v, col_g = st.columns(2)
+            with col_v:
+                st.markdown("**Từ vựng nên dùng:**")
+                for item in suggestions["vocab"]:
+                    st.markdown(f"- {item}")
+            with col_g:
+                st.markdown("**Cấu trúc ngữ pháp đề xuất:**")
+                for item in suggestions["grammar"]:
+                    st.markdown(f"- {item}")
+            
+            if st.button("📥 Áp dụng từ vựng & ngữ pháp gợi ý vào form", key="apply_suggestions_btn", type="primary", use_container_width=True):
+                # Extract base words/phrases (before the colon)
+                vocab_lines = []
+                for item in suggestions["vocab"]:
+                    parts = item.split(":")
+                    vocab_lines.append(parts[0].strip())
+                
+                grammar_lines = []
+                for item in suggestions["grammar"]:
+                    parts = item.split(":")
+                    grammar_lines.append(parts[0].strip())
+                
+                st.session_state.selected_topic = active_topic
+                # Populate textareas directly
+                st.session_state["dlg_topic_input"] = active_topic
+                st.session_state["dlg_vocab_input"] = "\n".join(vocab_lines)
+                st.session_state["dlg_grammar_input"] = "\n".join(grammar_lines)
+                st.toast("Đã áp dụng từ vựng & ngữ pháp gợi ý vào biểu mẫu tự luyện!")
+                st.rerun()
 
     topic_input = st.text_input(
         "Hoặc nhập chủ đề của riêng bạn:",
