@@ -233,8 +233,17 @@ def inject_custom_css(dark_mode: bool = False) -> None:
         }}
 
         /* ── Labels & Text ── */
-        label, p, span, div {{
-            color: {text_primary};
+        label, p, li {{
+            color: {text_primary} !important;
+        }}
+        [data-testid="stMarkdownContainer"] p, 
+        [data-testid="stMarkdownContainer"] li,
+        [data-testid="stMarkdownContainer"] span,
+        [data-testid="stMarkdownContainer"] ol,
+        [data-testid="stMarkdownContainer"] ul,
+        [data-testid="stMarkdownContainer"] strong,
+        [data-testid="stMarkdownContainer"] em {{
+            color: {text_primary} !important;
         }}
 
         /* ── Dividers ── */

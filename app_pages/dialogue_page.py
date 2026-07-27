@@ -74,16 +74,23 @@ def render_dialogue_tab() -> None:
             key="dlg_situation",
         )
     with c_pol:
+        if dlg_language == "Tiếng Anh":
+            politeness_options = ["Lịch sự (Polite)", "Thân mật (Casual)", "Trang trọng (Formal)"]
+        else:
+            politeness_options = ["Lịch sự (です/ます)", "Thân mật (タメ口)", "Kính ngữ (敬語)", "Khiêm nhường ngữ (謙醸語)"]
         dlg_politeness = st.selectbox(
             "Phong cách / Kính ngữ:",
-            ["Lịch sự (です/ます)", "Thân mật (タメ口)", "Kính ngữ (敬語)", "Khiêm nhường ngữ (謙醸語)"],
+            politeness_options,
             key="dlg_politeness",
         )
 
     # ── Display Toggles ──
     col_t1, col_t2, col_t3, col_t4 = st.columns(4)
     with col_t1:
-        show_hiragana = st.toggle("Hiển thị Hiragana", value=True, key="dlg_show_hira")
+        if dlg_language == "Tiếng Nhật":
+            show_hiragana = st.toggle("Hiển thị Hiragana", value=True, key="dlg_show_hira")
+        else:
+            show_hiragana = False
     with col_t2:
         show_translation = st.toggle("Hiển thị dịch tiếng Việt", value=True, key="dlg_show_vi")
     with col_t3:
@@ -220,12 +227,15 @@ def render_dialogue_tab() -> None:
             meta_info += f" | Miêu tả hoàn cảnh: _{r['scenario_description']}_"
         st.caption(meta_info)
 
+        is_english = "english" in str(r.get("language") or dlg_language).lower() or "tiếng anh" in str(r.get("language") or dlg_language).lower()
+        tts_lang = "en" if is_english else "ja"
+
         # TTS: Play all button
         if enable_tts:
             if st.button("🔊 Phát toàn bộ hội thoại", key="btn_play_all_tts"):
                 with st.spinner("Đang tạo audio..."):
                     all_text = "\n".join(t["text"] for t in r["dialogue"] if t.get("text"))
-                    full_audio = text_to_speech(all_text, lang="ja", slow=tts_slow)
+                    full_audio = text_to_speech(all_text, lang=tts_lang, slow=tts_slow)
                     if full_audio:
                         st.session_state["tts_full_audio"] = full_audio
             if st.session_state.get("tts_full_audio"):
@@ -248,7 +258,7 @@ def render_dialogue_tab() -> None:
             if enable_tts:
                 tts_cache_key = f"tts_audio_{turn_idx}_{tts_slow}"
                 if st.button(f"🔊 Nghe câu {turn['speaker']} ({turn_idx + 1})", key=f"tts_{turn_idx}"):
-                    audio_data = text_to_speech(turn["text"], lang="ja", slow=tts_slow)
+                    audio_data = text_to_speech(turn["text"], lang=tts_lang, slow=tts_slow)
                     if audio_data:
                         st.session_state[tts_cache_key] = audio_data
                     else:
@@ -286,7 +296,8 @@ def render_dialogue_tab() -> None:
         st.markdown("### 📝 Mini Quiz (Luyện tập sau bài học)")
         if st.session_state.dialogue_quiz:
             quiz = st.session_state.dialogue_quiz
-            q_tab1, q_tab2, q_tab3, q_tab4 = st.tabs(["1. Điền từ (Cloze)", "2. Trắc nghiệm nghĩa", "3. Sắp xếp câu", "4. Dịch Việt - Nhật"])
+            tab4_title = "4. Dịch Việt - Anh" if is_english else "4. Dịch Việt - Nhật"
+            q_tab1, q_tab2, q_tab3, q_tab4 = st.tabs(["1. Điền từ (Cloze)", "2. Trắc nghiệm nghĩa", "3. Sắp xếp câu", tab4_title])
 
             with q_tab1:
                 if quiz.get("cloze"):
@@ -332,10 +343,14 @@ def render_dialogue_tab() -> None:
             with q_tab4:
                 if quiz.get("translate"):
                     for q in quiz["translate"]:
-                        st.markdown(f"**Dịch sang tiếng Nhật:** _{q['prompt_vi']}_")
+                        lang_name = "Anh" if is_english else "Nhật"
+                        st.markdown(f"**Dịch sang tiếng {lang_name}:** _{q['prompt_vi']}_")
                         user_trans = st.text_input("Câu trả lời của bạn:", key=f"ui_{q['id']}")
                         if st.button("Xem đáp án", key=f"btn_{q['id']}"):
-                            st.info(f"Câu gốc: `{q['correct_jp']}` ({q['text_hira']})")
+                            if is_english or not q.get("text_hira"):
+                                st.info(f"Câu gốc: `{q['correct_jp']}`")
+                            else:
+                                st.info(f"Câu gốc: `{q['correct_jp']}` ({q['text_hira']})")
 
         # ── EXPORT BUTTONS ──
         st.divider()

@@ -17,6 +17,9 @@ def generate_pure_quiz(result: dict[str, Any]) -> dict[str, list[dict[str, Any]]
     reorder_questions = []
     translate_questions = []
 
+    # Detect if English
+    is_english = "english" in str(result.get("language", "")).lower() or "tiếng anh" in str(result.get("language", "")).lower()
+
     # 1. Cloze Questions (Fill-in-the-blank)
     for turn_idx, turn in enumerate(dialogue):
         highlights = turn.get("highlights", [])
@@ -29,20 +32,21 @@ def generate_pure_quiz(result: dict[str, Any]) -> dict[str, list[dict[str, Any]]
                     "sentence": masked_text,
                     "target_word": word,
                     "text_vi": turn.get("text_vi", ""),
-                    "options": _generate_distractors(word, result),
+                    "options": _generate_distractors(word, result, is_english),
                 })
 
     # 2. MCQ Questions (Vocab & Meaning from summary/notes)
-    # Parse vocabulary lines from summary or notes like "予約 (yoyaku): đặt trước"
-    vocab_lines = re.findall(r"([一-龯ぁ-んァ-ヶa-zA-Z0-9〜\-\s]+)\s*\((.*?)\)?\s*:\s*(.+)", summary)
+    # Parse vocabulary lines from summary or notes supporting both Japanese 'word (reading): meaning' and English 'word: meaning'
+    vocab_lines = re.findall(r"([一-龯ぁ-んァ-ヶa-zA-Z0-9〜\-\s'\"]+?)(?:\s*\((.*?)\))?\s*:\s*(.+)", summary)
     for v_idx, match in enumerate(vocab_lines):
         word = match[0].strip()
-        reading = match[1].strip()
+        reading = match[1].strip() if match[1] else ""
         meaning = match[2].strip()
         if word and meaning:
+            question_text = f"Từ vựng/cấu trúc `{word}` ({reading}) có nghĩa là gì?" if reading else f"Từ vựng/cấu trúc `{word}` có nghĩa là gì?"
             mcq_questions.append({
                 "id": f"mcq_{v_idx}",
-                "question": f"Từ vựng/cấu trúc `{word}` ({reading}) có nghĩa là gì?",
+                "question": question_text,
                 "correct_answer": meaning,
                 "options": _generate_mcq_options(meaning),
             })
@@ -51,7 +55,7 @@ def generate_pure_quiz(result: dict[str, Any]) -> dict[str, list[dict[str, Any]]
     for turn_idx, turn in enumerate(dialogue[:4]): # Take up to 4 turns
         text = turn.get("text", "")
         # Break sentence into 3-5 word chunks
-        tokens = [t for t in re.split(r"(| |、|。|\?|！)", text) if t.strip()]
+        tokens = [t for t in re.split(r"(\s+|、|。|\?|！)", text) if t.strip()]
         if len(tokens) >= 3:
             shuffled = tokens.copy()
             random.seed(turn_idx + 42)
@@ -63,7 +67,7 @@ def generate_pure_quiz(result: dict[str, Any]) -> dict[str, list[dict[str, Any]]
                 "shuffled_tokens": shuffled,
             })
 
-    # 4. Translation Questions (VI -> JP)
+    # 4. Translation Questions (VI -> JP/EN)
     for turn_idx, turn in enumerate(dialogue):
         if turn.get("text_vi") and turn.get("text"):
             translate_questions.append({
@@ -81,7 +85,7 @@ def generate_pure_quiz(result: dict[str, Any]) -> dict[str, list[dict[str, Any]]
     }
 
 
-def _generate_distractors(correct_word: str, result: dict[str, Any]) -> list[str]:
+def _generate_distractors(correct_word: str, result: dict[str, Any], is_english: bool) -> list[str]:
     """Generate options for cloze test including correct word and distractors."""
     # Gather other words used in dialogue
     all_highlights = []
@@ -89,7 +93,11 @@ def _generate_distractors(correct_word: str, result: dict[str, Any]) -> list[str
         all_highlights.extend(t.get("highlights", []))
 
     distractors = [w for w in set(all_highlights) if w != correct_word]
-    defaults = ["予約", "確認", "相談", "案内", "注文", "準備", "連絡"]
+    if is_english:
+        defaults = ["confirm", "request", "order", "reservation", "cancel", "check", "inquire"]
+    else:
+        defaults = ["予約", "確認", "相談", "案内", "注文", "準備", "連絡"]
+        
     for d in defaults:
         if d not in distractors and d != correct_word:
             distractors.append(d)
