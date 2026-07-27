@@ -242,25 +242,72 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             border-color: {divider_color} !important;
         }}
 
-        /* ── File Uploader Dropzone ── */
-        [data-testid="stFileUploaderDropzone"] {{
+        /* ── File Uploader & File List Items ── */
+        [data-testid="stFileUploader"],
+        [data-testid="stFileUploaderDropzone"],
+        section[data-testid="stFileUploaderDropzone"] {{
             min-height: 140px;
             border: 2px dashed {dropzone_border} !important;
-            border-radius: 16px;
+            border-radius: 16px !important;
             background: {dropzone_bg} !important;
             backdrop-filter: blur(8px);
             -webkit-backdrop-filter: blur(8px);
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            color: {text_primary} !important;
         }}
         [data-testid="stFileUploaderDropzone"]:hover {{
             border-color: {glass_hover_border} !important;
             box-shadow: {glass_hover_shadow};
             transform: scale(1.005);
         }}
-        [data-testid="stFileUploaderDropzone"] button {{
-            min-height: 44px;
+        [data-testid="stFileUploaderDropzone"] button,
+        [data-testid="stFileUploader"] button {{
+            min-height: 40px;
             font-weight: 700;
             border-radius: 12px;
+            background: {glass_bg} !important;
+            color: {text_primary} !important;
+            border: 1px solid {glass_border} !important;
+        }}
+        [data-testid="stFileUploaderFile"],
+        [data-testid="stFileUploaderFileData"],
+        div[data-testid="stFileUploaderFileContainer"],
+        section[data-testid="stFileUploaderDropzone"] + div {{
+            background: {glass_bg} !important;
+            border: 1px solid {glass_border} !important;
+            border-radius: 12px !important;
+            color: {text_primary} !important;
+        }}
+        [data-testid="stFileUploaderFile"] *,
+        [data-testid="stFileUploaderFileData"] * {{
+            color: {text_primary} !important;
+        }}
+
+        /* ── Camera Input ── */
+        [data-testid="stCameraInput"],
+        [data-testid="stCameraInput"] > div {{
+            background: {glass_bg} !important;
+            border-radius: 16px !important;
+            border: 1px solid {glass_border} !important;
+            color: {text_primary} !important;
+        }}
+
+        /* ── Radio Buttons & Checkboxes / Toggles (Dialogue & Quiz) ── */
+        [data-testid="stRadio"],
+        [data-testid="stCheckbox"],
+        [data-testid="stToggle"],
+        div[role="radiogroup"] {{
+            color: {text_primary} !important;
+        }}
+        div[role="radiogroup"] label,
+        div[role="radiogroup"] label *,
+        [data-testid="stRadio"] label,
+        [data-testid="stRadio"] label * {{
+            color: {text_primary} !important;
+            background: transparent !important;
+        }}
+        div[role="radiogroup"] > div {{
+            background: transparent !important;
         }}
 
         /* ── Buttons ── */
@@ -360,6 +407,7 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             transition: all 0.2s ease;
             font-size: 0.88rem;
             color: {text_secondary} !important;
+            background: transparent !important;
         }}
         .stTabs [aria-selected="true"] {{
             background: {tab_active_bg} !important;
@@ -437,16 +485,23 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             color: {tab_active_text} !important;
         }}
 
-        /* ── Alert Boxes (st.info, st.warning, st.error, st.success) ── */
+        /* ── Alert Boxes Callouts (st.info, st.warning, st.error, st.success) ── */
         [data-testid="stAlert"],
         div[role="alert"] {{
             border-radius: 12px !important;
             backdrop-filter: blur(8px);
             -webkit-backdrop-filter: blur(8px);
+            background: {glass_bg} !important;
+            border: 1px solid {glass_border} !important;
+            color: {text_primary} !important;
+        }}
+        [data-testid="stAlert"] * {{
+            color: {text_primary} !important;
         }}
         div[data-baseweb="notification"] {{
             background: {glass_bg} !important;
             border-radius: 12px !important;
+            color: {text_primary} !important;
         }}
 
         /* ── Progress Bar ── */
@@ -456,14 +511,16 @@ def inject_custom_css(dark_mode: bool = False) -> None:
         }}
 
         /* ── Dataframe & Tables ── */
-        [data-testid="stDataFrame"], div[data-testid="stTable"] {{
+        [data-testid="stDataFrame"], div[data-testid="stTable"], table {{
             border-radius: 12px;
             overflow: hidden;
             border: 1px solid {glass_border} !important;
             background: {glass_bg} !important;
-        }}
-        [data-testid="stDataFrame"] * {{
             color: {text_primary} !important;
+        }}
+        [data-testid="stDataFrame"] *, table * {{
+            color: {text_primary} !important;
+            background: transparent !important;
         }}
 
         /* ── Code blocks ── */
