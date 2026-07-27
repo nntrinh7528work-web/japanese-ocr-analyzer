@@ -11,27 +11,31 @@ from unittest.mock import patch, MagicMock
 class TestTextToSpeech(unittest.TestCase):
     """Tests for the text_to_speech function."""
 
-    def _setup_gtts_mock(self):
-        """Create a fake gtts module with a mock gTTS class."""
+    def _setup_edge_tts_mock(self):
+        """Create a fake edge_tts module with mock stream & Communicate class."""
         mock_instance = MagicMock()
-        mock_instance.write_to_fp = lambda fp: fp.write(b"fake_audio_data")
-        mock_gtts_cls = MagicMock(return_value=mock_instance)
+        
+        async def mock_stream():
+            yield {"type": "audio", "data": b"fake_audio_data"}
+            
+        mock_instance.stream = mock_stream
+        mock_comm_cls = MagicMock(return_value=mock_instance)
 
-        fake_module = types.ModuleType("gtts")
-        fake_module.gTTS = mock_gtts_cls
-        return fake_module, mock_gtts_cls
+        fake_module = types.ModuleType("edge_tts")
+        fake_module.Communicate = mock_comm_cls
+        return fake_module, mock_comm_cls
 
     def test_basic_generation(self):
         """Test that audio bytes are returned for valid text."""
         from modules.tts_engine import text_to_speech
 
-        fake_module, mock_cls = self._setup_gtts_mock()
-        with patch.dict(sys.modules, {"gtts": fake_module}):
+        fake_module, mock_cls = self._setup_edge_tts_mock()
+        with patch.dict(sys.modules, {"edge_tts": fake_module}):
             result = text_to_speech("こんにちは", lang="ja", slow=False)
 
         self.assertIsNotNone(result)
         self.assertEqual(result, b"fake_audio_data")
-        mock_cls.assert_called_once_with(text="こんにちは", lang="ja", slow=False)
+        mock_cls.assert_called_once_with("こんにちは", "ja-JP-NanamiNeural", rate="+0%")
 
     def test_empty_text_returns_none(self):
         """Test that empty or whitespace text returns None."""
@@ -45,10 +49,10 @@ class TestTextToSpeech(unittest.TestCase):
         """Test that slow mode parameter is passed correctly."""
         from modules.tts_engine import text_to_speech
 
-        fake_module, mock_cls = self._setup_gtts_mock()
-        with patch.dict(sys.modules, {"gtts": fake_module}):
+        fake_module, mock_cls = self._setup_edge_tts_mock()
+        with patch.dict(sys.modules, {"edge_tts": fake_module}):
             text_to_speech("テスト", lang="ja", slow=True)
-            mock_cls.assert_called_once_with(text="テスト", lang="ja", slow=True)
+            mock_cls.assert_called_once_with("テスト", "ja-JP-NanamiNeural", rate="-20%")
 
 
 class TestGenerateDialogueAudio(unittest.TestCase):

@@ -16,3 +16,4 @@ readability-lxml>=0.8.1
 fundus>=0.4.1
 lxml_html_clean>=0.4.1
 gTTS>=2.5.0
+edge-tts>=6.1.3

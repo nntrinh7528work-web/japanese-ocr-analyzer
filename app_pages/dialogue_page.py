@@ -17,7 +17,7 @@ from modules.dialogue_history import (
     update_sm2_card,
 )
 from modules.dialogue_quiz import generate_pure_quiz
-from modules.tts_engine import text_to_speech
+from modules.tts_engine import text_to_speech, generate_full_dialogue_audio
 
 
 def render_dialogue_tab() -> None:
@@ -234,8 +234,7 @@ def render_dialogue_tab() -> None:
         if enable_tts:
             if st.button("🔊 Phát toàn bộ hội thoại", key="btn_play_all_tts"):
                 with st.spinner("Đang tạo audio..."):
-                    all_text = "\n".join(t["text"] for t in r["dialogue"] if t.get("text"))
-                    full_audio = text_to_speech(all_text, lang=tts_lang, slow=tts_slow)
+                    full_audio = generate_full_dialogue_audio(r["dialogue"], lang=tts_lang, slow=tts_slow)
                     if full_audio:
                         st.session_state["tts_full_audio"] = full_audio
             if st.session_state.get("tts_full_audio"):
@@ -258,7 +257,7 @@ def render_dialogue_tab() -> None:
             if enable_tts:
                 tts_cache_key = f"tts_audio_{turn_idx}_{tts_slow}"
                 if st.button(f"🔊 Nghe câu {turn['speaker']} ({turn_idx + 1})", key=f"tts_{turn_idx}"):
-                    audio_data = text_to_speech(turn["text"], lang=tts_lang, slow=tts_slow)
+                    audio_data = text_to_speech(turn["text"], lang=tts_lang, slow=tts_slow, speaker=turn["speaker"])
                     if audio_data:
                         st.session_state[tts_cache_key] = audio_data
                     else:
