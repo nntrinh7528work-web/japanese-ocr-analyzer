@@ -15,7 +15,8 @@ def _image_bytes(color):
 def test_app_starts_without_upload():
     app = AppTest.from_file("app.py").run(timeout=20)
     assert not app.exception
-    assert app.title[0].value == "🔍 Japanese / English OCR Analyzer"
+    # Branded header is rendered via st.markdown, not st.title
+    assert any("Japanese / English OCR Analyzer" in m.value for m in app.markdown)
     assert any("một hoặc nhiều ảnh/PDF" in item.value for item in app.info)
     assert len(app.tabs) == 4
 

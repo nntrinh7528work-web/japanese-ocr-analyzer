@@ -10,7 +10,7 @@ from modules import session_store
 import modules.text_analyzer as text_analyzer
 from modules.job_store import get_job
 
-from components.styles import inject_custom_css
+from components.styles import inject_custom_css, render_branded_header
 from components.sidebar import render_sidebar
 from components.helpers import (
     COLUMN_LABELS,
@@ -182,8 +182,7 @@ def run_item_ocr(item: dict, model_name: str | None = None) -> None:
 
 
 # ── Title & Branding ──
-st.title("🔍 Japanese / English OCR Analyzer")
-st.caption("Tải nhiều ảnh hoặc PDF, OCR từng trang hoặc toàn bộ, rồi chọn phân tích tiếng Nhật hoặc tiếng Anh.")
+render_branded_header()
 
 # ── Sidebar & Theme Injection ──
 config = render_sidebar(

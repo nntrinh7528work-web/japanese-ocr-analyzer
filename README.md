@@ -1,3 +1,14 @@
+---
+title: Japanese OCR Analyzer
+emoji: 🔍
+colorFrom: purple
+colorTo: indigo
+sdk: streamlit
+sdk_version: 1.35.0
+app_file: app.py
+pinned: false
+---
+
 # Japanese OCR Analyzer
 
 Ứng dụng Streamlit xử lý ảnh, OCR văn bản tiếng Nhật bằng Gemini 3.5 Flash và phân tích ngôn ngữ bằng Gemini 3.1 Pro (hỗ trợ tùy chọn linh hoạt model trên giao diện UI).

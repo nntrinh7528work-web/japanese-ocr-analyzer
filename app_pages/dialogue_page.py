@@ -27,7 +27,14 @@ def render_dialogue_tab() -> None:
     # ── Display streak & due SM-2 cards notice ──
     streak = get_streak_days()
     due_cards = get_due_sm2_cards()
-    st.info(f"🔥 **Streak hiện tại:** `{streak}` ngày liên tục | 🧠 **Từ vựng cần ôn hôm nay (SM-2):** `{len(due_cards)}` từ")
+    st.markdown(
+        f"""<div class="streak-banner">
+            <span class="streak-number">🔥 {streak}</span>
+            <span>ngày liên tục</span>
+            <span style="margin-left: auto;">🧠 <strong>{len(due_cards)}</strong> từ cần ôn hôm nay</span>
+        </div>""",
+        unsafe_allow_html=True,
+    )
 
     # ── Spaced Repetition Section ──
     if due_cards:

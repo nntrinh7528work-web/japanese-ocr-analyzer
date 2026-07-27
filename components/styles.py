@@ -1,122 +1,230 @@
-"""Youthful & Modern Custom CSS styling (Light & Dark Mode) for Japanese / English OCR Analyzer."""
+"""Premium Glassmorphism CSS styling (Light & Dark Mode) for Japanese / English OCR Analyzer."""
 
 from __future__ import annotations
 import streamlit as st
 
 
 def inject_custom_css(dark_mode: bool = False) -> None:
-    """Inject modern CSS styles for Light Mode or Youthful Soft Dark Mode."""
+    """Inject premium glassmorphism CSS for Light or Dark mode."""
     if dark_mode:
-        bg_app = "#0F172A"
-        card_bg = "#18182C"
-        card_border = "#2E2A5B"
-        card_hover_border = "#A855F7"
-        text_primary = "#F8FAFC"
-        text_muted = "#CBD5E1"
-        metric_bg = "linear-gradient(135deg, #1E1B4B 0%, #2E1065 100%)"
-        metric_border = "#4C1D95"
-        metric_label = "#C084FC"
-        metric_value = "#E9D5FF"
-        dropzone_bg = "linear-gradient(135deg, #1E1B4B 0%, #170E38 100%)"
-        dropzone_border = "#A855F7"
-        btn_primary_bg = "linear-gradient(135deg, #9333EA 0%, #7E22CE 100%)"
-        btn_primary_hover = "linear-gradient(135deg, #7E22CE 0%, #6B21A8 100%)"
-        bubble_a_bg = "linear-gradient(135deg, #2E1065 0%, #1E1B4B 100%)"
-        bubble_a_border = "#C084FC"
-        bubble_a_text = "#F3F0FF"
-        bubble_b_bg = "linear-gradient(135deg, #831843 0%, #500724 100%)"
+        # ── Dark Mode Palette ──
+        bg_app = "#0B0E17"
+        bg_gradient = "radial-gradient(ellipse at 20% 0%, rgba(99,102,241,0.12) 0%, transparent 50%), radial-gradient(ellipse at 80% 100%, rgba(168,85,247,0.10) 0%, transparent 50%), #0B0E17"
+        glass_bg = "rgba(17,20,39,0.72)"
+        glass_border = "rgba(148,163,184,0.10)"
+        glass_hover_border = "rgba(168,85,247,0.35)"
+        glass_shadow = "0 8px 32px rgba(0,0,0,0.35)"
+        glass_hover_shadow = "0 12px 40px rgba(139,92,246,0.18)"
+        text_primary = "#F1F5F9"
+        text_secondary = "#94A3B8"
+        text_accent = "#C4B5FD"
+        metric_bg = "linear-gradient(135deg, rgba(30,27,75,0.65) 0%, rgba(46,16,101,0.50) 100%)"
+        metric_border = "rgba(139,92,246,0.25)"
+        metric_label_color = "#A78BFA"
+        metric_value_color = "#E9D5FF"
+        dropzone_bg = "linear-gradient(135deg, rgba(30,27,75,0.40) 0%, rgba(23,14,56,0.40) 100%)"
+        dropzone_border = "rgba(168,85,247,0.45)"
+        btn_primary_bg = "linear-gradient(135deg, #7C3AED 0%, #6366F1 100%)"
+        btn_primary_hover = "linear-gradient(135deg, #6D28D9 0%, #4F46E5 100%)"
+        btn_primary_shadow = "0 4px 20px rgba(124,58,237,0.40)"
+        btn_primary_hover_shadow = "0 6px 28px rgba(124,58,237,0.55)"
+        bubble_a_bg = "linear-gradient(135deg, rgba(30,27,75,0.60) 0%, rgba(49,46,129,0.40) 100%)"
+        bubble_a_border = "#818CF8"
+        bubble_a_text = "#E0E7FF"
+        bubble_b_bg = "linear-gradient(135deg, rgba(131,24,67,0.35) 0%, rgba(80,7,36,0.35) 100%)"
         bubble_b_border = "#F472B6"
         bubble_b_text = "#FCE7F3"
-        tab_active_bg = "#2E1065"
-        tab_active_text = "#C084FC"
+        tab_active_bg = "rgba(99,102,241,0.18)"
+        tab_active_text = "#A5B4FC"
+        tab_active_border = "#818CF8"
+        sidebar_bg = "rgba(15,18,35,0.85)"
+        sidebar_border = "rgba(148,163,184,0.08)"
+        divider_color = "rgba(148,163,184,0.10)"
+        input_bg = "rgba(30,27,75,0.40)"
+        input_border = "rgba(148,163,184,0.15)"
+        input_focus_border = "rgba(139,92,246,0.50)"
+        scrollbar_thumb = "rgba(139,92,246,0.30)"
+        dataframe_header_bg = "rgba(30,27,75,0.60)"
+        success_bg = "rgba(16,185,129,0.12)"
+        success_border = "rgba(16,185,129,0.30)"
+        warning_bg = "rgba(245,158,11,0.12)"
+        warning_border = "rgba(245,158,11,0.30)"
+        info_bg = "rgba(99,102,241,0.12)"
+        info_border = "rgba(99,102,241,0.30)"
+        error_bg = "rgba(239,68,68,0.12)"
+        error_border = "rgba(239,68,68,0.30)"
     else:
-        bg_app = "#FAFAFF"
-        card_bg = "#FFFFFF"
-        card_border = "#E9D5FF"
-        card_hover_border = "#C084FC"
+        # ── Light Mode Palette ──
+        bg_app = "#F8FAFF"
+        bg_gradient = "radial-gradient(ellipse at 20% 0%, rgba(139,92,246,0.06) 0%, transparent 50%), radial-gradient(ellipse at 80% 100%, rgba(99,102,241,0.05) 0%, transparent 50%), #F8FAFF"
+        glass_bg = "rgba(255,255,255,0.72)"
+        glass_border = "rgba(139,92,246,0.12)"
+        glass_hover_border = "rgba(124,58,237,0.30)"
+        glass_shadow = "0 4px 24px rgba(139,92,246,0.06)"
+        glass_hover_shadow = "0 8px 32px rgba(139,92,246,0.12)"
         text_primary = "#1E1B4B"
-        text_muted = "#4C1D95"
-        metric_bg = "linear-gradient(135deg, #F3F0FF 0%, #E9D5FF 100%)"
-        metric_border = "#DDD6FE"
-        metric_label = "#4C1D95"
-        metric_value = "#6D28D9"
-        dropzone_bg = "linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%)"
-        dropzone_border = "#8B5CF6"
-        btn_primary_bg = "linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%)"
-        btn_primary_hover = "linear-gradient(135deg, #6D28D9 0%, #5B21B6 100%)"
-        bubble_a_bg = "linear-gradient(135deg, #F3F0FF 0%, #EDE9FE 100%)"
-        bubble_a_border = "#7C3AED"
-        bubble_a_text = "#1E1B4B"
-        bubble_b_bg = "linear-gradient(135deg, #FDF2F8 0%, #FCE7F3 100%)"
+        text_secondary = "#6366F1"
+        text_accent = "#7C3AED"
+        metric_bg = "linear-gradient(135deg, rgba(243,240,255,0.80) 0%, rgba(233,213,255,0.60) 100%)"
+        metric_border = "rgba(196,181,253,0.40)"
+        metric_label_color = "#6D28D9"
+        metric_value_color = "#4C1D95"
+        dropzone_bg = "linear-gradient(135deg, rgba(245,243,255,0.80) 0%, rgba(237,233,254,0.70) 100%)"
+        dropzone_border = "rgba(139,92,246,0.40)"
+        btn_primary_bg = "linear-gradient(135deg, #7C3AED 0%, #6366F1 100%)"
+        btn_primary_hover = "linear-gradient(135deg, #6D28D9 0%, #4F46E5 100%)"
+        btn_primary_shadow = "0 4px 20px rgba(124,58,237,0.25)"
+        btn_primary_hover_shadow = "0 6px 28px rgba(124,58,237,0.40)"
+        bubble_a_bg = "linear-gradient(135deg, rgba(243,240,255,0.90) 0%, rgba(224,231,255,0.80) 100%)"
+        bubble_a_border = "#6366F1"
+        bubble_a_text = "#312E81"
+        bubble_b_bg = "linear-gradient(135deg, rgba(253,242,248,0.90) 0%, rgba(252,231,243,0.80) 100%)"
         bubble_b_border = "#EC4899"
         bubble_b_text = "#831843"
-        tab_active_bg = "#F3F0FF"
-        tab_active_text = "#7C3AED"
+        tab_active_bg = "rgba(99,102,241,0.10)"
+        tab_active_text = "#4F46E5"
+        tab_active_border = "#6366F1"
+        sidebar_bg = "rgba(255,255,255,0.60)"
+        sidebar_border = "rgba(139,92,246,0.08)"
+        divider_color = "rgba(139,92,246,0.10)"
+        input_bg = "rgba(243,240,255,0.50)"
+        input_border = "rgba(139,92,246,0.15)"
+        input_focus_border = "rgba(124,58,237,0.45)"
+        scrollbar_thumb = "rgba(139,92,246,0.25)"
+        dataframe_header_bg = "rgba(243,240,255,0.80)"
+        success_bg = "rgba(16,185,129,0.08)"
+        success_border = "rgba(16,185,129,0.25)"
+        warning_bg = "rgba(245,158,11,0.08)"
+        warning_border = "rgba(245,158,11,0.25)"
+        info_bg = "rgba(99,102,241,0.08)"
+        info_border = "rgba(99,102,241,0.25)"
+        error_bg = "rgba(239,68,68,0.08)"
+        error_border = "rgba(239,68,68,0.25)"
 
     st.markdown(
         f"""
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 
+        /* ── Global Reset & Typography ── */
         html, body, [class*="css"] {{
-            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }}
 
         .stApp {{
-            background-color: {bg_app};
+            background: {bg_gradient};
             color: {text_primary};
         }}
 
-        [data-testid="stExpander"] {{
-            border: 1px solid {card_border};
-            border-radius: 16px;
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
-            margin-bottom: 16px;
-            background-color: {card_bg};
-            overflow: hidden;
-            transition: all 0.2s ease-in-out;
+        /* ── Animated accent line at top ── */
+        .stApp::before {{
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, #7C3AED, #6366F1, #EC4899, #7C3AED);
+            background-size: 300% 100%;
+            animation: shimmer 4s ease-in-out infinite;
+            z-index: 9999;
         }}
-        [data-testid="stExpander"]:hover {{
-            box-shadow: 0 6px 20px rgba(168, 85, 247, 0.15);
-            border-color: {card_hover_border};
+        @keyframes shimmer {{
+            0%, 100% {{ background-position: 0% 50%; }}
+            50% {{ background-position: 100% 50%; }}
         }}
 
+        /* ── Scrollbar ── */
+        ::-webkit-scrollbar {{
+            width: 6px;
+            height: 6px;
+        }}
+        ::-webkit-scrollbar-track {{
+            background: transparent;
+        }}
+        ::-webkit-scrollbar-thumb {{
+            background: {scrollbar_thumb};
+            border-radius: 3px;
+        }}
+
+        /* ── Glassmorphism Cards (Expanders) ── */
+        [data-testid="stExpander"] {{
+            background: {glass_bg};
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid {glass_border};
+            border-radius: 16px;
+            box-shadow: {glass_shadow};
+            margin-bottom: 12px;
+            overflow: hidden;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }}
+        [data-testid="stExpander"]:hover {{
+            box-shadow: {glass_hover_shadow};
+            border-color: {glass_hover_border};
+            transform: translateY(-1px);
+        }}
+
+        /* ── Metrics with glass effect ── */
         [data-testid="stMetric"] {{
             background: {metric_bg};
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
             border-radius: 14px;
-            padding: 14px 18px;
+            padding: 16px 20px;
             border: 1px solid {metric_border};
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+            transition: all 0.25s ease;
+        }}
+        [data-testid="stMetric"]:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(139,92,246,0.12);
         }}
         [data-testid="stMetricLabel"] {{
             font-weight: 600;
-            color: {metric_label};
-            font-size: 0.85rem;
+            color: {metric_label_color};
+            font-size: 0.8rem;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
         }}
         [data-testid="stMetricValue"] {{
             font-weight: 800;
-            color: {metric_value};
+            color: {metric_value_color};
+            font-size: 1.5rem;
         }}
 
+        /* ── Section Subheaders with gradient underline ── */
         .stSubheader {{
-            border-bottom: 3px solid;
-            border-image: linear-gradient(90deg, #A855F7 0%, #C084FC 60%, transparent 100%) 1;
-            padding-bottom: 8px;
-            margin-bottom: 16px;
+            border-bottom: 2px solid;
+            border-image: linear-gradient(90deg, #7C3AED 0%, #6366F1 40%, transparent 100%) 1;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
             color: {text_primary};
             font-weight: 700;
+            letter-spacing: -0.3px;
         }}
 
+        /* ── Dividers ── */
+        [data-testid="stHorizontalRule"] {{
+            border-color: {divider_color};
+        }}
+
+        /* ── File Uploader Dropzone ── */
         [data-testid="stFileUploaderDropzone"] {{
             min-height: 140px;
             border: 2px dashed {dropzone_border};
             border-radius: 16px;
             background: {dropzone_bg};
-            transition: all 0.25s ease-in-out;
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }}
         [data-testid="stFileUploaderDropzone"]:hover {{
-            border-color: {card_hover_border};
-            box-shadow: 0 4px 16px rgba(168, 85, 247, 0.2);
+            border-color: {glass_hover_border};
+            box-shadow: {glass_hover_shadow};
+            transform: scale(1.005);
         }}
         [data-testid="stFileUploaderDropzone"] button {{
             min-height: 44px;
@@ -124,13 +232,20 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             border-radius: 12px;
         }}
 
+        /* ── Buttons ── */
         .stButton > button {{
             border-radius: 12px;
             font-weight: 600;
-            transition: all 0.2s ease-in-out;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            letter-spacing: 0.2px;
+            border: 1px solid {glass_border};
         }}
         .stButton > button:hover {{
-            transform: translateY(-1px);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+        }}
+        .stButton > button:active {{
+            transform: translateY(0);
         }}
         .stButton > button[kind="primary"] {{
             background: {btn_primary_bg};
@@ -138,46 +253,238 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             font-weight: 700;
             letter-spacing: 0.3px;
             border: none;
-            box-shadow: 0 4px 14px rgba(147, 51, 234, 0.35);
+            box-shadow: {btn_primary_shadow};
         }}
         .stButton > button[kind="primary"]:hover {{
             background: {btn_primary_hover};
-            box-shadow: 0 6px 18px rgba(147, 51, 234, 0.5);
+            box-shadow: {btn_primary_hover_shadow};
         }}
 
+        /* ── Download buttons ── */
+        .stDownloadButton > button {{
+            border-radius: 12px;
+            font-weight: 600;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid {glass_border};
+        }}
+        .stDownloadButton > button:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+            border-color: {glass_hover_border};
+        }}
+
+        /* ── Dialogue Chat Bubbles ── */
         .speaker-bubble-a {{
-            border-left: 5px solid {bubble_a_border};
+            border-left: 4px solid {bubble_a_border};
             background: {bubble_a_bg};
-            padding: 14px 18px;
-            border-radius: 0 16px 16px 0;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            padding: 16px 20px;
+            border-radius: 4px 16px 16px 4px;
             margin-bottom: 10px;
             color: {bubble_a_text};
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+            transition: all 0.2s ease;
+        }}
+        .speaker-bubble-a:hover {{
+            transform: translateX(4px);
+            box-shadow: 0 4px 16px rgba(99,102,241,0.15);
         }}
         .speaker-bubble-b {{
-            border-left: 5px solid {bubble_b_border};
+            border-left: 4px solid {bubble_b_border};
             background: {bubble_b_bg};
-            padding: 14px 18px;
-            border-radius: 0 16px 16px 0;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            padding: 16px 20px;
+            border-radius: 4px 16px 16px 4px;
             margin-bottom: 10px;
             color: {bubble_b_text};
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+            transition: all 0.2s ease;
+        }}
+        .speaker-bubble-b:hover {{
+            transform: translateX(4px);
+            box-shadow: 0 4px 16px rgba(236,72,153,0.15);
         }}
 
+        /* ── Tabs ── */
         .stTabs [data-baseweb="tab-list"] {{
-            gap: 8px;
+            gap: 4px;
+            background: {glass_bg};
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-radius: 14px;
+            padding: 4px;
+            border: 1px solid {glass_border};
         }}
         .stTabs [data-baseweb="tab"] {{
-            border-radius: 12px;
+            border-radius: 10px;
             padding: 8px 16px;
             font-weight: 600;
+            transition: all 0.2s ease;
+            font-size: 0.88rem;
         }}
         .stTabs [aria-selected="true"] {{
-            background-color: {tab_active_bg};
+            background: {tab_active_bg};
             color: {tab_active_text};
             font-weight: 700;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        }}
+
+        /* ── Sidebar ── */
+        [data-testid="stSidebar"] {{
+            background: {sidebar_bg};
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-right: 1px solid {sidebar_border};
+        }}
+        [data-testid="stSidebar"] [data-testid="stExpander"] {{
+            background: transparent;
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+            border: 1px solid {glass_border};
+            box-shadow: none;
+        }}
+
+        /* ── Text Inputs / Text Areas ── */
+        .stTextInput > div > div > input,
+        .stTextArea > div > div > textarea {{
+            background: {input_bg};
+            border: 1px solid {input_border};
+            border-radius: 12px;
+            transition: all 0.2s ease;
+            color: {text_primary};
+        }}
+        .stTextInput > div > div > input:focus,
+        .stTextArea > div > div > textarea:focus {{
+            border-color: {input_focus_border};
+            box-shadow: 0 0 0 3px rgba(139,92,246,0.12);
+        }}
+
+        /* ── Select Box ── */
+        .stSelectbox > div > div {{
+            border-radius: 12px;
+        }}
+
+        /* ── Alert Boxes ── */
+        [data-testid="stAlert"] div[role="alert"][data-baseweb] {{
+            border-radius: 12px;
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+        }}
+
+        /* ── Progress Bar ── */
+        .stProgress > div > div > div > div {{
+            background: linear-gradient(90deg, #7C3AED, #6366F1);
+            border-radius: 6px;
+        }}
+
+        /* ── Dataframe ── */
+        [data-testid="stDataFrame"] {{
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid {glass_border};
+        }}
+
+        /* ── Captions ── */
+        .stCaption {{
+            color: {text_secondary};
+        }}
+
+        /* ── Toast notifications ── */
+        [data-testid="stToast"] {{
+            border-radius: 12px;
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+        }}
+
+        /* ── Custom branded header ── */
+        .app-header {{
+            background: {glass_bg};
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid {glass_border};
+            border-radius: 20px;
+            padding: 24px 32px;
+            margin-bottom: 24px;
+            box-shadow: {glass_shadow};
+        }}
+        .app-header h1 {{
+            background: linear-gradient(135deg, #7C3AED, #6366F1, #818CF8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-weight: 900;
+            font-size: 2rem;
+            margin: 0 0 4px 0;
+            letter-spacing: -0.5px;
+        }}
+        .app-header p {{
+            color: {text_secondary};
+            margin: 0;
+            font-size: 0.92rem;
+            font-weight: 400;
+        }}
+
+        /* ── Stat badge (for sidebar) ── */
+        .stat-badge {{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: {metric_bg};
+            border: 1px solid {metric_border};
+            border-radius: 20px;
+            padding: 4px 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: {metric_label_color};
+        }}
+
+        /* ── Streak banner ── */
+        .streak-banner {{
+            background: linear-gradient(135deg, rgba(245,158,11,0.10) 0%, rgba(249,115,22,0.08) 100%);
+            border: 1px solid rgba(245,158,11,0.25);
+            border-radius: 14px;
+            padding: 14px 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 600;
+            color: {text_primary};
+        }}
+        .streak-banner .streak-number {{
+            font-size: 1.5rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #F59E0B, #F97316);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }}
+
+        /* ── Quiz card ── */
+        .quiz-card {{
+            background: {glass_bg};
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid {glass_border};
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 12px;
         }}
         </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_branded_header() -> None:
+    """Render a premium branded header with gradient title."""
+    st.markdown(
+        """
+        <div class="app-header">
+            <h1>🔍 Japanese / English OCR Analyzer</h1>
+            <p>Tải ảnh hoặc PDF → OCR bằng Gemini AI → Phân tích từ vựng, ngữ pháp và mẫu câu chi tiết</p>
+        </div>
         """,
         unsafe_allow_html=True,
     )

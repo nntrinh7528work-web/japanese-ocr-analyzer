@@ -10,3 +10,7 @@ data/
 jobs.db
 worker_error.log
 
+# Ensure Dockerfile and deployment scripts are tracked
+!Dockerfile
+!deploy_hf.ps1
+
