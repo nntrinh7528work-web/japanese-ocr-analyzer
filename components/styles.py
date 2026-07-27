@@ -106,16 +106,20 @@ def inject_custom_css(dark_mode: bool = False) -> None:
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 
+        /* ── CSS Variables Root Override ── */
+        :root {{
+            --background-color: {bg_app};
+            --secondary-background-color: {sidebar_bg};
+            --text-color: {text_primary};
+        }}
+
         /* ── Global Reset & Typography ── */
-        html, body, [class*="css"] {{
+        html, body, [class*="css"], .stApp {{
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
-        }}
-
-        .stApp {{
-            background: {bg_gradient};
-            color: {text_primary};
+            background: {bg_gradient} !important;
+            color: {text_primary} !important;
         }}
 
         /* ── Animated accent line at top ── */
@@ -149,32 +153,52 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             border-radius: 3px;
         }}
 
-        /* ── Glassmorphism Cards (Expanders) ── */
-        [data-testid="stExpander"] {{
-            background: {glass_bg};
+        /* ── Glassmorphism Cards (Expanders & Details) ── */
+        [data-testid="stExpander"],
+        details {{
+            background: {glass_bg} !important;
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
-            border: 1px solid {glass_border};
-            border-radius: 16px;
-            box-shadow: {glass_shadow};
+            border: 1px solid {glass_border} !important;
+            border-radius: 16px !important;
+            box-shadow: {glass_shadow} !important;
             margin-bottom: 12px;
             overflow: hidden;
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            color: {text_primary} !important;
         }}
-        [data-testid="stExpander"]:hover {{
-            box-shadow: {glass_hover_shadow};
-            border-color: {glass_hover_border};
-            transform: translateY(-1px);
+        [data-testid="stExpander"]:hover,
+        details:hover {{
+            box-shadow: {glass_hover_shadow} !important;
+            border-color: {glass_hover_border} !important;
+        }}
+        [data-testid="stExpanderDetails"],
+        [data-testid="stExpander"] > div,
+        summary {{
+            background: transparent !important;
+            color: {text_primary} !important;
+        }}
+        summary span, [data-testid="stExpander"] summary span {{
+            color: {text_primary} !important;
+            font-weight: 600;
+        }}
+
+        /* ── Container Border Wrappers (Streamlit cards) ── */
+        [data-testid="stVerticalBlockBorderWrapper"] {{
+            background: {glass_bg} !important;
+            border: 1px solid {glass_border} !important;
+            border-radius: 16px !important;
+            box-shadow: {glass_shadow} !important;
         }}
 
         /* ── Metrics with glass effect ── */
         [data-testid="stMetric"] {{
-            background: {metric_bg};
+            background: {metric_bg} !important;
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
             border-radius: 14px;
             padding: 16px 20px;
-            border: 1px solid {metric_border};
+            border: 1px solid {metric_border} !important;
             box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
             transition: all 0.25s ease;
         }}
@@ -184,45 +208,52 @@ def inject_custom_css(dark_mode: bool = False) -> None:
         }}
         [data-testid="stMetricLabel"] {{
             font-weight: 600;
-            color: {metric_label_color};
+            color: {metric_label_color} !important;
             font-size: 0.8rem;
             letter-spacing: 0.4px;
             text-transform: uppercase;
         }}
         [data-testid="stMetricValue"] {{
             font-weight: 800;
-            color: {metric_value_color};
+            color: {metric_value_color} !important;
             font-size: 1.5rem;
         }}
 
         /* ── Section Subheaders with gradient underline ── */
+        .stSubheader, h1, h2, h3, h4, h5, h6 {{
+            color: {text_primary} !important;
+        }}
         .stSubheader {{
             border-bottom: 2px solid;
             border-image: linear-gradient(90deg, #7C3AED 0%, #6366F1 40%, transparent 100%) 1;
             padding-bottom: 10px;
             margin-bottom: 20px;
-            color: {text_primary};
             font-weight: 700;
             letter-spacing: -0.3px;
         }}
 
+        /* ── Labels & Text ── */
+        label, p, span, div {{
+            color: {text_primary};
+        }}
+
         /* ── Dividers ── */
-        [data-testid="stHorizontalRule"] {{
-            border-color: {divider_color};
+        [data-testid="stHorizontalRule"], hr {{
+            border-color: {divider_color} !important;
         }}
 
         /* ── File Uploader Dropzone ── */
         [data-testid="stFileUploaderDropzone"] {{
             min-height: 140px;
-            border: 2px dashed {dropzone_border};
+            border: 2px dashed {dropzone_border} !important;
             border-radius: 16px;
-            background: {dropzone_bg};
+            background: {dropzone_bg} !important;
             backdrop-filter: blur(8px);
             -webkit-backdrop-filter: blur(8px);
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }}
         [data-testid="stFileUploaderDropzone"]:hover {{
-            border-color: {glass_hover_border};
+            border-color: {glass_hover_border} !important;
             box-shadow: {glass_hover_shadow};
             transform: scale(1.005);
         }}
@@ -238,25 +269,28 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             font-weight: 600;
             transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
             letter-spacing: 0.2px;
-            border: 1px solid {glass_border};
+            border: 1px solid {glass_border} !important;
+            background: {glass_bg} !important;
+            color: {text_primary} !important;
         }}
         .stButton > button:hover {{
             transform: translateY(-2px);
             box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+            border-color: {glass_hover_border} !important;
         }}
         .stButton > button:active {{
             transform: translateY(0);
         }}
         .stButton > button[kind="primary"] {{
-            background: {btn_primary_bg};
-            color: #FFFFFF;
+            background: {btn_primary_bg} !important;
+            color: #FFFFFF !important;
             font-weight: 700;
             letter-spacing: 0.3px;
-            border: none;
+            border: none !important;
             box-shadow: {btn_primary_shadow};
         }}
         .stButton > button[kind="primary"]:hover {{
-            background: {btn_primary_hover};
+            background: {btn_primary_hover} !important;
             box-shadow: {btn_primary_hover_shadow};
         }}
 
@@ -265,24 +299,26 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             border-radius: 12px;
             font-weight: 600;
             transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-            border: 1px solid {glass_border};
+            border: 1px solid {glass_border} !important;
+            background: {glass_bg} !important;
+            color: {text_primary} !important;
         }}
         .stDownloadButton > button:hover {{
             transform: translateY(-2px);
             box-shadow: 0 4px 16px rgba(0,0,0,0.08);
-            border-color: {glass_hover_border};
+            border-color: {glass_hover_border} !important;
         }}
 
         /* ── Dialogue Chat Bubbles ── */
         .speaker-bubble-a {{
-            border-left: 4px solid {bubble_a_border};
-            background: {bubble_a_bg};
+            border-left: 4px solid {bubble_a_border} !important;
+            background: {bubble_a_bg} !important;
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
             padding: 16px 20px;
             border-radius: 4px 16px 16px 4px;
             margin-bottom: 10px;
-            color: {bubble_a_text};
+            color: {bubble_a_text} !important;
             box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
             transition: all 0.2s ease;
         }}
@@ -291,14 +327,14 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             box-shadow: 0 4px 16px rgba(99,102,241,0.15);
         }}
         .speaker-bubble-b {{
-            border-left: 4px solid {bubble_b_border};
-            background: {bubble_b_bg};
+            border-left: 4px solid {bubble_b_border} !important;
+            background: {bubble_b_bg} !important;
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
             padding: 16px 20px;
             border-radius: 4px 16px 16px 4px;
             margin-bottom: 10px;
-            color: {bubble_b_text};
+            color: {bubble_b_text} !important;
             box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
             transition: all 0.2s ease;
         }}
@@ -310,12 +346,12 @@ def inject_custom_css(dark_mode: bool = False) -> None:
         /* ── Tabs ── */
         .stTabs [data-baseweb="tab-list"] {{
             gap: 4px;
-            background: {glass_bg};
+            background: {glass_bg} !important;
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
             border-radius: 14px;
             padding: 4px;
-            border: 1px solid {glass_border};
+            border: 1px solid {glass_border} !important;
         }}
         .stTabs [data-baseweb="tab"] {{
             border-radius: 10px;
@@ -323,54 +359,94 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             font-weight: 600;
             transition: all 0.2s ease;
             font-size: 0.88rem;
+            color: {text_secondary} !important;
         }}
         .stTabs [aria-selected="true"] {{
-            background: {tab_active_bg};
-            color: {tab_active_text};
+            background: {tab_active_bg} !important;
+            color: {tab_active_text} !important;
             font-weight: 700;
             box-shadow: 0 1px 4px rgba(0,0,0,0.06);
         }}
+        [data-baseweb="tab-panel"], [data-testid="stTabContent"] {{
+            background: transparent !important;
+            padding-top: 16px;
+        }}
 
         /* ── Sidebar ── */
-        [data-testid="stSidebar"] {{
-            background: {sidebar_bg};
+        [data-testid="stSidebar"], [data-testid="stSidebarContent"] {{
+            background: {sidebar_bg} !important;
             backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
-            border-right: 1px solid {sidebar_border};
+            border-right: 1px solid {sidebar_border} !important;
+            color: {text_primary} !important;
         }}
         [data-testid="stSidebar"] [data-testid="stExpander"] {{
-            background: transparent;
+            background: transparent !important;
             backdrop-filter: none;
             -webkit-backdrop-filter: none;
-            border: 1px solid {glass_border};
-            box-shadow: none;
+            border: 1px solid {glass_border} !important;
+            box-shadow: none !important;
         }}
 
-        /* ── Text Inputs / Text Areas ── */
-        .stTextInput > div > div > input,
-        .stTextArea > div > div > textarea {{
-            background: {input_bg};
-            border: 1px solid {input_border};
-            border-radius: 12px;
+        /* ── Text Inputs, Text Areas & BaseWeb Inputs ── */
+        .stTextInput input,
+        .stTextArea textarea,
+        div[data-baseweb="input"],
+        div[data-baseweb="base-input"],
+        div[data-baseweb="textarea"] {{
+            background: {input_bg} !important;
+            border: 1px solid {input_border} !important;
+            border-radius: 12px !important;
             transition: all 0.2s ease;
-            color: {text_primary};
+            color: {text_primary} !important;
         }}
-        .stTextInput > div > div > input:focus,
-        .stTextArea > div > div > textarea:focus {{
-            border-color: {input_focus_border};
-            box-shadow: 0 0 0 3px rgba(139,92,246,0.12);
-        }}
-
-        /* ── Select Box ── */
-        .stSelectbox > div > div {{
-            border-radius: 12px;
+        .stTextInput input:focus,
+        .stTextArea textarea:focus,
+        div[data-baseweb="input"]:focus-within {{
+            border-color: {input_focus_border} !important;
+            box-shadow: 0 0 0 3px rgba(139,92,246,0.12) !important;
         }}
 
-        /* ── Alert Boxes ── */
-        [data-testid="stAlert"] div[role="alert"][data-baseweb] {{
-            border-radius: 12px;
+        /* ── Select Box & BaseWeb Dropdown Menus ── */
+        .stSelectbox > div > div,
+        div[data-baseweb="select"] > div {{
+            background: {input_bg} !important;
+            border: 1px solid {input_border} !important;
+            border-radius: 12px !important;
+            color: {text_primary} !important;
+        }}
+        div[data-baseweb="select"] span {{
+            color: {text_primary} !important;
+        }}
+        [data-baseweb="popover"],
+        [data-baseweb="menu"],
+        ul[role="listbox"] {{
+            background: {glass_bg} !important;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid {glass_border} !important;
+            border-radius: 12px !important;
+            box-shadow: {glass_shadow} !important;
+        }}
+        li[role="option"], [data-baseweb="option"] {{
+            background: transparent !important;
+            color: {text_primary} !important;
+        }}
+        li[role="option"]:hover, [data-baseweb="option"]:hover {{
+            background: {tab_active_bg} !important;
+            color: {tab_active_text} !important;
+        }}
+
+        /* ── Alert Boxes (st.info, st.warning, st.error, st.success) ── */
+        [data-testid="stAlert"],
+        div[role="alert"] {{
+            border-radius: 12px !important;
             backdrop-filter: blur(8px);
             -webkit-backdrop-filter: blur(8px);
+        }}
+        div[data-baseweb="notification"] {{
+            background: {glass_bg} !important;
+            border-radius: 12px !important;
         }}
 
         /* ── Progress Bar ── */
@@ -379,35 +455,50 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             border-radius: 6px;
         }}
 
-        /* ── Dataframe ── */
-        [data-testid="stDataFrame"] {{
+        /* ── Dataframe & Tables ── */
+        [data-testid="stDataFrame"], div[data-testid="stTable"] {{
             border-radius: 12px;
             overflow: hidden;
-            border: 1px solid {glass_border};
+            border: 1px solid {glass_border} !important;
+            background: {glass_bg} !important;
+        }}
+        [data-testid="stDataFrame"] * {{
+            color: {text_primary} !important;
+        }}
+
+        /* ── Code blocks ── */
+        code, pre {{
+            background: {input_bg} !important;
+            color: {text_primary} !important;
+            border: 1px solid {input_border} !important;
+            border-radius: 8px !important;
         }}
 
         /* ── Captions ── */
-        .stCaption {{
-            color: {text_secondary};
+        .stCaption, caption {{
+            color: {text_secondary} !important;
         }}
 
         /* ── Toast notifications ── */
         [data-testid="stToast"] {{
             border-radius: 12px;
+            background: {glass_bg} !important;
+            color: {text_primary} !important;
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
+            border: 1px solid {glass_border} !important;
         }}
 
         /* ── Custom branded header ── */
         .app-header {{
-            background: {glass_bg};
+            background: {glass_bg} !important;
             backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
-            border: 1px solid {glass_border};
+            border: 1px solid {glass_border} !important;
             border-radius: 20px;
             padding: 24px 32px;
             margin-bottom: 24px;
-            box-shadow: {glass_shadow};
+            box-shadow: {glass_shadow} !important;
         }}
         .app-header h1 {{
             background: linear-gradient(135deg, #7C3AED, #6366F1, #818CF8);
@@ -420,7 +511,7 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             letter-spacing: -0.5px;
         }}
         .app-header p {{
-            color: {text_secondary};
+            color: {text_secondary} !important;
             margin: 0;
             font-size: 0.92rem;
             font-weight: 400;
@@ -437,20 +528,20 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             padding: 4px 12px;
             font-size: 0.8rem;
             font-weight: 600;
-            color: {metric_label_color};
+            color: {metric_label_color} !important;
         }}
 
         /* ── Streak banner ── */
         .streak-banner {{
-            background: linear-gradient(135deg, rgba(245,158,11,0.10) 0%, rgba(249,115,22,0.08) 100%);
-            border: 1px solid rgba(245,158,11,0.25);
+            background: linear-gradient(135deg, rgba(245,158,11,0.10) 0%, rgba(249,115,22,0.08) 100%) !important;
+            border: 1px solid rgba(245,158,11,0.25) !important;
             border-radius: 14px;
             padding: 14px 20px;
             display: flex;
             align-items: center;
             gap: 12px;
             font-weight: 600;
-            color: {text_primary};
+            color: {text_primary} !important;
         }}
         .streak-banner .streak-number {{
             font-size: 1.5rem;
@@ -463,13 +554,14 @@ def inject_custom_css(dark_mode: bool = False) -> None:
 
         /* ── Quiz card ── */
         .quiz-card {{
-            background: {glass_bg};
+            background: {glass_bg} !important;
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
-            border: 1px solid {glass_border};
+            border: 1px solid {glass_border} !important;
             border-radius: 16px;
             padding: 20px;
             margin-bottom: 12px;
+            color: {text_primary} !important;
         }}
         </style>
         """,
