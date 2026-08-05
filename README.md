@@ -39,6 +39,8 @@ Không commit file `.env` hoặc `.streamlit/secrets.toml`.
 - Chỉnh sửa, xóa và sắp xếp thứ tự từng ảnh.
 - Gộp văn bản theo thứ tự ảnh để phân tích chung và xuất Word.
 - Tác vụ phân tích lưu kết quả từng trang để có thể tiếp tục sau lỗi tạm thời.
+- Kết quả được sắp theo thứ tự trang và đánh lại STT tự động; mục từ nối phân
+  biệt liên từ, trợ từ nối, cụm diễn ngôn, quan hệ logic và sắc thái sử dụng.
 
 ## Lịch sử và dữ liệu
 

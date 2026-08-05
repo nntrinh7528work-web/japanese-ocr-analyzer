@@ -9,6 +9,19 @@ Phân tích văn bản sau cực kỳ chi tiết, chuyên sâu, giải thích đ
 {ocr_notes}
 ================
 
+QUY TẮC BẮT BUỘC VỀ ĐỘ CHI TIẾT VÀ THỨ TỰ:
+1. Phân tích theo đúng thứ tự văn bản từ trên xuống dưới, trái sang phải; không tự
+   sắp xếp theo JLPT, bảng chữ cái, độ khó hoặc chủ đề.
+2. Trong mọi bảng/danh sách, xếp mục theo vị trí xuất hiện đầu tiên trong văn bản.
+3. Chỉ bảng từ vựng mục 2.1 có cột `#`; luôn đánh số nguyên liên tục 1, 2, 3...
+   trong bảng đó. Không tự thêm cột STT/# vào các bảng khác, không lặp/bỏ số,
+   dùng 0, hoặc tiếp tục số thứ tự từ một văn bản/trang khác.
+4. Chỉ lấy ví dụ thật sự xuất hiện trong văn bản cho trường "Ví dụ trong bài".
+   Không suy đoán một từ/cấu trúc là có trong bài nếu không chỉ ra được câu chứa nó.
+5. Phân biệt rõ từ vựng, kanji, từ nối và ngữ pháp; một mục có thể được giải thích
+   ở nhiều phần nếu vai trò của nó khác nhau, nhưng không tạo các dòng trùng nhau
+   trong cùng một bảng.
+
 Thực hiện đúng thứ tự 7 bước sau:
 
 # PHÂN TÍCH VĂN BẢN TIẾNG NHẬT
@@ -18,7 +31,7 @@ Trình bày lại văn bản, ghi các sửa lỗi theo dạng `[Sửa: XXX → 
 **Tóm tắt nội dung:** Tóm tắt 2-3 câu.
 
 ## 2. TỪ VỰNG JLPT N4-N1
-**Lưu ý quan trọng**: Lượt bỏ (KHÔNG ĐƯA VÀO BẢNG) những từ quá đơn giản như trợ từ (は, が, を, に, で...), dấu câu (。, 、), hoặc các từ quá cơ bản.
+**Lưu ý quan trọng**: Lược bỏ (KHÔNG ĐƯA VÀO BẢNG) những từ quá đơn giản như trợ từ (は, が, を, に, で...), dấu câu (。, 、), hoặc các từ quá cơ bản. Giữ nguyên thứ tự xuất hiện đầu tiên trong bài.
 
 ### 2.1 Danh sách toàn bộ từ vựng trong bài
 | # | Từ gốc | Phiên âm | Loại từ (Nếu là động từ, ghi rõ Tự động từ / Tha động từ) | Nghĩa tiếng Việt | Cấp JLPT |
@@ -43,12 +56,29 @@ hoặc từ dễ dùng sai. Lượt bỏ trợ từ và từ cơ bản. Mỗi t�
 - Mức độ: (JLPT N5 / N4 / N3 / N2 / N1)
 
 ## 3. PHÂN TÍCH KANJI
+Liệt kê kanji theo thứ tự xuất hiện đầu tiên. Giải thích vai trò và nghĩa cụ thể
+trong từ/câu đang xét, không chỉ ghi nghĩa từ điển chung.
+
 | Kanji | Onyomi | Kunyomi | Nghĩa cơ bản | JLPT | Từ vựng trong bài (≤5 từ) | Câu ví dụ trong bài | Vai trò trong từ |
 |---|---|---|---|---|---|---|---|
 
 ## 4. TỪ NỐI CÂU & LIÊN TỪ
-| Từ/Cụm | Phiên âm | Loại | Nghĩa tiếng Việt | Câu ví dụ trong bài | Vai trò ngữ nghĩa | Mức độ khó |
-|---|---|---|---|---|---|---|
+Phải quét đầy đủ cả từ nối giữa câu và thành phần nối hai vế trong cùng một câu:
+- 接続詞 (liên từ): しかし、そのため、したがって、また、つまり...
+- 接続助詞 (trợ từ nối/mệnh đề phụ): ので、から、のに、けれども、ても、ながら、つつ...
+- Trạng từ liên kết/cụm diễn ngôn: 一方で、逆に、なお、むしろ、このように...
+- Từ chỉ quan hệ và quy chiếu giúp liên kết ý: その、それに対して、こうした...
+
+Không đưa trợ từ đơn thuần như は/が/を vào đây nếu chúng không tạo quan hệ nối.
+Với mỗi mục, chỉ rõ hình thức đứng trước/sau, hai thành phần được nối, quan hệ
+logic (bổ sung, tương phản, nguyên nhân, kết quả, điều kiện, nhượng bộ, chuyển đề,
+tóm tắt...) và sắc thái cụ thể trong ngữ cảnh. Xếp theo thứ tự xuất hiện đầu tiên.
+
+| Từ/Cụm | Phiên âm | Nhóm | Cấu trúc/Cách nối | Nghĩa tiếng Việt | Ví dụ trong bài | Hai thành phần được nối | Quan hệ logic & sắc thái | JLPT |
+|---|---|---|---|---|---|---|---|---|
+
+Nếu không có, ghi đúng một dòng:
+| — | — | — | — | Không có | — | — | — | — |
 
 ## 5. PHÂN TÍCH NGỮ PHÁP
 Chỉ phân tích các cấu trúc thật sự xuất hiện trong văn bản. Ưu tiên mẫu N3 trở lên,
@@ -59,6 +89,8 @@ block riêng biệt.
 - Công thức: (mẫu câu / pattern ngắn gọn)
 - Ý nghĩa: (dịch nghĩa và sắc thái bằng tiếng Việt)
 - Cách dùng: (khi nào dùng, điều kiện ngữ pháp đi kèm)
+- Cấu tạo trong câu: (chỉ rõ từng thành phần và dạng biến đổi thực tế trong bài)
+- Sắc thái / văn phong: (khẩu ngữ hay văn viết, trang trọng, chủ quan/khách quan, mạnh/yếu)
 - Ví dụ trong bài: (câu gốc tiếng Nhật) - (nghĩa tiếng Việt)
 - Hiragana ví dụ trong bài: (viết toàn bộ câu ví dụ trong bài bằng hiragana)
 - Phân tích ví dụ: (tách vai trò từng phần trong ví dụ)
@@ -66,11 +98,17 @@ block riêng biệt.
 - Hiragana ví dụ 1: (viết toàn bộ Ví dụ 1 bằng hiragana)
 - Ví dụ 2: (câu tiếng Nhật tự tạo) - (nghĩa tiếng Việt)
 - Hiragana ví dụ 2: (viết toàn bộ Ví dụ 2 bằng hiragana)
+- Phân biệt: (so sánh với mẫu gần nghĩa/dễ nhầm, nêu tiêu chí chọn dùng — nếu không có thì ghi Không có)
 - Lưu ý: (lỗi thường gặp, cấu trúc dễ nhầm — nếu không có thì ghi Không có)
 - Mức độ: (JLPT N5 / N4 / N3 / N2 / N1)
 
+Xếp các cấu trúc theo thứ tự xuất hiện đầu tiên trong bài. Ngoài mẫu JLPT, phải
+nhận diện cấu trúc bổ nghĩa danh từ, mệnh đề phụ, tỉnh lược, bị động/sai khiến,
+kính ngữ, điều kiện, nhượng bộ và liên kết vế nếu chúng thật sự xuất hiện.
+
 ## 6. MẪU CÂU ĐẶC TRƯNG
-Với mỗi mẫu: **Mẫu:** `[công thức / pattern]`, rồi `- Ví dụ trong bài:` và `- Giải thích:`.
+Xếp theo thứ tự xuất hiện. Với mỗi mẫu: **Mẫu:** `[công thức / pattern]`, rồi
+`- Ví dụ trong bài:`, `- Thành phần câu:`, `- Chức năng giao tiếp:` và `- Giải thích:`.
 
 ## 7. TỔNG HỢP ĐẦY ĐỦ (DÀNH CHO WORD EXPORT)
 Không lặp lại nội dung mục 1-6. Chỉ ghi một dòng xác nhận hoàn tất vì toàn bộ phản hồi này sẽ được dùng trực tiếp để xuất Word.

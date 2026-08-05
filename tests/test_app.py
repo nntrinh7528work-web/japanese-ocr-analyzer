@@ -70,14 +70,40 @@ def test_app_renders_analysis_download_options():
     app.session_state["analysis"] = {
         "confirmed_text": "日本語",
         "summary": "Tóm tắt",
-        "analysis_language": "english",
-        "vocabulary_all": [],
+        "analysis_language": "japanese",
+        "vocabulary_all": [{"num": "1", "word": "変更", "reading": "へんこう", "meaning": "thay đổi"}],
         "vocabulary_important": [],
         "phrasal_collocations": [],
         "discourse_markers": [],
         "kanji_analysis": [],
-        "connectors": [],
-        "grammar_points": [],
+        "connectors": [
+            {
+                "phrase": "ので",
+                "reading": "ので",
+                "type": "接続助詞",
+                "structure": "V thể thường + ので",
+                "meaning": "vì",
+                "example": "雨なので、予定を変更した。",
+                "linked_parts": "nguyên nhân → kết quả",
+                "role": "lý do khách quan",
+                "difficulty": "N4",
+            }
+        ],
+        "grammar_points": [
+            {
+                "name": "～ので",
+                "formation": "雨だ + ので → 雨なので",
+                "nuance": "lý do khách quan, mềm",
+                "comparison": "mềm hơn ～から",
+            }
+        ],
+        "sentence_patterns": [
+            {
+                "pattern": "理由 + ので + 結果",
+                "components": "mệnh đề nguyên nhân + mệnh đề kết quả",
+                "function": "giải thích lý do",
+            }
+        ],
         "section_markdown": {},
         "full_markdown": "# Báo cáo\n日本語",
         "usage": {"input_tokens": 1, "output_tokens": 1},
@@ -92,3 +118,8 @@ def test_app_renders_analysis_download_options():
     assert "Tên file lưu:" in [field.label for field in app.text_input]
     assert "💾 Lưu kết quả phân tích" in [expander.label for expander in app.get("expander")]
     assert any("JSON lưu dữ liệu có cấu trúc" in caption.value for caption in app.caption)
+    markdown_values = [item.value for item in app.markdown]
+    assert any("Cấu tạo trong câu" in value for value in markdown_values)
+    assert any("Sắc thái / Văn phong" in value for value in markdown_values)
+    assert any("Phân biệt cấu trúc gần nghĩa" in item.value for item in app.info)
+    assert any("Chức năng giao tiếp" in value for value in markdown_values)

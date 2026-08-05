@@ -506,6 +506,10 @@ def render_ocr_tab(
                             if pattern.get("example"):
                                 st.markdown("**Ví dụ trong bài:**")
                                 st.code(pattern["example"], language=None)
+                            if pattern.get("components"):
+                                st.markdown(f"**Thành phần câu:** {pattern['components']}")
+                            if pattern.get("function"):
+                                st.markdown(f"**Chức năng giao tiếp:** {pattern['function']}")
                             if pattern.get("explanation"):
                                 st.markdown(f"**Giải thích:** {pattern['explanation']}")
                 else:

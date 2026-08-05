@@ -21,6 +21,13 @@ CRITICAL RULES:
    Vietnamese. Keep only the original English examples/quotes in English.
 7. Keep the Markdown section headers and table column headers EXACTLY as shown,
    even though the cell contents should be Vietnamese.
+8. Preserve source order. In every table/list, order items by their first
+   occurrence in the text, never alphabetically or by CEFR/difficulty.
+9. Only section 2.1 has a `#` column. Output consecutive integers 1, 2, 3...
+   there with no duplicates, gaps, zero, or numbering continued from another
+   page/chunk. Never add a numbering column to any other table.
+10. "Example from text" must be an exact quote that proves the item occurs in
+    the input. Do not invent an occurrence.
 
 ---
 
@@ -39,7 +46,9 @@ CRITICAL RULES:
 
 ### 2.1 All Vocabulary
 
-List every content word (nouns, verbs, adjectives, adverbs).
+List every content word (nouns, verbs, adjectives, adverbs) in order of first
+appearance. Include useful multiword lexical units but do not duplicate the same
+word merely because it occurs more than once.
 
 | # | Word | Base Form | Part of Speech | Vietnamese Meaning | CEFR Level |
 |---|------|-----------|----------------|--------------------|------------|
@@ -78,12 +87,21 @@ If none found: | — | — | Không có | — | — |
 
 ## 4. Linking Words &amp; Discourse Markers
 
-| Word/Phrase | Function | Vietnamese Meaning | Example from Text | Register | Difficulty |
-|-------------|----------|--------------------|-------------------|----------|------------|
-| however | contrast | tuy nhiên | "..." | trang trọng | B1 |
+Cover both sentence-level and clause-level cohesion, including:
+- coordinating and subordinating conjunctions;
+- conjunctive adverbs and transition phrases;
+- relative/referential markers that connect ideas;
+- sequencing, addition, contrast, cause, result, condition, concession,
+  exemplification, reformulation, emphasis, topic shift, and conclusion.
 
-Register: formal / informal / neutral
-If none found: | — | — | — | Không có | — | — |
+For each item, identify what two parts it connects, its exact logical relation,
+register/nuance, normal position, and punctuation. Keep source order.
+
+| Word/Phrase | Category | Function | Vietnamese Meaning | Example from Text | Connected Parts | Register & Nuance | Position/Punctuation | Difficulty |
+|-------------|----------|----------|--------------------|-------------------|-----------------|-------------------|----------------------|------------|
+| however | conjunctive adverb | contrast | tuy nhiên | "..." | previous claim → contrasting claim | trang trọng, nhấn mạnh đối lập | đầu/giữa câu; thường có dấu phẩy | B1 |
+
+If none found: | — | — | — | Không có | — | — | — | — | — |
 
 ---
 
@@ -93,16 +111,21 @@ If none found: | — | — | — | Không có | — | — |
 - Structure: (short grammar pattern)
 - Rule: (concise Vietnamese rule)
 - Meaning: (Vietnamese meaning/function)
+- Usage: (điều kiện sử dụng và dạng từ đi kèm, bằng tiếng Việt)
+- Nuance / Register: (sắc thái, mức độ trang trọng và tác dụng trong ngữ cảnh, bằng tiếng Việt)
 - Example from text: (exact quote)
 - Example analysis: (Vietnamese breakdown of the example)
 - Example 1: (new sentence in everyday context)
 - Example 2: (new sentence in formal or academic context)
+- Comparison: (phân biệt với cấu trúc gần nghĩa/dễ nhầm, bằng tiếng Việt; nếu không có ghi None)
 - Common mistake: (typical mistake Vietnamese learners make — if none, write None)
 - Level: (A2 / B1 / B2 / C1 / C2)
 
 Cover: tense, modal verbs, passive voice, conditionals, relative clauses,
 comparatives, gerunds/infinitives, participle clauses, inversion, emphasis,
-and noun/verb/adjective patterns — only if present. Skip absent structures entirely.
+and noun/verb/adjective patterns — only if present. Also explain clause boundaries,
+the role of each component, and why this structure is used here. Keep source order
+and skip absent structures entirely.
 
 ---
 
@@ -110,6 +133,8 @@ and noun/verb/adjective patterns — only if present. Skip absent structures ent
 
 **Pattern:** `pattern description`
 - Example from text: (exact quote)
+- Sentence components: (Vietnamese breakdown of subject, verb, object/complement, modifiers and clauses)
+- Communicative function: (Vietnamese explanation of what the pattern achieves)
 - Explanation: (Vietnamese structural analysis and communicative function)
 
 Identify: fronting/inversion, cleft sentences, participle clauses,

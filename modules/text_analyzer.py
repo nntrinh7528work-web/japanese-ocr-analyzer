@@ -49,9 +49,17 @@ def _parse_table(section: str, keys: list[str]) -> list[dict[str, str]]:
     lines = [line.strip() for line in section.splitlines() if line.strip().startswith("|")]
     if len(lines) < 3:
         return []
+    headers = [cell.strip() for cell in lines[0].strip("|").split("|")]
+    optional_number_column = (
+        len(headers) == len(keys) + 1
+        and keys[0] != "num"
+        and headers[0].strip().lower().rstrip(".") in {"#", "stt", "no", "number", "số"}
+    )
     rows: list[dict[str, str]] = []
     for line in lines[2:]:
         values = [cell.strip() for cell in line.strip("|").split("|")]
+        if optional_number_column and len(values) >= len(keys) + 1:
+            values = values[1:]
         if len(values) < len(keys):
             continue
         rows.append(dict(zip(keys, values[: len(keys)])))
@@ -94,6 +102,8 @@ def _parse_named_blocks(section: str, heading_pattern: str, kind: str) -> list[d
                     "rule": _field(block, r"Rule|Quy tắc"),
                     "meaning": _field(block, r"Meaning|Ý nghĩa"),
                     "usage": _field(block, r"Cách dùng|Usage"),
+                    "formation": _field(block, r"Cấu tạo trong câu|Formation in context"),
+                    "nuance": _field(block, r"Sắc thái(?: / văn phong)?|Nuance / Register|Nuance|Register"),
                     "example": example,
                     "example_hiragana": example_hiragana,
                     "example_analysis": _field(block, r"Example analysis|Phân tích ví dụ"),
@@ -103,6 +113,7 @@ def _parse_named_blocks(section: str, heading_pattern: str, kind: str) -> list[d
                     "example_2": example_2,
                     "example_2_hiragana": example_2_hiragana,
                     "note": _field(block, r"Lưu ý"),
+                    "comparison": _field(block, r"Phân biệt|Comparison"),
                     "mistake": _field(block, r"Common mistake"),
                     "level": _field(block, r"Level|Mức độ"),
                 }
@@ -138,6 +149,8 @@ def _parse_named_blocks(section: str, heading_pattern: str, kind: str) -> list[d
                 {
                     "pattern": re.sub(r"^\d+[\.\)]\s*", "", match.group(1).strip("` ")),
                     "example": _field(block, r"Example from text|Ví dụ trong bài"),
+                    "components": _field(block, r"Sentence components|Thành phần câu"),
+                    "function": _field(block, r"Communicative function|Chức năng giao tiếp"),
                     "explanation": _field(block, r"Explanation|Giải thích"),
                 }
             )
@@ -160,12 +173,15 @@ def _parse_grammar(section: str) -> list[dict[str, str]]:
                 "rule": _field(block, r"Rule|Quy tắc|Cấu trúc|Mẫu câu"),
                 "meaning": _field(block, r"Meaning|Ý nghĩa"),
                 "usage": _field(block, r"Cách dùng|Usage"),
+                "formation": _field(block, r"Cấu tạo trong câu|Formation in context"),
+                "nuance": _field(block, r"Sắc thái(?: / văn phong)?|Nuance / Register|Nuance|Register"),
                 "example": _field(block, r"Example from text|Ví dụ(?: trong bài)?"),
                 "example_analysis": _field(block, r"Example analysis|Phân tích ví dụ"),
                 "explanation": _field(block, r"Explanation|Giải thích(?: ý nghĩa & cách dùng)?|Ý nghĩa|Cách dùng"),
                 "example_1": _field(block, r"Example 1|Ví dụ 1"),
                 "example_2": _field(block, r"Example 2|Ví dụ 2"),
                 "note": _field(block, r"Lưu ý"),
+                "comparison": _field(block, r"Phân biệt|Comparison"),
                 "mistake": _field(block, r"Common mistake"),
                 "level": _field(block, r"Level|Mức độ"),
             }
@@ -213,8 +229,23 @@ def parse_analysis_response(response_text: str, analysis_language: str = "englis
             sections[3], ["kanji", "onyomi", "kunyomi", "meaning", "jlpt", "vocab", "example", "role"]
         )
         connectors = _parse_table(
-            sections[4], ["phrase", "reading", "type", "meaning", "example", "role", "difficulty"]
+            sections[4],
+            [
+                "phrase",
+                "reading",
+                "type",
+                "structure",
+                "meaning",
+                "example",
+                "linked_parts",
+                "role",
+                "difficulty",
+            ],
         )
+        if not connectors:
+            connectors = _parse_table(
+                sections[4], ["phrase", "reading", "type", "meaning", "example", "role", "difficulty"]
+            )
         phrasal_collocations: list[dict[str, str]] = []
         discourse_markers: list[dict[str, str]] = []
     else:
@@ -236,12 +267,28 @@ def parse_analysis_response(response_text: str, analysis_language: str = "englis
             sections[3], ["phrase", "type", "meaning", "example", "note"]
         )
         discourse_markers = _parse_table(
-            sections[4], ["phrase", "function", "meaning", "example", "register", "difficulty"]
+            sections[4],
+            [
+                "phrase",
+                "type",
+                "function",
+                "meaning",
+                "example",
+                "linked_parts",
+                "register",
+                "usage",
+                "difficulty",
+            ],
         )
+        if not discourse_markers:
+            discourse_markers = _parse_table(
+                sections[4], ["phrase", "function", "meaning", "example", "register", "difficulty"]
+            )
         kanji = phrasal_collocations
         connectors = discourse_markers
     grammar = _parse_grammar(sections[5])
     patterns = _parse_named_blocks(sections[6], r"^\s*\*\*(?:Pattern|Mẫu):\*\*\s*(.+?)\s*$", "pattern")
+    _renumber_rows(vocab_all)
     return {
         "analysis_language": language,
         "confirmed_text": sections[1],
@@ -292,8 +339,11 @@ Trả lời đúng Markdown theo các tiêu đề sau nếu được yêu cầu:
 |---|---|---|---|---|---|---|---|
 
 ## 4. TỪ NỐI CÂU & LIÊN TỪ
-| Từ/Cụm | Phiên âm | Loại | Nghĩa tiếng Việt | Câu ví dụ trong bài | Vai trò ngữ nghĩa | Mức độ khó |
-|---|---|---|---|---|---|---|
+Bao gồm 接続詞, 接続助詞, trạng từ liên kết/cụm diễn ngôn và từ quy chiếu nối ý.
+Xếp theo thứ tự xuất hiện đầu tiên; nêu cấu trúc nối, hai thành phần được nối,
+quan hệ logic và sắc thái trong ngữ cảnh.
+| Từ/Cụm | Phiên âm | Nhóm | Cấu trúc/Cách nối | Nghĩa tiếng Việt | Ví dụ trong bài | Hai thành phần được nối | Quan hệ logic & sắc thái | JLPT |
+|---|---|---|---|---|---|---|---|---|
 
 ## 5. PHÂN TÍCH NGỮ PHÁP
 Với mỗi điểm:
@@ -301,15 +351,19 @@ Với mỗi điểm:
 - Công thức:
 - Ý nghĩa:
 - Cách dùng:
+- Cấu tạo trong câu:
+- Sắc thái / văn phong:
 - Ví dụ trong bài:
 - Phân tích ví dụ:
 - Ví dụ 1:
 - Ví dụ 2:
+- Phân biệt:
 - Lưu ý:
 - Mức độ:
 
 ## 6. MẪU CÂU ĐẶC TRƯNG
-Với mỗi mẫu: **Mẫu:** `[công thức / pattern]`, rồi `- Ví dụ trong bài:` và `- Giải thích:`.
+Với mỗi mẫu: **Mẫu:** `[công thức / pattern]`, rồi `- Ví dụ trong bài:`,
+`- Thành phần câu:`, `- Chức năng giao tiếp:` và `- Giải thích:`.
 
 Nếu cần bổ sung mục từ vựng khó ở định dạng 2.2 trong các lần sau, luôn thêm:
 `- Hiragana ví dụ trong bài:`, `- Hiragana ví dụ 1:`, `- Hiragana ví dụ 2:`
@@ -331,8 +385,10 @@ Use these exact section formats when requested:
 |---|---|---|---|---|
 
 ## 4. Linking Words &amp; Discourse Markers
-| Word/Phrase | Function | Vietnamese Meaning | Example from Text | Register | Difficulty |
-|---|---|---|---|---|---|
+Cover conjunctions, subordinators, conjunctive adverbs, transition phrases and
+referential cohesion. Keep source order and explain the connected parts.
+| Word/Phrase | Category | Function | Vietnamese Meaning | Example from Text | Connected Parts | Register & Nuance | Position/Punctuation | Difficulty |
+|---|---|---|---|---|---|---|---|---|
 
 ## 5. Grammar Points
 For each point:
@@ -340,15 +396,20 @@ For each point:
 - Structure:
 - Rule: in Vietnamese
 - Meaning: in Vietnamese
+- Usage: in Vietnamese
+- Nuance / Register: in Vietnamese
 - Example from text: exact English quote
 - Example analysis: in Vietnamese
 - Example 1:
 - Example 2:
+- Comparison: in Vietnamese
 - Common mistake:
 - Level:
 
 ## 6. Sentence Patterns &amp; Structures
-For each pattern: **Pattern:** `pattern description`, then `- Example from text:` as the exact English quote and `- Explanation:` in Vietnamese.
+For each pattern: **Pattern:** `pattern description`, then `- Example from text:`
+as the exact English quote, `- Sentence components:`, `- Communicative function:`
+and `- Explanation:` in Vietnamese.
 """
 
 
@@ -661,27 +722,40 @@ def merge_page_analyses(
 ) -> dict[str, Any]:
     """Merge a list of per-page analysis results into a single combined report."""
     language = _analysis_language(analysis_language)
-    
+
+    def _page_sort_key(page: dict[str, Any]) -> tuple[int, str]:
+        try:
+            page_index = int(page.get("page_index"))
+        except (TypeError, ValueError):
+            page_index = 10**9
+        return page_index, str(page.get("page_name") or "")
+
+    # Completion callbacks arrive in API-finish order. Always rebuild the report
+    # in source-page order and repair legacy/model-provided vocabulary numbers.
+    ordered_pages = sorted(copy.deepcopy(page_analyses), key=_page_sort_key)
+
     # Inject source page label so we can show which page a word/grammar came from
-    for page in page_analyses:
+    for page in ordered_pages:
         page_label = page.get("source_label", "")
+        _renumber_rows(page.get("vocabulary_all", []))
         for field in ("vocabulary_important", "grammar_points", "sentence_patterns"):
             for item in page.get(field, []):
                 if "page_label" not in item:
                     item["page_label"] = page_label
 
-    merged = _merge_analysis_results(page_analyses, language)
-    merged["page_analyses"] = page_analyses
+    merged = _merge_analysis_results(ordered_pages, language)
+    _renumber_rows(merged.get("vocabulary_all", []))
+    merged["page_analyses"] = ordered_pages
     merged["confirmed_text"] = "\n\n".join(
-        f"## {page['source_label']}\n{page['confirmed_text']}" for page in page_analyses
+        f"## {page['source_label']}\n{page['confirmed_text']}" for page in ordered_pages
     )
     merged["summary"] = "\n\n".join(
-        f"**{page['source_label']}:** {page['summary']}" for page in page_analyses
+        f"**{page['source_label']}:** {page['summary']}" for page in ordered_pages
     )
     merged["full_markdown"] = "\n\n---\n\n".join(
-        f"# {page['source_label']}\n\n{page['full_markdown']}" for page in page_analyses
+        f"# {page['source_label']}\n\n{page['full_markdown']}" for page in ordered_pages
     )
-    merged["model_used"] = page_analyses[0].get("model_used", "gemini-3.5-flash") if page_analyses else "gemini-3.5-flash"
+    merged["model_used"] = ordered_pages[0].get("model_used", "gemini-3.5-flash") if ordered_pages else "gemini-3.5-flash"
     return merged
 
 

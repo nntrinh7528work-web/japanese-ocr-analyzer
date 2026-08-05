@@ -18,6 +18,9 @@ COLUMN_LABELS = {
         "note": "Ghi chú",
         "function": "Chức năng",
         "register": "Sắc thái",
+        "linked_parts": "Hai thành phần được nối",
+        "structure": "Cấu trúc / Cách nối",
+        "usage": "Vị trí / Dấu câu",
     },
     "japanese": {
         "num": "STT",
@@ -34,6 +37,8 @@ COLUMN_LABELS = {
         "vocab": "Từ vựng trong bài",
         "role": "Vai trò",
         "phrase": "Từ/Cụm",
+        "linked_parts": "Hai thành phần được nối",
+        "structure": "Cấu trúc / Cách nối",
     },
 }
 
@@ -114,6 +119,10 @@ def render_grammar_points(items: list[dict]) -> None:
                     st.markdown(f"**Ý nghĩa:** {point['meaning']}")
                 if point.get("usage"):
                     st.markdown(f"**Cách dùng:** {point['usage']}")
+                if point.get("formation"):
+                    st.markdown(f"**Cấu tạo trong câu:** {point['formation']}")
+                if point.get("nuance"):
+                    st.markdown(f"**Sắc thái / Văn phong:** {point['nuance']}")
                 if point.get("explanation"):
                     st.markdown(f"**Giải thích:** {point['explanation']}")
             with col2:
@@ -125,5 +134,7 @@ def render_grammar_points(items: list[dict]) -> None:
 
             if point.get("note") and point["note"] not in ("Không có", "None", "N/A"):
                 st.warning(f"⚠️ **Lưu ý:** {point['note']}")
+            if point.get("comparison") and point["comparison"] not in ("Không có", "None", "N/A"):
+                st.info(f"**Phân biệt cấu trúc gần nghĩa:** {point['comparison']}")
             if point.get("mistake") and point["mistake"] not in ("Không có", "None", "N/A"):
                 st.warning(f"⚠️ **Common mistake:** {point['mistake']}")

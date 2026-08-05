@@ -145,6 +145,36 @@ def test_build_and_parse_japanese_mode():
     assert result["discourse_markers"] == []
 
 
+def test_japanese_prompt_requires_detailed_connectors_and_source_order():
+    prompt = text_analyzer.build_analysis_prompt("雨なので、家にいた。しかし、退屈だった。", [], "japanese")
+
+    assert "接続助詞" in prompt
+    assert "trạng từ liên kết" in prompt.lower()
+    assert "thứ tự xuất hiện đầu tiên" in prompt
+    assert "Hai thành phần được nối" in prompt
+    assert "Quan hệ logic & sắc thái" in prompt
+
+
+def test_parse_enhanced_japanese_connector_columns():
+    response = JAPANESE_RESPONSE.replace(
+        "| Cụm | Phiên âm | Loại | Nghĩa | Ví dụ | Vai trò | Khó |\n"
+        "|---|---|---|---|---|---|---|\n"
+        "| しかし | しかし | liên từ | tuy nhiên | しかし | tương phản | N4 |",
+        "| STT | Từ/Cụm | Phiên âm | Nhóm | Cấu trúc/Cách nối | Nghĩa tiếng Việt | Ví dụ trong bài | Hai thành phần được nối | Quan hệ logic & sắc thái | JLPT |\n"
+        "|---|---|---|---|---|---|---|---|---|---|\n"
+        "| 1 | ので | ので | 接続助詞 | V/A thể thường + ので | vì | 雨なので、家にいた。 | nguyên nhân → kết quả | nguyên nhân khách quan, mềm hơn から | N4 |",
+    )
+
+    result = text_analyzer.parse_analysis_response(response, "japanese")
+
+    connector = result["connectors"][0]
+    assert connector["phrase"] == "ので"
+    assert connector["type"] == "接続助詞"
+    assert connector["structure"] == "V/A thể thường + ので"
+    assert connector["linked_parts"] == "nguyên nhân → kết quả"
+    assert connector["role"].startswith("nguyên nhân khách quan")
+
+
 def test_parse_japanese_vocab_detail_blocks():
     mock = """
 **[一概に・いちがいに]**
@@ -427,6 +457,16 @@ def test_renumber_rows():
     assert [r["num"] for r in rows] == ["1", "2", "3"]
 
 
+def test_parse_always_normalizes_model_vocabulary_numbers():
+    response = RESPONSE.replace("| 1 | team", "| 9 | team").replace(
+        "| 2 | decided", "| 2 | decided"
+    ).replace("| 3 | approaching", "| 1 | approaching")
+
+    parsed = text_analyzer.parse_analysis_response(response)
+
+    assert [row["num"] for row in parsed["vocabulary_all"]] == ["1", "2", "3"]
+
+
 def test_merge_deduplicates_vocabulary(monkeypatch):
     parsed1 = text_analyzer.parse_analysis_response(RESPONSE)
     parsed1["usage"] = {"input_tokens": 5, "output_tokens": 10, "candidate_tokens": 10, "thinking_tokens": 0}
@@ -456,5 +496,29 @@ def test_analyze_single_page_and_merge(monkeypatch):
     assert result["vocabulary_all"]
 
     merged = text_analyzer.merge_page_analyses([result])
-    assert merged["page_analyses"] == [result]
+    assert len(merged["page_analyses"]) == 1
+    assert merged["page_analyses"][0]["page_index"] == result["page_index"]
     assert "test.png" in merged["confirmed_text"]
+
+
+def test_merge_page_analyses_sorts_pages_and_renumbers_combined_vocabulary():
+    page_2 = text_analyzer.parse_analysis_response(RESPONSE)
+    page_2.update(
+        page_index=2,
+        page_name="page-2.png",
+        source_label="Trang 2: page-2.png",
+        vocabulary_all=[{"num": "7", "word": "second", "meaning": "thứ hai"}],
+    )
+    page_1 = text_analyzer.parse_analysis_response(RESPONSE)
+    page_1.update(
+        page_index=1,
+        page_name="page-1.png",
+        source_label="Trang 1: page-1.png",
+        vocabulary_all=[{"num": "4", "word": "first", "meaning": "đầu tiên"}],
+    )
+
+    merged = text_analyzer.merge_page_analyses([page_2, page_1])
+
+    assert [page["page_index"] for page in merged["page_analyses"]] == [1, 2]
+    assert [row["word"] for row in merged["vocabulary_all"]] == ["first", "second"]
+    assert [row["num"] for row in merged["vocabulary_all"]] == ["1", "2"]
