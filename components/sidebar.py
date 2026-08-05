@@ -34,7 +34,7 @@ def render_sidebar(
         st.sidebar.code(st.session_state.session_id, language=None)
         st.sidebar.caption(
             "Mã phiên tự động. Khi thoát app, mở lại link có mã này để khôi phục toàn bộ tiến trình. "
-            "Phiên được giữ tối đa 24 giờ."
+            "Phiên được giữ tối đa 30 ngày trên máy chủ hiện tại."
         )
 
     st.sidebar.divider()
@@ -93,8 +93,25 @@ def render_sidebar(
             horizontal=True,
         )
 
-        usd_to_jpy = st.number_input("Tỷ giá USD → JPY", min_value=1.0, value=155.0, step=1.0)
-        st.caption("Gemini 3.5 Flash: input $0.30/M token, output $2.50/M token.")
+        budget_jpy = st.number_input(
+            "Ngân sách API (JPY)", min_value=0.0,
+            value=float(st.session_state.get("budget_jpy", 0.0)), step=100.0,
+            key="budget_jpy_input",
+        )
+        spent_before_jpy = st.number_input(
+            "Đã chi trước phiên này (JPY)", min_value=0.0,
+            value=float(st.session_state.get("spent_before_jpy", 0.0)), step=100.0,
+            key="spent_before_jpy_input",
+        )
+        usd_to_jpy = st.number_input(
+            "Tỷ giá USD → JPY", min_value=1.0,
+            value=float(st.session_state.get("usd_to_jpy", 155.0)), step=1.0,
+            key="usd_to_jpy_input",
+        )
+        st.session_state["budget_jpy"] = budget_jpy
+        st.session_state["spent_before_jpy"] = spent_before_jpy
+        st.session_state["usd_to_jpy"] = usd_to_jpy
+        st.caption("Gemini 3.5 Flash Standard: input $1.50/M token, output $9.00/M token.")
         st.markdown("[Xem bảng giá Gemini chính thức](https://ai.google.dev/gemini-api/docs/pricing)")
 
     with st.sidebar.expander("💡 Luồng sử dụng"):
@@ -111,5 +128,7 @@ def render_sidebar(
         "reasoning_effort": reasoning_effort,
         "analysis_language": analysis_language,
         "billing_tier": billing_tier,
+        "budget_jpy": budget_jpy,
+        "spent_before_jpy": spent_before_jpy,
         "usd_to_jpy": usd_to_jpy,
     }

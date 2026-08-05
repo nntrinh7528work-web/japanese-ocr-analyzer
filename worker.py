@@ -23,11 +23,19 @@ def run_job(job_id: str, text: str, lang: str):
             model_name = pages_data.get("model_name")
             reasoning_effort = pages_data.get("reasoning_effort", "standard")
             analysis_lang = "japanese" if lang == "pdf_ja" else "english"
+            partial_results = list(job_data.get("partial_result") or []) if job_data else []
+
+            def _persist_page(page_result: dict) -> None:
+                partial_results.append(page_result)
+                partial_results.sort(key=lambda page: int(page.get("page_index", 0)))
+                update_job(job_id, "running", partial_result=partial_results)
+
             result = run_page_analyses(
                 pages,
                 analysis_language=analysis_lang,
                 model_name=model_name,
                 reasoning_effort=reasoning_effort,
+                page_done_callback=_persist_page,
             )
         else:
             # Fallback direct text analysis
@@ -49,7 +57,7 @@ def run_job(job_id: str, text: str, lang: str):
                 reasoning_effort=reasoning_effort,
             )
             
-        update_job(job_id, "done", result=result)
+        update_job(job_id, "done", result=result, partial_result=[])
     except Exception as exc:
         import traceback
         traceback.print_exc()

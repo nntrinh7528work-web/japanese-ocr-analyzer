@@ -12,6 +12,20 @@ def test_paid_cost_uses_gemini_flash_rates():
     assert cost["total_cost_usd"] == 2.80
 
 
+def test_current_gemini_35_standard_rates():
+    flash = estimate_cost(
+        {"input_tokens": 1_000_000, "output_tokens": 1_000_000},
+        "gemini-3.5-flash",
+    )
+    lite = estimate_cost(
+        {"input_tokens": 1_000_000, "output_tokens": 1_000_000},
+        "gemini-3.5-flash-lite",
+    )
+
+    assert flash["total_cost_usd"] == 10.50
+    assert lite["total_cost_usd"] == 2.80
+
+
 def test_free_tier_is_zero_but_keeps_paid_equivalent():
     cost = estimate_cost({"input_tokens": 1000, "output_tokens": 1000}, "gemini-2.5-flash", "free")
     assert cost["total_cost_usd"] == 0

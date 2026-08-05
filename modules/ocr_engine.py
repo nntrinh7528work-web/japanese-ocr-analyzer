@@ -16,15 +16,13 @@ PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "ocr_prompt.txt"
 
 def init_gemini(model_name: str | None = None):
     """Initialize and return the configured Gemini vision model."""
-    import google.generativeai as genai
-
     from config import GEMINI_API_KEY, GEMINI_MODEL_VISION
+    from modules.gemini_client import create_gemini_model
 
     if not GEMINI_API_KEY:
         raise ValueError("Thiếu GEMINI_API_KEY. Hãy cấu hình key trong .env hoặc Streamlit secrets.")
-    genai.configure(api_key=GEMINI_API_KEY)
     target_model = model_name or GEMINI_MODEL_VISION
-    return genai.GenerativeModel(target_model)
+    return create_gemini_model(target_model, GEMINI_API_KEY)
 
 
 def build_ocr_prompt(preprocessing_report: dict) -> str:
@@ -105,6 +103,9 @@ def run_ocr(image_bytes: bytes, preprocessing_report: dict, model_name: str | No
     except Exception as exc:
         raise ValueError("Dữ liệu ảnh đầu vào không hợp lệ.") from exc
 
+    from config import GEMINI_MODEL_VISION
+
+    target_model = model_name or GEMINI_MODEL_VISION
     model = init_gemini(model_name) if model_name else init_gemini()
     prompt = build_ocr_prompt(preprocessing_report)
     last_error: Exception | None = None
@@ -115,6 +116,7 @@ def run_ocr(image_bytes: bytes, preprocessing_report: dict, model_name: str | No
             if not result["raw_text"]:
                 raise ValueError("Gemini không trả về phần OCR hợp lệ.")
             result["usage"] = _usage(response)
+            result["model_used"] = target_model
             return result
         except Exception as exc:
             last_error = exc

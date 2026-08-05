@@ -430,15 +430,13 @@ def _fill_missing_sections(
 
 
 def _init_model(model_name: str | None = None):
-    import google.generativeai as genai
-
     from config import GEMINI_API_KEY, GEMINI_MODEL_TEXT
+    from modules.gemini_client import create_gemini_model
 
     if not GEMINI_API_KEY:
         raise ValueError("Thiếu GEMINI_API_KEY. Hãy cấu hình key trong .env hoặc Streamlit secrets.")
-    genai.configure(api_key=GEMINI_API_KEY)
     target_model = model_name or GEMINI_MODEL_TEXT
-    model = genai.GenerativeModel(target_model)
+    model = create_gemini_model(target_model, GEMINI_API_KEY)
     model.target_model_name = target_model
     return model
 

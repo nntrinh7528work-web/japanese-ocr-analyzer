@@ -12,13 +12,12 @@ TOPIC_PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "topic_sug
 
 
 def _init_model():
-    import google.generativeai as genai
     from config import GEMINI_API_KEY, GEMINI_MODEL_TEXT
+    from modules.gemini_client import create_gemini_model
 
     if not GEMINI_API_KEY:
         raise ValueError("Thiếu GEMINI_API_KEY.")
-    genai.configure(api_key=GEMINI_API_KEY)
-    return genai.GenerativeModel(GEMINI_MODEL_TEXT)
+    return create_gemini_model(GEMINI_MODEL_TEXT, GEMINI_API_KEY)
 
 
 def _section(text: str, name: str) -> str:
@@ -233,6 +232,5 @@ GRAMMAR:
                 grammar.append(item)
                 
     return {"vocab": vocab, "grammar": grammar}
-
 
 

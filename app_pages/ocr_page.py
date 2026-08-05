@@ -14,9 +14,10 @@ from config import (
     MAX_PDF_SIZE_MB,
     SUPPORTED_UPLOAD_FORMATS,
 )
-from modules.cost_estimator import estimate_cost, format_cost, sum_costs
+from modules.cost_estimator import budget_status, estimate_cost, format_cost, sum_costs
 from modules.doc_exporter import export_to_docx
 from modules.job_store import create_job
+from modules.job_workflow import items_source_hash
 from modules.multi_image_workflow import combined_text, move_image_item
 from modules.ocr_engine import run_ocr
 from modules.result_exporter import (
@@ -200,11 +201,13 @@ def render_ocr_tab(
 
             if action2.button("⬆️ Lên", key=f"up_{item['id']}", disabled=index == 1, use_container_width=True):
                 st.session_state.image_items = move_image_item(items, item["id"], -1)
+                persist_items_fn()
                 clear_analysis_fn()
                 st.rerun()
 
             if action3.button("⬇️ Xuống", key=f"down_{item['id']}", disabled=index == len(items), use_container_width=True):
                 st.session_state.image_items = move_image_item(items, item["id"], 1)
+                persist_items_fn()
                 clear_analysis_fn()
                 st.rerun()
 
@@ -221,13 +224,18 @@ def render_ocr_tab(
                 meta2.metric("Furigana", "Có" if result["has_furigana"] else "Không")
                 meta3.metric("Độ tin cậy", result["confidence"])
 
-                item["edited_text"] = st.text_area(
+                edited_text = st.text_area(
                     "Văn bản ảnh này (có thể chỉnh sửa):",
                     value=item["edited_text"],
                     height=180,
                     key=f"text_{item['id']}",
                 )
-                ocr_cost = estimate_cost(result.get("usage"), ocr_model_choice, billing_tier)
+                if edited_text != item["edited_text"]:
+                    item["edited_text"] = edited_text
+                    persist_items_fn()
+                    clear_analysis_fn()
+                ocr_result_model = result.get("model_used") or ocr_model_choice
+                ocr_cost = estimate_cost(result.get("usage"), ocr_result_model, billing_tier)
                 with st.expander("💰 Chi phí OCR ảnh này"):
                     cost1, cost2, cost3 = st.columns(3)
                     cost1.metric("Input token", f"{ocr_cost['input_tokens']:,}")
@@ -263,7 +271,13 @@ def render_ocr_tab(
         done_page_indices = {p["page_index"] for p in partial}
         remaining_pages = [p for p in pages_to_analyze if p["page_index"] not in done_page_indices]
 
-        if partial and remaining_pages:
+        active_background_job = bool(st.query_params.get("job_id"))
+        if partial and remaining_pages and active_background_job:
+            st.info(
+                f"Đã lưu kết quả {len(partial)}/{len(pages_to_analyze)} trang. "
+                "Worker nền vẫn đang xử lý các trang còn lại."
+            )
+        elif partial and remaining_pages:
             st.info(
                 f"🔄 Phát hiện phân tích trước đó bị gián đoạn. Đang tự động chạy tiếp {len(remaining_pages)} trang còn lại..."
             )
@@ -285,8 +299,12 @@ def render_ocr_tab(
                         text=f"Đã phân tích {overall}/{len(pages_to_analyze)}: {name}",
                     )
 
+                resumed_pages = list(partial)
+
                 def _resume_page_done(page_result: dict) -> None:
-                    st.session_state.partial_page_analyses = list(partial) + [page_result]
+                    resumed_pages.append(page_result)
+                    resumed_pages.sort(key=lambda page: int(page.get("page_index", 0)))
+                    st.session_state.partial_page_analyses = list(resumed_pages)
                     persist_analysis_fn()
 
                 new_results = text_analyzer_module.run_page_analyses(
@@ -310,8 +328,7 @@ def render_ocr_tab(
 
         if analysis_language == "japanese":
             if st.button("🧠 Phân tích bằng Gemini", type="primary", use_container_width=True):
-                st.session_state.partial_page_analyses = []
-                persist_analysis_fn()
+                clear_analysis_fn()
                 detected_lang = "pdf_ja"
                 input_data = {
                     "pages": pages_to_analyze,
@@ -319,7 +336,12 @@ def render_ocr_tab(
                     "reasoning_effort": reasoning_effort,
                 }
                 input_text = json.dumps(input_data)
-                job_id = create_job(input_text, detected_lang)
+                job_id = create_job(
+                    input_text,
+                    detected_lang,
+                    session_id=st.session_state.session_id,
+                    source_hash=items_source_hash(items),
+                )
                 subprocess.Popen(
                     [_sys.executable, worker_path, job_id],
                     stdout=subprocess.DEVNULL,
@@ -333,8 +355,7 @@ def render_ocr_tab(
                 st.rerun()
         else:
             if st.button("🧠 Phân tích từng trang đã OCR", type="primary", use_container_width=True):
-                st.session_state.partial_page_analyses = []
-                persist_analysis_fn()
+                clear_analysis_fn()
                 detected_lang = "pdf_en"
                 input_data = {
                     "pages": pages_to_analyze,
@@ -342,7 +363,12 @@ def render_ocr_tab(
                     "reasoning_effort": reasoning_effort,
                 }
                 input_text = json.dumps(input_data)
-                job_id = create_job(input_text, detected_lang)
+                job_id = create_job(
+                    input_text,
+                    detected_lang,
+                    session_id=st.session_state.session_id,
+                    source_hash=items_source_hash(items),
+                )
                 subprocess.Popen(
                     [_sys.executable, worker_path, job_id],
                     stdout=subprocess.DEVNULL,
@@ -363,11 +389,15 @@ def render_ocr_tab(
         result_language = analysis.get("analysis_language", analysis_language)
 
         ocr_costs = [
-            estimate_cost(item["ocr_result"].get("usage"), ocr_model_choice, billing_tier)
+            estimate_cost(
+                item["ocr_result"].get("usage"),
+                item["ocr_result"].get("model_used") or ocr_model_choice,
+                billing_tier,
+            )
             for item in items
             if item.get("ocr_result")
         ]
-        analysis_cost = estimate_cost(analysis.get("usage"), text_model_choice, billing_tier)
+        analysis_cost = estimate_cost(analysis.get("usage"), used_model_name, billing_tier)
         session_cost = sum_costs([*ocr_costs, analysis_cost])
 
         with st.expander("💰 Tổng chi phí phiên phân tích", expanded=True):
@@ -383,6 +413,18 @@ def render_ocr_tab(
                     + format_cost(session_cost["paid_equivalent_usd"], usd_to_jpy)
                 )
 
+            budget = budget_status(
+                config.get("budget_jpy", 0),
+                config.get("spent_before_jpy", 0),
+                float(session_cost["total_cost_usd"]),
+                usd_to_jpy,
+            )
+            if budget["budget_jpy"] > 0:
+                budget1, budget2, budget3 = st.columns(3)
+                budget1.metric("Ngân sách", f"¥{budget['budget_jpy']:,.0f}")
+                budget2.metric("Đã dùng ước tính", f"¥{budget['total_spent_jpy']:,.0f}")
+                budget3.metric("Còn lại", f"¥{budget['remaining_jpy']:,.0f}")
+
         with st.expander("💾 Lưu kết quả phân tích", expanded=True):
             st.caption("Tải file về máy/điện thoại để xem lại sau. JSON lưu dữ liệu có cấu trúc, không nhúng ảnh gốc.")
             export_stem = safe_export_stem(
@@ -392,7 +434,9 @@ def render_ocr_tab(
             md_name = f"{export_stem}.md"
             json_name = f"{export_stem}.json"
             docx_bytes = export_to_docx(analysis["full_markdown"], docx_name)
-            json_bytes = analysis_json_bytes(items, analysis, session_cost, billing_tier, usd_to_jpy)
+            json_bytes = analysis_json_bytes(
+                items, analysis, session_cost, billing_tier, usd_to_jpy, budget=budget
+            )
 
             save_col1, save_col2, save_col3 = st.columns(3)
             save_col1.download_button(

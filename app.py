@@ -8,7 +8,8 @@ import streamlit as st
 from modules.multi_image_workflow import add_upload_items
 from modules import session_store
 import modules.text_analyzer as text_analyzer
-from modules.job_store import get_job
+from modules.job_store import cleanup_old_jobs, get_job
+from modules.job_workflow import items_source_hash, sync_job_state
 
 from components.styles import inject_custom_css, render_branded_header
 from components.sidebar import render_sidebar
@@ -38,17 +39,23 @@ for key, default in {
     "session_id": None,
     "session_restored": False,
     "current_job_id": None,
+    "applied_job_id": None,
+    "budget_jpy": 0.0,
+    "spent_before_jpy": 0.0,
+    "usd_to_jpy": 155.0,
     "recent_topics": [],
     "dialogue_result": None,
     "dialogue_quiz": None,
     "revealed_turns": {},
+    "dialogue_history_id": None,
+    "dialogue_quiz_results": {},
     "dark_mode": False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
 
 # ── Session persistence: restore or create ──────────────────────────────
-session_store.cleanup_old_sessions(max_age_hours=24)
+session_store.cleanup_old_sessions(max_age_hours=24 * 30)
 query_sid = st.query_params.get("session", "").strip()
 
 if not st.session_state.session_restored:
@@ -62,6 +69,10 @@ if not st.session_state.session_restored:
             st.session_state.analysis = saved_analysis
         if saved_partial:
             st.session_state.partial_page_analyses = saved_partial
+        saved_settings = session_store.load_settings(query_sid)
+        for key in ("budget_jpy", "spent_before_jpy", "usd_to_jpy"):
+            if key in saved_settings:
+                st.session_state[key] = saved_settings[key]
         session_store.update_session_timestamp(query_sid)
     else:
         new_sid = session_store.generate_session_id()
@@ -96,24 +107,39 @@ def _persist_analysis() -> None:
 
 _WORKER_PATH = str(Path(__file__).resolve().parent / "worker.py")
 _PROJECT_DIR = str(Path(__file__).resolve().parent)
+cleanup_old_jobs(max_age_hours=48)
 
 # ── Check background job status if job_id is present ─────────────────────
 job_id_from_url = st.query_params.get("job_id")
 if job_id_from_url:
     job = get_job(job_id_from_url)
+    job_status = None
+    job_changed = False
     if job:
-        if job["status"] == "done":
+        job_status, job_changed = sync_job_state(
+            st.session_state,
+            job_id_from_url,
+            job,
+            st.session_state.session_id,
+            current_source_hash=items_source_hash(st.session_state.image_items),
+        )
+    if job_status == "foreign":
+        st.error("Job phân tích này không thuộc phiên làm việc hiện tại.")
+    elif job_status == "stale":
+        st.warning("Nội dung OCR đã thay đổi nên kết quả job cũ không được áp dụng.")
+    elif job:
+        job_partial = job.get("partial_result") or []
+        if job_changed:
+            _persist_analysis()
+        if job_status == "done":
             st.success("Phân tích đã hoàn tất!")
-            if job["lang"] in ("pdf_ja", "pdf_en", "ai_ja", "ai_en"):
-                if st.session_state.analysis is None:
-                    st.session_state.analysis = job["result"]
-                    _persist_analysis()
-        elif job["status"] == "running":
+        elif job_status == "running":
             st.warning("⏳ Đang phân tích trong nền, vui lòng tải lại trang sau vài giây...")
             st.button("🔄 Tải lại")
-        elif job["status"] == "failed":
+        elif job_status == "failed":
             st.error(f"Phân tích thất bại: {job['error']}")
-            if st.button("🔄 Thử lại"):
+            retry_label = "▶️ Tiếp tục các trang còn lại" if job_partial else "🔄 Thử lại từ đầu"
+            if st.button(retry_label):
                 del st.query_params["job_id"]
                 st.rerun()
         else:
@@ -125,6 +151,8 @@ def clear_analysis() -> None:
     """Clear active analysis results."""
     st.session_state.analysis = None
     st.session_state.partial_page_analyses = []
+    st.session_state.current_job_id = None
+    st.session_state.applied_job_id = None
     if "job_id" in st.query_params:
         del st.query_params["job_id"]
     _persist_analysis()
@@ -191,6 +219,14 @@ config = render_sidebar(
     persist_items_fn=_persist_items,
     persist_analysis_fn=_persist_analysis,
 )
+session_store.save_settings(
+    st.session_state.session_id,
+    {
+        "budget_jpy": config["budget_jpy"],
+        "spent_before_jpy": config["spent_before_jpy"],
+        "usd_to_jpy": config["usd_to_jpy"],
+    },
+)
 inject_custom_css(dark_mode=config.get("dark_mode", False))
 
 # ── Main Content Tabs ──
@@ -212,4 +248,4 @@ with tab_ocr:
     )
 
 with tab_dialogue:
-    render_dialogue_tab()
+    render_dialogue_tab(session_id=st.session_state.session_id)

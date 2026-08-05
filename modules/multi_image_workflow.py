@@ -6,7 +6,7 @@ import hashlib
 from typing import Any, Iterable
 
 from modules.image_processor import process_image
-from modules.pdf_processor import pdf_to_image_sources
+from modules.pdf_processor import iter_pdf_image_sources
 
 
 def image_id(data: bytes) -> str:
@@ -58,19 +58,24 @@ def add_upload_items(
     sources: Iterable[tuple[str, bytes]],
 ) -> tuple[list[dict[str, Any]], list[str], list[str]]:
     """Expand PDFs into pages, then add all uploaded images to the workflow."""
-    expanded_sources: list[tuple[str, bytes]] = []
+    items = list(current_items)
+    added: list[str] = []
     errors: list[str] = []
     for name, data in sources:
         if name.lower().endswith(".pdf"):
             try:
-                expanded_sources.extend(pdf_to_image_sources(data, name))
+                for page_source in iter_pdf_image_sources(data, name):
+                    items, page_added, page_errors = add_image_items(items, [page_source])
+                    added.extend(page_added)
+                    errors.extend(page_errors)
             except Exception as exc:
                 errors.append(f"{name}: {exc}")
         else:
-            expanded_sources.append((name, data))
+            items, image_added, image_errors = add_image_items(items, [(name, data)])
+            added.extend(image_added)
+            errors.extend(image_errors)
 
-    items, added, image_errors = add_image_items(current_items, expanded_sources)
-    return items, added, [*errors, *image_errors]
+    return items, added, errors
 
 
 def combined_text(items: list[dict[str, Any]]) -> str:

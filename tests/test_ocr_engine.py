@@ -52,7 +52,7 @@ def test_run_ocr_retries_and_usage(monkeypatch):
                 usage_metadata=SimpleNamespace(prompt_token_count=12, candidates_token_count=34),
             )
 
-    monkeypatch.setattr(ocr_engine, "init_gemini", lambda: Model())
+    monkeypatch.setattr(ocr_engine, "init_gemini", lambda _model_name=None: Model())
     result = ocr_engine.run_ocr(png_bytes(), {"quality_level": "good"})
 
     assert calls["count"] == 2
@@ -61,3 +61,4 @@ def test_run_ocr_retries_and_usage(monkeypatch):
     assert result["usage"]["output_tokens"] == 34
     assert result["usage"]["candidate_tokens"] == 34
     assert result["usage"]["thinking_tokens"] == 0
+    assert result["model_used"]

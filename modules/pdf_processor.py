@@ -4,18 +4,19 @@ from __future__ import annotations
 
 import gc
 from pathlib import Path
+from collections.abc import Iterator
 
 import fitz
 
 from config import MAX_PDF_PAGES, MAX_PDF_SIZE_MB
 
 
-def pdf_to_image_sources(
+def iter_pdf_image_sources(
     data: bytes,
     filename: str,
     max_pages: int = MAX_PDF_PAGES,
-) -> list[tuple[str, bytes]]:
-    """Return PDF pages as compact named JPEG byte sources.
+) -> Iterator[tuple[str, bytes]]:
+    """Yield compact JPEG pages one at a time.
 
     Memory optimisation: each page pixmap is explicitly deleted and garbage
     collected immediately after conversion so that large multi-page PDFs
@@ -41,18 +42,25 @@ def pdf_to_image_sources(
 
         stem = Path(filename).stem or "document"
         digits = max(2, len(str(document.page_count)))
-        sources = []
         # Use lower scaling for large documents to reduce memory usage.
         scale = 1.1 if document.page_count > 20 else 1.3
         matrix = fitz.Matrix(scale, scale)
         for page_number, page in enumerate(document, 1):
             pixmap = page.get_pixmap(matrix=matrix, alpha=False)
             page_name = f"{stem} - trang {page_number:0{digits}d}.jpg"
-            sources.append((page_name, pixmap.tobytes("jpeg", jpg_quality=85)))
+            page_bytes = pixmap.tobytes("jpeg", jpg_quality=85)
             # Free pixmap memory immediately to avoid accumulation.
             del pixmap
             gc.collect()
-        return sources
+            yield page_name, page_bytes
     finally:
         document.close()
 
+
+def pdf_to_image_sources(
+    data: bytes,
+    filename: str,
+    max_pages: int = MAX_PDF_PAGES,
+) -> list[tuple[str, bytes]]:
+    """Return all rendered pages for callers that explicitly need a list."""
+    return list(iter_pdf_image_sources(data, filename, max_pages=max_pages))

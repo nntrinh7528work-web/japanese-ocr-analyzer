@@ -136,7 +136,7 @@ def generate_full_dialogue_audio(
     return None
 
 
-def get_audio_cache_key(text: str, lang: str, slow: bool) -> str:
+def get_audio_cache_key(text: str, lang: str, slow: bool, speaker: str = "default") -> str:
     """Generate a cache key for a TTS request."""
-    raw = f"{text}|{lang}|{slow}"
+    raw = f"{text}|{lang}|{slow}|{speaker}"
     return hashlib.md5(raw.encode("utf-8")).hexdigest()

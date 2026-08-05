@@ -5,9 +5,8 @@ from __future__ import annotations
 import datetime
 import json
 import pathlib
-import random
+import secrets
 import sqlite3
-import string
 import threading
 
 _DB_PATH: str = str(
@@ -45,6 +44,12 @@ CREATE TABLE IF NOT EXISTS analysis_cache (
     partial_json TEXT DEFAULT '[]',
     FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS session_settings (
+    session_id TEXT PRIMARY KEY,
+    settings_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+);
 """
 
 
@@ -73,9 +78,8 @@ def _utcnow_iso() -> str:
 
 
 def generate_session_id() -> str:
-    """Generate a short random session ID (6 lowercase-alphanumeric chars)."""
-    alphabet = string.ascii_lowercase + string.digits
-    return "".join(random.choices(alphabet, k=6))
+    """Generate an unguessable lowercase hexadecimal session ID."""
+    return secrets.token_hex(8)
 
 
 def create_session(
@@ -129,10 +133,19 @@ def save_image_items(session_id: str, items: list[dict]) -> None:
     with _lock:
         conn = _get_connection()
         try:
-            conn.execute(
-                "DELETE FROM image_items WHERE session_id = ?",
-                (session_id,),
-            )
+            existing_ids = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT id FROM image_items WHERE session_id = ?", (session_id,)
+                ).fetchall()
+            }
+            current_ids = {item["id"] for item in items}
+            removed_ids = existing_ids - current_ids
+            if removed_ids:
+                conn.executemany(
+                    "DELETE FROM image_items WHERE session_id = ? AND id = ?",
+                    [(session_id, item_id) for item_id in removed_ids],
+                )
             for idx, item in enumerate(items):
                 report_json = json.dumps(item.get("report")) if item.get("report") is not None else None
                 ocr_result_json = (
@@ -140,24 +153,32 @@ def save_image_items(session_id: str, items: list[dict]) -> None:
                     if item.get("ocr_result") is not None
                     else None
                 )
-                conn.execute(
-                    "INSERT INTO image_items "
-                    "(id, session_id, name, original_image_bytes, processed_image_bytes, "
-                    "report_json, ocr_result_json, edited_text, ocr_error, item_order) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        item["id"],
-                        session_id,
-                        item["name"],
-                        item.get("original_image_bytes"),
-                        item.get("processed_image_bytes"),
-                        report_json,
-                        ocr_result_json,
-                        item.get("edited_text", ""),
-                        item.get("ocr_error"),
-                        idx,
-                    ),
-                )
+                if item["id"] in existing_ids:
+                    # Image bytes never change after upload. Avoid rewriting large
+                    # BLOBs every time OCR text or page order changes.
+                    conn.execute(
+                        "UPDATE image_items SET name = ?, report_json = ?, "
+                        "ocr_result_json = ?, edited_text = ?, ocr_error = ?, item_order = ? "
+                        "WHERE session_id = ? AND id = ?",
+                        (
+                            item["name"], report_json, ocr_result_json,
+                            item.get("edited_text", ""), item.get("ocr_error"), idx,
+                            session_id, item["id"],
+                        ),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO image_items "
+                        "(id, session_id, name, original_image_bytes, processed_image_bytes, "
+                        "report_json, ocr_result_json, edited_text, ocr_error, item_order) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            item["id"], session_id, item["name"],
+                            item.get("original_image_bytes"), item.get("processed_image_bytes"),
+                            report_json, ocr_result_json, item.get("edited_text", ""),
+                            item.get("ocr_error"), idx,
+                        ),
+                    )
             conn.commit()
         finally:
             conn.close()
@@ -225,13 +246,14 @@ def save_analysis(
     with _lock:
         conn = _get_connection()
         try:
-            if analysis is None:
+            partial = partial if partial is not None else []
+            if analysis is None and not partial:
                 conn.execute(
                     "DELETE FROM analysis_cache WHERE session_id = ?",
                     (session_id,),
                 )
             else:
-                partial_json = json.dumps(partial if partial is not None else [])
+                partial_json = json.dumps(partial)
                 conn.execute(
                     "INSERT OR REPLACE INTO analysis_cache "
                     "(session_id, analysis_json, partial_json) VALUES (?, ?, ?)",
@@ -301,5 +323,32 @@ def update_session_timestamp(session_id: str) -> None:
                 (now, session_id),
             )
             conn.commit()
+        finally:
+            conn.close()
+
+
+def save_settings(session_id: str, settings: dict) -> None:
+    """Persist user-facing session settings such as the JPY budget."""
+    with _lock:
+        conn = _get_connection()
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO session_settings (session_id, settings_json) VALUES (?, ?)",
+                (session_id, json.dumps(settings)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def load_settings(session_id: str) -> dict:
+    """Load persisted session settings."""
+    with _lock:
+        conn = _get_connection()
+        try:
+            row = conn.execute(
+                "SELECT settings_json FROM session_settings WHERE session_id = ?", (session_id,)
+            ).fetchone()
+            return json.loads(row[0]) if row else {}
         finally:
             conn.close()

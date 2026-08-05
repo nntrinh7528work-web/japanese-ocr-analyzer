@@ -21,6 +21,17 @@ def test_app_starts_without_upload():
     assert len(app.tabs) == 4
 
 
+def test_app_can_switch_dark_mode_without_error():
+    app = AppTest.from_file("app.py").run(timeout=20)
+
+    dark_toggle = next(toggle for toggle in app.toggle if "Dark Mode" in toggle.label)
+    dark_toggle.set_value(True).run(timeout=20)
+
+    assert not app.exception
+    assert app.session_state["dark_mode"] is True
+    assert any("#0B0E17" in item.value for item in app.markdown)
+
+
 def test_app_renders_two_independent_image_flows():
     app = AppTest.from_file("app.py")
     app.session_state["image_items"] = [

@@ -11,7 +11,9 @@ pinned: false
 
 # Japanese OCR Analyzer
 
-Ứng dụng Streamlit xử lý ảnh, OCR văn bản tiếng Nhật bằng Gemini 3.5 Flash và phân tích ngôn ngữ bằng Gemini 3.1 Pro (hỗ trợ tùy chọn linh hoạt model trên giao diện UI).
+Ứng dụng Streamlit xử lý ảnh/PDF, OCR văn bản tiếng Nhật hoặc tiếng Anh bằng
+Gemini và phân tích từ vựng, kanji, ngữ pháp bằng tiếng Việt. Ứng dụng dùng SDK
+`google-genai` hiện hành và cho phép chọn model OCR/phân tích trên giao diện.
 
 ## Chạy ứng dụng
 
@@ -36,13 +38,25 @@ Không commit file `.env` hoặc `.streamlit/secrets.toml`.
 - OCR từng ảnh hoặc dùng nút OCR toàn bộ.
 - Chỉnh sửa, xóa và sắp xếp thứ tự từng ảnh.
 - Gộp văn bản theo thứ tự ảnh để phân tích chung và xuất Word.
+- Tác vụ phân tích lưu kết quả từng trang để có thể tiếp tục sau lỗi tạm thời.
+
+## Lịch sử và dữ liệu
+
+- Ảnh, OCR, kết quả phân tích, ngân sách và lịch sử hội thoại được cách ly theo
+  từng phiên truy cập.
+- Dữ liệu cục bộ được dọn sau 30 ngày. SQLite trên Streamlit Community Cloud
+  không phải kho lưu trữ vĩnh viễn và có thể bị xóa khi ứng dụng được triển khai
+  lại hoặc máy chủ được tái tạo. Muốn đồng bộ lâu dài giữa nhiều thiết bị cần
+  kết nối một cơ sở dữ liệu ngoài như PostgreSQL/Supabase.
 
 ## Ước tính chi phí
 
 Ứng dụng hiển thị token và chi phí ước tính cho từng lần OCR, lần phân tích
-văn bản và tổng phiên. Giá mặc định theo Gemini 3.5 Flash Standard Paid Tier:
-input `$0.30/M token`, output gồm thinking token `$2.50/M token`. Có thể chọn
-Free Tier để hiển thị chi phí thực tế `$0` cùng giá trị tương đương Paid Tier.
+văn bản và tổng phiên bằng USD hoặc JPY. Giá Gemini 3.5 Flash Standard Paid
+Tier đang cấu hình là input `$1.50/M token`, output gồm thinking token
+`$9.00/M token`. Có thể chọn Free Tier để hiển thị chi phí thực tế `$0` cùng
+giá trị tương đương Paid Tier. Đây là ước tính theo token, không phải số dư lấy
+trực tiếp từ Google Cloud Billing.
 
 ## Kiểm thử
 

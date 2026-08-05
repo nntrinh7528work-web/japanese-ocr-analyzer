@@ -4,8 +4,8 @@ from __future__ import annotations
 import streamlit as st
 
 
-def inject_custom_css(dark_mode: bool = False) -> None:
-    """Inject premium glassmorphism CSS for Light or Dark mode."""
+def build_custom_css(dark_mode: bool = False) -> str:
+    """Build the app theme CSS so it can be regression-tested."""
     if dark_mode:
         # ── Dark Mode Palette ──
         bg_app = "#0B0E17"
@@ -101,8 +101,7 @@ def inject_custom_css(dark_mode: bool = False) -> None:
         error_bg = "rgba(239,68,68,0.08)"
         error_border = "rgba(239,68,68,0.25)"
 
-    st.markdown(
-        f"""
+    return f"""
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 
@@ -119,6 +118,16 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
             background: {bg_gradient} !important;
+            color: {text_primary} !important;
+        }}
+
+        /* Streamlit's fixed header is outside the main app container. */
+        header[data-testid="stHeader"],
+        [data-testid="stHeader"],
+        [data-testid="stToolbar"],
+        [data-testid="stDecoration"],
+        .stAppHeader {{
+            background: {bg_app} !important;
             color: {text_primary} !important;
         }}
 
@@ -448,6 +457,7 @@ def inject_custom_css(dark_mode: bool = False) -> None:
         /* ── Text Inputs, Text Areas & BaseWeb Inputs ── */
         .stTextInput input,
         .stTextArea textarea,
+        .stNumberInput input,
         div[data-baseweb="input"],
         div[data-baseweb="base-input"],
         div[data-baseweb="textarea"] {{
@@ -455,6 +465,24 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             border: 1px solid {input_border} !important;
             border-radius: 12px !important;
             transition: all 0.2s ease;
+            color: {text_primary} !important;
+        }}
+        .stTextInput input::placeholder,
+        .stTextArea textarea::placeholder {{
+            color: {text_secondary} !important;
+            opacity: 0.85;
+        }}
+
+        /* Number input steppers otherwise keep Streamlit's light surface. */
+        .stNumberInput button,
+        [data-testid="stNumberInput"] button {{
+            background: {input_bg} !important;
+            color: {text_primary} !important;
+            border-color: {input_border} !important;
+        }}
+        .stNumberInput button svg,
+        [data-testid="stNumberInput"] button svg {{
+            fill: {text_primary} !important;
             color: {text_primary} !important;
         }}
         .stTextInput input:focus,
@@ -476,20 +504,27 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             color: {text_primary} !important;
         }}
         [data-baseweb="popover"],
+        [data-baseweb="popover"] > div,
         [data-baseweb="menu"],
+        [data-baseweb="menu"] > div,
+        [data-baseweb="menu"] > ul,
+        div[role="listbox"],
         ul[role="listbox"] {{
-            background: {glass_bg} !important;
+            background: {bg_app} !important;
             backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
             border: 1px solid {glass_border} !important;
             border-radius: 12px !important;
             box-shadow: {glass_shadow} !important;
         }}
-        li[role="option"], [data-baseweb="option"] {{
-            background: transparent !important;
+        li[role="option"], [data-baseweb="option"], div[role="option"] {{
+            background: {bg_app} !important;
             color: {text_primary} !important;
         }}
-        li[role="option"]:hover, [data-baseweb="option"]:hover {{
+        li[role="option"] *, [data-baseweb="option"] *, div[role="option"] * {{
+            color: {text_primary} !important;
+        }}
+        li[role="option"]:hover, [data-baseweb="option"]:hover, div[role="option"]:hover {{
             background: {tab_active_bg} !important;
             color: {tab_active_text} !important;
         }}
@@ -530,6 +565,13 @@ def inject_custom_css(dark_mode: bool = False) -> None:
         [data-testid="stDataFrame"] *, table * {{
             color: {text_primary} !important;
             background: transparent !important;
+        }}
+
+        /* Dataframe toolbar buttons use a separate BaseWeb surface. */
+        [data-testid="stDataFrame"] button,
+        [data-testid="stElementToolbar"] button {{
+            background: {glass_bg} !important;
+            color: {text_primary} !important;
         }}
 
         /* ── Code blocks ── */
@@ -630,9 +672,12 @@ def inject_custom_css(dark_mode: bool = False) -> None:
             color: {text_primary} !important;
         }}
         </style>
-        """,
-        unsafe_allow_html=True,
-    )
+        """
+
+
+def inject_custom_css(dark_mode: bool = False) -> None:
+    """Inject premium glassmorphism CSS for Light or Dark mode."""
+    st.markdown(build_custom_css(dark_mode), unsafe_allow_html=True)
 
 
 def render_branded_header() -> None:

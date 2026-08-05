@@ -22,16 +22,16 @@ class TestGenerateSessionId:
     """Tests for ``generate_session_id``."""
 
     def test_generate_session_id(self) -> None:
-        """Generated ID is 6 lowercase-alphanumeric characters."""
+        """Generated ID is a 16-character lowercase hexadecimal token."""
         sid = session_store.generate_session_id()
-        assert len(sid) == 6
+        assert len(sid) == 16
         assert sid.isalnum()
         assert sid == sid.lower()
 
     def test_generate_session_id_uniqueness(self) -> None:
         """Two consecutive IDs should (almost certainly) differ."""
         ids = {session_store.generate_session_id() for _ in range(50)}
-        # With 36^6 ≈ 2 billion possibilities, 50 draws should all be unique.
+        # A 64-bit random namespace makes collisions across 50 draws negligible.
         assert len(ids) == 50
 
 
@@ -144,6 +144,28 @@ class TestImageItems:
         assert len(loaded) == 1
         assert loaded[0]["id"] == "new"
 
+    def test_existing_image_blobs_are_not_rewritten_for_text_edits(self) -> None:
+        sid = "img003"
+        session_store.create_session(sid)
+        item = {
+            "id": "same",
+            "name": "page.png",
+            "original_image_bytes": b"original",
+            "processed_image_bytes": b"processed",
+            "report": {},
+            "ocr_result": None,
+            "edited_text": "before",
+            "ocr_error": None,
+        }
+        session_store.save_image_items(sid, [item])
+
+        edited = {**item, "original_image_bytes": b"should-not-rewrite", "edited_text": "after"}
+        session_store.save_image_items(sid, [edited])
+
+        restored = session_store.load_image_items(sid)[0]
+        assert restored["original_image_bytes"] == b"original"
+        assert restored["edited_text"] == "after"
+
 
 class TestAnalysisCache:
     """Tests for ``save_analysis`` and ``load_analysis``."""
@@ -220,3 +242,25 @@ class TestNonexistentSession:
         analysis, partial = session_store.load_analysis("no_such_session")
         assert analysis is None
         assert partial == []
+
+
+def test_partial_analysis_can_be_saved_before_final_result() -> None:
+    sid = "part01"
+    session_store.create_session(sid)
+    partial = [{"page_index": 1, "summary": "done"}]
+
+    session_store.save_analysis(sid, None, partial)
+
+    analysis, restored_partial = session_store.load_analysis(sid)
+    assert analysis is None
+    assert restored_partial == partial
+
+
+def test_session_settings_round_trip() -> None:
+    sid = "set001"
+    session_store.create_session(sid)
+    settings = {"budget_jpy": 10_000, "usd_to_jpy": 150}
+
+    session_store.save_settings(sid, settings)
+
+    assert session_store.load_settings(sid) == settings

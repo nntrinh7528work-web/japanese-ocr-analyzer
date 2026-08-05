@@ -13,20 +13,22 @@ from modules.dialogue_history import (
     get_due_sm2_cards,
     get_practice_history,
     get_streak_days,
+    load_dialogue_session,
     save_dialogue_session,
+    update_quiz_score,
     update_sm2_card,
 )
 from modules.dialogue_quiz import generate_pure_quiz
-from modules.tts_engine import text_to_speech, generate_full_dialogue_audio
+from modules.tts_engine import get_audio_cache_key, text_to_speech, generate_full_dialogue_audio
 
 
-def render_dialogue_tab() -> None:
+def render_dialogue_tab(session_id: str = "default") -> None:
     """Render Tab 2: Dialogue Practice & Spaced Repetition (SM-2)."""
     st.subheader("💬 Luyện Hội Thoại Hằng Ngày")
 
     # ── Display streak & due SM-2 cards notice ──
-    streak = get_streak_days()
-    due_cards = get_due_sm2_cards()
+    streak = get_streak_days(session_id=session_id)
+    due_cards = get_due_sm2_cards(session_id=session_id)
     st.markdown(
         f"""<div class="streak-banner">
             <span class="streak-number">🔥 {streak}</span>
@@ -45,19 +47,19 @@ def render_dialogue_tab() -> None:
                 st.caption(f"Gợi ý / Nghĩa: {card['meaning']}")
                 c1, c2, c3, c4 = st.columns(4)
                 if c1.button("❌ 0: Quên", key=f"sm2_0_{card['id']}"):
-                    update_sm2_card(card["id"], 0)
+                    update_sm2_card(card["id"], 0, session_id=session_id)
                     st.toast("Đã ghi nhận: Cần luyện lại sớm")
                     st.rerun()
                 if c2.button("⚠️ 3: Khó", key=f"sm2_3_{card['id']}"):
-                    update_sm2_card(card["id"], 3)
+                    update_sm2_card(card["id"], 3, session_id=session_id)
                     st.toast("Đã ghi nhận: Khó nhớ")
                     st.rerun()
                 if c3.button("👍 4: Tốt", key=f"sm2_4_{card['id']}"):
-                    update_sm2_card(card["id"], 4)
+                    update_sm2_card(card["id"], 4, session_id=session_id)
                     st.toast("Đã ghi nhận: Tốt")
                     st.rerun()
                 if c4.button("🌟 5: Rất dễ", key=f"sm2_5_{card['id']}"):
-                    update_sm2_card(card["id"], 5)
+                    update_sm2_card(card["id"], 5, session_id=session_id)
                     st.toast("Đã ghi nhận: Rất dễ!")
                     st.rerun()
 
@@ -200,8 +202,14 @@ def render_dialogue_tab() -> None:
                 )
                 st.session_state.dialogue_result = result
                 st.session_state.dialogue_quiz = generate_pure_quiz(result)
+                st.session_state.revealed_turns = {}
+                st.session_state.dialogue_quiz_results = {}
                 st.session_state.recent_topics.append(topic_input)
-                save_dialogue_session(result)
+                st.session_state.dialogue_history_id = save_dialogue_session(
+                    result, session_id=session_id
+                )
+                for key in [key for key in st.session_state if str(key).startswith("tts_")]:
+                    del st.session_state[key]
                 if not result["fully_covered"]:
                     st.warning("Một số từ/ngữ pháp chưa được dùng hết, nhưng đây là bản tốt nhất.")
             except Exception as e:
@@ -213,7 +221,13 @@ def render_dialogue_tab() -> None:
                 var_result = generate_variation(st.session_state.dialogue_result)
                 st.session_state.dialogue_result = var_result
                 st.session_state.dialogue_quiz = generate_pure_quiz(var_result)
-                save_dialogue_session(var_result)
+                st.session_state.revealed_turns = {}
+                st.session_state.dialogue_quiz_results = {}
+                st.session_state.dialogue_history_id = save_dialogue_session(
+                    var_result, session_id=session_id
+                )
+                for key in [key for key in st.session_state if str(key).startswith("tts_")]:
+                    del st.session_state[key]
                 st.success("Đã tạo biến thể mới!")
             except Exception as e:
                 st.error(f"Lỗi tạo biến thể: {e}")
@@ -230,15 +244,28 @@ def render_dialogue_tab() -> None:
         is_english = "english" in str(r.get("language") or dlg_language).lower() or "tiếng anh" in str(r.get("language") or dlg_language).lower()
         tts_lang = "en" if is_english else "ja"
 
+        def _record_quiz_answer(question_id: str, correct: bool) -> None:
+            results = dict(st.session_state.get("dialogue_quiz_results", {}))
+            results[question_id] = bool(correct)
+            st.session_state.dialogue_quiz_results = results
+            score = round(100 * sum(results.values()) / len(results)) if results else 0
+            history_id = st.session_state.get("dialogue_history_id")
+            if history_id:
+                update_quiz_score(history_id, score, session_id=session_id)
+
         # TTS: Play all button
         if enable_tts:
+            full_text = "\n".join(
+                f"{turn.get('speaker', '')}:{turn.get('text', '')}" for turn in r["dialogue"]
+            )
+            full_audio_key = "tts_full_" + get_audio_cache_key(full_text, tts_lang, tts_slow)
             if st.button("🔊 Phát toàn bộ hội thoại", key="btn_play_all_tts"):
                 with st.spinner("Đang tạo audio..."):
                     full_audio = generate_full_dialogue_audio(r["dialogue"], lang=tts_lang, slow=tts_slow)
                     if full_audio:
-                        st.session_state["tts_full_audio"] = full_audio
-            if st.session_state.get("tts_full_audio"):
-                st.audio(st.session_state["tts_full_audio"], format="audio/mp3")
+                        st.session_state[full_audio_key] = full_audio
+            if st.session_state.get(full_audio_key):
+                st.audio(st.session_state[full_audio_key], format="audio/mp3")
 
         # Dialogue Turns
         for turn_idx, turn in enumerate(r["dialogue"]):
@@ -255,7 +282,9 @@ def render_dialogue_tab() -> None:
 
             # TTS per turn button
             if enable_tts:
-                tts_cache_key = f"tts_audio_{turn_idx}_{tts_slow}"
+                tts_cache_key = "tts_audio_" + get_audio_cache_key(
+                    turn["text"], tts_lang, tts_slow, turn["speaker"]
+                )
                 if st.button(f"🔊 Nghe câu {turn['speaker']} ({turn_idx + 1})", key=f"tts_{turn_idx}"):
                     audio_data = text_to_speech(turn["text"], lang=tts_lang, slow=tts_slow, speaker=turn["speaker"])
                     if audio_data:
@@ -305,7 +334,9 @@ def render_dialogue_tab() -> None:
                         st.caption(f"Dịch: {q['text_vi']}")
                         user_ans = st.radio(f"Chọn từ thích hợp:", q["options"], key=f"ui_{q['id']}")
                         if st.button("Kiểm tra", key=f"btn_{q['id']}"):
-                            if user_ans == q["target_word"]:
+                            is_correct = user_ans == q["target_word"]
+                            _record_quiz_answer(q["id"], is_correct)
+                            if is_correct:
                                 st.success("🎉 Chính xác!")
                             else:
                                 st.error(f"❌ Chưa đúng. Đáp án đúng là: `{q['target_word']}`")
@@ -318,7 +349,9 @@ def render_dialogue_tab() -> None:
                         st.markdown(f"**{q['question']}**")
                         user_ans = st.radio("Chọn đáp án:", q["options"], key=f"ui_{q['id']}")
                         if st.button("Kiểm tra", key=f"btn_{q['id']}"):
-                            if user_ans == q["correct_answer"]:
+                            is_correct = user_ans == q["correct_answer"]
+                            _record_quiz_answer(q["id"], is_correct)
+                            if is_correct:
                                 st.success("🎉 Chính xác!")
                             else:
                                 st.error(f"❌ Chưa đúng. Đáp án: `{q['correct_answer']}`")
@@ -332,7 +365,9 @@ def render_dialogue_tab() -> None:
                         st.write("Từ gợi ý: " + "  |  ".join(f"`{t}`" for t in q["shuffled_tokens"]))
                         user_input = st.text_input("Nhập lại câu hoàn chỉnh:", key=f"ui_{q['id']}")
                         if st.button("Kiểm tra", key=f"btn_{q['id']}"):
-                            if user_input.strip() == q["original"].strip():
+                            is_correct = user_input.strip() == q["original"].strip()
+                            _record_quiz_answer(q["id"], is_correct)
+                            if is_correct:
                                 st.success("🎉 Bạn xếp đúng rồi!")
                             else:
                                 st.info(f"Đáp án gốc: `{q['original']}`")
@@ -386,8 +421,24 @@ def render_dialogue_tab() -> None:
     # ── PRACTICE HISTORY LOG ──
     st.divider()
     st.markdown("### 📜 Lịch sử luyện tập gần đây")
-    history_logs = get_practice_history(limit=10)
+    history_logs = get_practice_history(limit=10, session_id=session_id)
     if history_logs:
+        history_options = {
+            f"#{row['id']} · {row['topic']} · {row['created_at'][:16]}": row["id"]
+            for row in history_logs
+        }
+        selected_history = st.selectbox("Mở lại bài đã lưu:", list(history_options))
+        if st.button("📂 Mở bài đã chọn", use_container_width=True):
+            saved_result = load_dialogue_session(
+                history_options[selected_history], session_id=session_id
+            )
+            if saved_result:
+                st.session_state.dialogue_result = saved_result
+                st.session_state.dialogue_quiz = generate_pure_quiz(saved_result)
+                st.session_state.dialogue_history_id = history_options[selected_history]
+                st.session_state.revealed_turns = {}
+                st.session_state.dialogue_quiz_results = {}
+                st.rerun()
         st.dataframe(
             history_logs,
             column_config={

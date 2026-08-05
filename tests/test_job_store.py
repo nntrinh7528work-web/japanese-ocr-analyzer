@@ -3,7 +3,13 @@
 import pytest
 import time
 from modules.job_store import init_db, create_job, update_job, get_job, DB_PATH
+from modules import job_store
 import worker
+
+
+@pytest.fixture(autouse=True)
+def _use_temp_db(tmp_path, monkeypatch):
+    monkeypatch.setattr(job_store, "DB_PATH", tmp_path / "jobs.db")
 
 
 def test_job_lifecycle():
@@ -13,7 +19,7 @@ def test_job_lifecycle():
     # Create job
     text = "Hello World"
     lang = "en"
-    job_id = create_job(text, lang)
+    job_id = create_job(text, lang, session_id="abc123")
     assert job_id is not None
     
     # Get job and check pending status
@@ -23,6 +29,7 @@ def test_job_lifecycle():
     assert job["status"] == "pending"
     assert job["input_text"] == text
     assert job["lang"] == lang
+    assert job["session_id"] == "abc123"
     
     # Update status to running
     update_job(job_id, "running")
@@ -41,3 +48,13 @@ def test_job_lifecycle():
     job = get_job(job_id)
     assert job["status"] == "failed"
     assert job["error"] == "An error occurred"
+
+
+def test_partial_results_survive_running_updates():
+    job_id = create_job("{}", "pdf_ja", session_id="abc123")
+    partial = [{"page_index": 1, "summary": "Trang 1"}]
+    update_job(job_id, "running", partial_result=partial)
+
+    job = get_job(job_id)
+    assert job["partial_result"] == partial
+    assert job["result"] is None
