@@ -117,15 +117,11 @@ def render_grammar_points(items: list[dict]) -> None:
                 if point.get("explanation"):
                     st.markdown(f"**Giải thích:** {point['explanation']}")
             with col2:
-                if point.get("example"):
-                    st.markdown("**📌 Ví dụ trong bài:**")
-                    st.code(point["example"], language=None)
+                render_example("**📌 Ví dụ trong bài:**", point.get("example"), point.get("example_hiragana"))
                 if point.get("example_analysis"):
                     st.markdown(f"**Phân tích ví dụ:** {point['example_analysis']}")
-                if point.get("example_1"):
-                    st.markdown(f"**✏️ Ví dụ 1:** {point['example_1']}")
-                if point.get("example_2"):
-                    st.markdown(f"**✏️ Ví dụ 2:** {point['example_2']}")
+                render_example("**✏️ Ví dụ 1:**", point.get("example_1"), point.get("example_1_hiragana"))
+                render_example("**✏️ Ví dụ 2:**", point.get("example_2"), point.get("example_2_hiragana"))
 
             if point.get("note") and point["note"] not in ("Không có", "None", "N/A"):
                 st.warning(f"⚠️ **Lưu ý:** {point['note']}")

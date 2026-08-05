@@ -63,12 +63,30 @@ def _field(block: str, labels: str) -> str:
     return match.group(1).strip().strip("`") if match else ""
 
 
+def _split_inline_hiragana(value: str) -> tuple[str, str]:
+    """Split examples that include a trailing ``(Hiragana: ...)`` note."""
+    match = re.search(r"(?i)(?:\s*[-–—]\s*)?\(?\s*(?:Hiragana|ひらがな)\s*:\s*([^)]+?)\s*\)?\s*$", value)
+    if not match:
+        return value, ""
+    clean_value = value[: match.start()].rstrip(" -–—")
+    return clean_value.strip(), match.group(1).strip()
+
+
+def _example_fields(block: str, example_labels: str, hiragana_labels: str) -> tuple[str, str]:
+    example, inline_hiragana = _split_inline_hiragana(_field(block, example_labels))
+    explicit_hiragana = _field(block, hiragana_labels)
+    return example, explicit_hiragana or inline_hiragana
+
+
 def _parse_named_blocks(section: str, heading_pattern: str, kind: str) -> list[dict[str, str]]:
     matches = list(re.finditer(heading_pattern, section, re.MULTILINE))
     results = []
     for index, match in enumerate(matches):
         block = section[match.end() : matches[index + 1].start() if index + 1 < len(matches) else None]
         if kind == "grammar":
+            example, example_hiragana = _example_fields(block, r"Example from text|Ví dụ trong bài", r"Hiragana ví dụ trong bài")
+            example_1, example_1_hiragana = _example_fields(block, r"Example 1|Ví dụ 1", r"Hiragana ví dụ 1")
+            example_2, example_2_hiragana = _example_fields(block, r"Example 2|Ví dụ 2", r"Hiragana ví dụ 2")
             results.append(
                 {
                     "name": re.sub(r"^\d+[\.\)]\s*", "", match.group(1).strip("[] ")),
@@ -76,17 +94,25 @@ def _parse_named_blocks(section: str, heading_pattern: str, kind: str) -> list[d
                     "rule": _field(block, r"Rule|Quy tắc"),
                     "meaning": _field(block, r"Meaning|Ý nghĩa"),
                     "usage": _field(block, r"Cách dùng|Usage"),
-                    "example": _field(block, r"Example from text|Ví dụ trong bài"),
+                    "example": example,
+                    "example_hiragana": example_hiragana,
                     "example_analysis": _field(block, r"Example analysis|Phân tích ví dụ"),
                     "explanation": _field(block, r"Explanation|Giải thích(?: ý nghĩa & cách dùng)?"),
-                    "example_1": _field(block, r"Example 1|Ví dụ 1"),
-                    "example_2": _field(block, r"Example 2|Ví dụ 2"),
+                    "example_1": example_1,
+                    "example_1_hiragana": example_1_hiragana,
+                    "example_2": example_2,
+                    "example_2_hiragana": example_2_hiragana,
                     "note": _field(block, r"Lưu ý"),
                     "mistake": _field(block, r"Common mistake"),
                     "level": _field(block, r"Level|Mức độ"),
                 }
             )
         elif kind == "vocab_detail":
+            example_text, example_text_hiragana = _example_fields(
+                block, r"Ví dụ trong bài|Example from text", r"Hiragana ví dụ trong bài"
+            )
+            example_1, example_1_hiragana = _example_fields(block, r"Ví dụ 1|Example 1", r"Hiragana ví dụ 1")
+            example_2, example_2_hiragana = _example_fields(block, r"Ví dụ 2|Example 2", r"Hiragana ví dụ 2")
             results.append(
                 {
                     "word": re.sub(r"^\d+[\.\)]\s*", "", match.group(1).strip("[] ")),
@@ -94,12 +120,12 @@ def _parse_named_blocks(section: str, heading_pattern: str, kind: str) -> list[d
                     "meaning": _field(block, r"Ý nghĩa"),
                     "vn_meaning": _field(block, r"Vietnamese Meaning"),
                     "definition": _field(block, r"Definition"),
-                    "example_text": _field(block, r"Ví dụ trong bài|Example from text"),
-                    "example_text_hiragana": _field(block, r"Hiragana ví dụ trong bài"),
-                    "example_1": _field(block, r"Ví dụ 1|Example 1"),
-                    "example_1_hiragana": _field(block, r"Hiragana ví dụ 1"),
-                    "example_2": _field(block, r"Ví dụ 2|Example 2"),
-                    "example_2_hiragana": _field(block, r"Hiragana ví dụ 2"),
+                    "example_text": example_text,
+                    "example_text_hiragana": example_text_hiragana,
+                    "example_1": example_1,
+                    "example_1_hiragana": example_1_hiragana,
+                    "example_2": example_2,
+                    "example_2_hiragana": example_2_hiragana,
                     "related": _field(block, r"Từ liên quan|Related words"),
                     "note": _field(block, r"Lưu ý"),
                     "mistake": _field(block, r"Common mistake"),

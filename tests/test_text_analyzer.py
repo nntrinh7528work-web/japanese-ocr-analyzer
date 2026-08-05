@@ -169,6 +169,24 @@ def test_parse_japanese_vocab_detail_blocks():
     assert result[0]["jlpt"] == "N2"
 
 
+def test_parse_inline_hiragana_examples():
+    mock = """
+**[検討・けんとう]**
+- Loại từ: danh từ / tha động từ
+- Ý nghĩa: cân nhắc, xem xét kỹ
+- Ví dụ trong bài: この案を検討します - Tôi sẽ xem xét phương án này - (Hiragana: このあんをけんとうします)
+- Ví dụ 1: 詳細を検討してください。 - Hãy xem xét chi tiết. - (Hiragana: しょうさいをけんとうしてください。)
+- Ví dụ 2: 委員会で政策を検討した。 - Ủy ban đã xem xét chính sách. - (Hiragana: いいんかいでせいさくをけんとうした。)
+- Mức độ: N2
+"""
+    result = text_analyzer._parse_named_blocks(mock, r"^\s*\*\*\[(.+?)\]\*\*\s*$", "vocab_detail")
+
+    assert result[0]["example_text"] == "この案を検討します - Tôi sẽ xem xét phương án này"
+    assert result[0]["example_text_hiragana"] == "このあんをけんとうします"
+    assert result[0]["example_1_hiragana"] == "しょうさいをけんとうしてください。"
+    assert result[0]["example_2_hiragana"] == "いいんかいでせいさくをけんとうした。"
+
+
 def test_parse_english_vocab_detail_blocks():
     mock = """
 **[meticulous (adjective)]**
@@ -208,6 +226,26 @@ def test_parse_japanese_detailed_grammar_blocks():
     assert result[0]["structure"] == "普通形 + とは限らない"
     assert result[0]["example_analysis"].startswith("正しい")
     assert result[0]["level"] == "N2"
+
+
+def test_parse_japanese_grammar_hiragana_examples():
+    mock = """
+**[〜とは限らない]**
+- Công thức: 普通形 + とは限らない
+- Ý nghĩa: không nhất thiết là
+- Ví dụ trong bài: いつも正しいとは限らない - Không phải lúc nào cũng đúng.
+- Hiragana ví dụ trong bài: いつもただしいとはかぎらない
+- Ví dụ 1: 高いものが良いとは限らない。 - Đồ đắt chưa chắc đã tốt.
+- Hiragana ví dụ 1: たかいものがよいとはかぎらない。
+- Ví dụ 2: 専門家の意見が常に正しいとは限らない。 - Ý kiến chuyên gia không phải luôn đúng.
+- Hiragana ví dụ 2: せんもんかのいけんがつねにただしいとはかぎらない。
+- Mức độ: N2
+"""
+    result = text_analyzer._parse_named_blocks(mock, r"^\s*\*\*(?!Mẫu:)(.+?)\*\*\s*$", "grammar")
+
+    assert result[0]["example_hiragana"] == "いつもただしいとはかぎらない"
+    assert result[0]["example_1_hiragana"] == "たかいものがよいとはかぎらない。"
+    assert result[0]["example_2_hiragana"] == "せんもんかのいけんがつねにただしいとはかぎらない。"
 
 
 def test_parse_english_detailed_grammar_blocks():
