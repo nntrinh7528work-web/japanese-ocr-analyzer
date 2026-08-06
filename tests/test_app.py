@@ -203,3 +203,70 @@ def test_app_renders_sentence_card_hiragana_and_hidden_answers():
     assert any("Từ nối nguyên nhân" in value for value in markdown_values)
     assert any("Mệnh đề nguyên nhân" in value for value in markdown_values)
     assert any("あめがふっているので" in item.value for item in app.caption)
+
+
+def test_app_renders_completed_notion_sync_status(tmp_path, monkeypatch):
+    from app_pages import ocr_page
+    from components import sidebar
+    from modules import notion_sync, session_store
+    from modules.job_workflow import items_source_hash
+
+    monkeypatch.setattr(session_store, "_DB_PATH", str(tmp_path / "sessions.db"))
+    connected = lambda: {"configured": True, "label": "Đã kết nối", "workspace_ready": True}
+    monkeypatch.setattr(notion_sync, "notion_connection_state", connected)
+    monkeypatch.setattr(sidebar, "notion_connection_state", connected)
+    monkeypatch.setattr(ocr_page, "notion_connection_state", connected)
+
+    item = create_image_item(_image_bytes("white"), "notion.png")
+    item["ocr_result"] = {
+        "clean_text": "日本語",
+        "ocr_notes": [],
+        "usage": {},
+        "text_direction": "horizontal",
+        "has_furigana": False,
+        "confidence": "high",
+    }
+    item["edited_text"] = "日本語"
+    analysis = {
+        "analysis_language": "japanese",
+        "summary": "Tóm tắt Notion",
+        "full_markdown": "# Báo cáo",
+        "usage": {},
+        "vocabulary_all": [],
+        "vocabulary_important": [],
+        "kanji_analysis": [],
+        "connectors": [],
+        "grammar_points": [],
+        "sentence_patterns": [],
+    }
+    session_store.create_session("notion-ui")
+    source_hash = items_source_hash([item])
+    run = session_store.ensure_notion_sync_run(
+        "notion-ui",
+        f"analysis:{source_hash}",
+        source_hash,
+        {"learning_items": []},
+    )
+    session_store.finish_notion_sync_run(
+        run["run_id"],
+        "done",
+        notion_page_id="page-id",
+        notion_page_url="https://www.notion.so/page-id",
+    )
+
+    app = AppTest.from_file("app.py")
+    app.session_state["session_id"] = "notion-ui"
+    app.session_state["session_restored"] = True
+    app.session_state["image_items"] = [item]
+    app.session_state["analysis"] = analysis
+    app.session_state["partial_page_analyses"] = []
+    app.session_state["upload_messages"] = []
+    app.session_state["upload_errors"] = []
+    app.session_state["uploader_version"] = 0
+    app.session_state["camera_version"] = 0
+    app.session_state["auto_notion_sync"] = False
+    app.run(timeout=20)
+
+    assert not app.exception
+    assert any("Đã lưu bài" in message.value for message in app.success)
+    assert any(toggle.label == "Tự động lưu bài hoàn tất" for toggle in app.toggle)

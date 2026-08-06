@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import pathlib
 import secrets
 import sqlite3
 import threading
+import uuid
 
 _DB_PATH: str = str(
     pathlib.Path(__file__).resolve().parent.parent / "data" / "sessions.db"
@@ -50,6 +52,39 @@ CREATE TABLE IF NOT EXISTS session_settings (
     settings_json TEXT NOT NULL DEFAULT '{}',
     FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS notion_workspace_config (
+    config_id INTEGER PRIMARY KEY CHECK (config_id = 1),
+    config_json TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS notion_sync_runs (
+    run_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    external_id TEXT NOT NULL UNIQUE,
+    source_hash TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    completed_items INTEGER NOT NULL DEFAULT 0,
+    total_items INTEGER NOT NULL DEFAULT 0,
+    notion_page_id TEXT,
+    notion_page_url TEXT,
+    error TEXT,
+    item_errors_json TEXT NOT NULL DEFAULT '[]',
+    next_retry_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_notion_sync_session_hash
+ON notion_sync_runs(session_id, source_hash, updated_at);
+
+CREATE INDEX IF NOT EXISTS idx_notion_sync_status
+ON notion_sync_runs(status, next_retry_at, updated_at);
 """
 
 
@@ -350,5 +385,282 @@ def load_settings(session_id: str) -> dict:
                 "SELECT settings_json FROM session_settings WHERE session_id = ?", (session_id,)
             ).fetchone()
             return json.loads(row[0]) if row else {}
+        finally:
+            conn.close()
+
+
+# --- Notion workspace and durable sync queue -----------------------------
+
+
+def save_notion_workspace_config(config: dict) -> None:
+    """Persist non-secret Notion resource IDs created during bootstrap."""
+    now = _utcnow_iso()
+    with _lock:
+        conn = _get_connection()
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO notion_workspace_config "
+                "(config_id, config_json, updated_at) VALUES (1, ?, ?)",
+                (json.dumps(config), now),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def load_notion_workspace_config() -> dict:
+    """Load locally cached Notion database/data-source IDs, never a token."""
+    with _lock:
+        conn = _get_connection()
+        try:
+            row = conn.execute(
+                "SELECT config_json FROM notion_workspace_config WHERE config_id = 1"
+            ).fetchone()
+            return json.loads(row[0]) if row else {}
+        finally:
+            conn.close()
+
+
+def _decode_notion_run(row: sqlite3.Row | tuple | None, columns: list[str] | None = None) -> dict | None:
+    if row is None:
+        return None
+    if isinstance(row, sqlite3.Row):
+        data = dict(row)
+    else:
+        data = dict(zip(columns or [], row))
+    data["payload"] = json.loads(data.pop("payload_json") or "{}")
+    data["item_errors"] = json.loads(data.pop("item_errors_json") or "[]")
+    return data
+
+
+def ensure_notion_sync_run(
+    session_id: str,
+    external_id: str,
+    source_hash: str,
+    payload: dict,
+    *,
+    force: bool = False,
+) -> dict:
+    """Create or refresh one idempotent Notion sync run for an OCR source."""
+    payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    stable_payload = dict(payload)
+    stable_payload.pop("created_at", None)
+    stable_json = json.dumps(stable_payload, ensure_ascii=False, sort_keys=True, default=str)
+    payload_hash = hashlib.sha256(stable_json.encode("utf-8")).hexdigest()
+    now = _utcnow_iso()
+    with _lock:
+        conn = _get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(
+                "SELECT * FROM notion_sync_runs WHERE external_id = ?", (external_id,)
+            ).fetchone()
+            if row is None:
+                run_id = str(uuid.uuid4())
+                conn.execute(
+                    "INSERT INTO notion_sync_runs "
+                    "(run_id, session_id, external_id, source_hash, payload_json, payload_hash, "
+                    "status, total_items, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)",
+                    (
+                        run_id,
+                        session_id,
+                        external_id,
+                        source_hash,
+                        payload_json,
+                        payload_hash,
+                        len(payload.get("learning_items") or []),
+                        now,
+                        now,
+                    ),
+                )
+            else:
+                changed = row["payload_hash"] != payload_hash
+                should_reset = changed or (force and row["status"] not in ("queued", "running"))
+                if should_reset:
+                    conn.execute(
+                        "UPDATE notion_sync_runs SET session_id=?, source_hash=?, payload_json=?, "
+                        "payload_hash=?, status='pending', completed_items=0, total_items=?, "
+                        "error=NULL, item_errors_json='[]', next_retry_at=NULL, updated_at=? "
+                        "WHERE external_id=?",
+                        (
+                            session_id,
+                            source_hash,
+                            payload_json,
+                            payload_hash,
+                            len(payload.get("learning_items") or []),
+                            now,
+                            external_id,
+                        ),
+                    )
+            conn.commit()
+            result = conn.execute(
+                "SELECT * FROM notion_sync_runs WHERE external_id = ?", (external_id,)
+            ).fetchone()
+            return _decode_notion_run(result) or {}
+        finally:
+            conn.close()
+
+
+def get_notion_sync_run(run_id: str) -> dict | None:
+    with _lock:
+        conn = _get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            return _decode_notion_run(
+                conn.execute("SELECT * FROM notion_sync_runs WHERE run_id = ?", (run_id,)).fetchone()
+            )
+        finally:
+            conn.close()
+
+
+def get_notion_sync_for_source(session_id: str, source_hash: str) -> dict | None:
+    with _lock:
+        conn = _get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            return _decode_notion_run(
+                conn.execute(
+                    "SELECT * FROM notion_sync_runs WHERE session_id=? AND source_hash=? "
+                    "ORDER BY updated_at DESC LIMIT 1",
+                    (session_id, source_hash),
+                ).fetchone()
+            )
+        finally:
+            conn.close()
+
+
+def dispatch_notion_sync_run(run_id: str, stale_after_seconds: int = 120) -> bool:
+    """Atomically mark a due run queued so only one worker is spawned."""
+    now_dt = datetime.datetime.now(datetime.timezone.utc)
+    now = now_dt.isoformat()
+    stale = (now_dt - datetime.timedelta(seconds=stale_after_seconds)).isoformat()
+    with _lock:
+        conn = _get_connection()
+        try:
+            cursor = conn.execute(
+                "UPDATE notion_sync_runs SET status='queued', updated_at=? WHERE run_id=? AND ("
+                "status='pending' OR "
+                "(status='retry' AND (next_retry_at IS NULL OR next_retry_at<=?)) OR "
+                "(status IN ('queued','running') AND updated_at<?))",
+                (now, run_id, now, stale),
+            )
+            conn.commit()
+            return cursor.rowcount == 1
+        finally:
+            conn.close()
+
+
+def list_due_notion_sync_runs(limit: int = 3) -> list[dict]:
+    now = _utcnow_iso()
+    with _lock:
+        conn = _get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                "SELECT * FROM notion_sync_runs WHERE status='pending' OR "
+                "(status='retry' AND (next_retry_at IS NULL OR next_retry_at<=?)) "
+                "ORDER BY created_at LIMIT ?",
+                (now, limit),
+            ).fetchall()
+            return [_decode_notion_run(row) or {} for row in rows]
+        finally:
+            conn.close()
+
+
+def mark_notion_sync_running(run_id: str) -> bool:
+    now = _utcnow_iso()
+    with _lock:
+        conn = _get_connection()
+        try:
+            cursor = conn.execute(
+                "UPDATE notion_sync_runs SET status='running', attempts=attempts+1, "
+                "error=NULL, updated_at=? WHERE run_id=? AND status='queued'",
+                (now, run_id),
+            )
+            conn.commit()
+            return cursor.rowcount == 1
+        finally:
+            conn.close()
+
+
+def update_notion_sync_progress(
+    run_id: str,
+    completed_items: int,
+    *,
+    notion_page_id: str | None = None,
+    notion_page_url: str | None = None,
+    item_errors: list[dict] | None = None,
+) -> None:
+    with _lock:
+        conn = _get_connection()
+        try:
+            conn.execute(
+                "UPDATE notion_sync_runs SET completed_items=?, "
+                "notion_page_id=COALESCE(?, notion_page_id), "
+                "notion_page_url=COALESCE(?, notion_page_url), "
+                "item_errors_json=COALESCE(?, item_errors_json), updated_at=? WHERE run_id=?",
+                (
+                    completed_items,
+                    notion_page_id,
+                    notion_page_url,
+                    json.dumps(item_errors, ensure_ascii=False) if item_errors is not None else None,
+                    _utcnow_iso(),
+                    run_id,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def finish_notion_sync_run(
+    run_id: str,
+    status: str,
+    *,
+    error: str | None = None,
+    notion_page_id: str | None = None,
+    notion_page_url: str | None = None,
+    item_errors: list[dict] | None = None,
+    next_retry_at: str | None = None,
+) -> None:
+    if status not in {"done", "partial", "failed", "retry"}:
+        raise ValueError(f"Unsupported Notion sync status: {status}")
+    with _lock:
+        conn = _get_connection()
+        try:
+            conn.execute(
+                "UPDATE notion_sync_runs SET status=?, error=?, "
+                "notion_page_id=COALESCE(?, notion_page_id), "
+                "notion_page_url=COALESCE(?, notion_page_url), "
+                "item_errors_json=COALESCE(?, item_errors_json), next_retry_at=?, updated_at=? "
+                "WHERE run_id=?",
+                (
+                    status,
+                    error,
+                    notion_page_id,
+                    notion_page_url,
+                    json.dumps(item_errors, ensure_ascii=False) if item_errors is not None else None,
+                    next_retry_at,
+                    _utcnow_iso(),
+                    run_id,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def retry_notion_sync_run(run_id: str) -> bool:
+    with _lock:
+        conn = _get_connection()
+        try:
+            cursor = conn.execute(
+                "UPDATE notion_sync_runs SET status='pending', error=NULL, next_retry_at=NULL, "
+                "updated_at=? WHERE run_id=? AND status NOT IN ('queued','running')",
+                (_utcnow_iso(), run_id),
+            )
+            conn.commit()
+            return cursor.rowcount == 1
         finally:
             conn.close()

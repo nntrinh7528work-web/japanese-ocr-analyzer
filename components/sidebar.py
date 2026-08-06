@@ -3,6 +3,7 @@
 from __future__ import annotations
 import streamlit as st
 from config import MAX_IMAGE_SIZE_MB, MAX_PDF_PAGES, MAX_PDF_SIZE_MB
+from modules.notion_sync import notion_connection_state
 
 
 def render_sidebar(
@@ -94,6 +95,24 @@ def render_sidebar(
         )
         st.session_state["auto_translation_guidance"] = auto_translation_guidance
 
+    with st.sidebar.expander("🗂️ Lưu vào Notion", expanded=False):
+        notion_state = notion_connection_state()
+        if notion_state["configured"]:
+            st.success(f"Notion: {notion_state['label']}")
+        else:
+            st.info(f"Notion: {notion_state['label']}")
+            st.caption(
+                "Thiết lập một lần bằng NOTION_TOKEN và NOTION_PARENT_PAGE_ID trong "
+                "Streamlit Secrets. Token không được lưu trong phiên hoặc file xuất."
+            )
+        auto_notion_sync = st.toggle(
+            "Tự động lưu bài hoàn tất",
+            value=bool(st.session_state.get("auto_notion_sync", True)),
+            disabled=not notion_state["configured"],
+            help="Đồng bộ trong nền sau khi toàn bộ phân tích chính hoàn tất.",
+        )
+        st.session_state["auto_notion_sync"] = auto_notion_sync
+
     if st.session_state.get("_last_analysis_language") not in (None, analysis_language):
         clear_analysis_fn()
     st.session_state["_last_analysis_language"] = analysis_language
@@ -103,9 +122,11 @@ def render_sidebar(
         billing_tier = st.radio(
             "Gói Gemini",
             options=["free", "paid"],
+            index=0 if st.session_state.get("billing_tier", "free") == "free" else 1,
             format_func=lambda val: "Free Tier" if val == "free" else "Paid Tier (Standard)",
             horizontal=True,
         )
+        st.session_state["billing_tier"] = billing_tier
 
         budget_jpy = st.number_input(
             "Ngân sách API (JPY)", min_value=0.0,
@@ -143,6 +164,8 @@ def render_sidebar(
         "analysis_language": analysis_language,
         "auto_sentence_deep_dive": auto_sentence_deep_dive,
         "auto_translation_guidance": auto_translation_guidance,
+        "auto_notion_sync": auto_notion_sync,
+        "notion_configured": notion_state["configured"],
         "billing_tier": billing_tier,
         "budget_jpy": budget_jpy,
         "spent_before_jpy": spent_before_jpy,

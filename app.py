@@ -3,6 +3,8 @@
 from __future__ import annotations
 import importlib
 from pathlib import Path
+import subprocess
+import sys
 import streamlit as st
 
 from modules.multi_image_workflow import add_upload_items
@@ -10,6 +12,7 @@ from modules import session_store
 import modules.text_analyzer as text_analyzer
 from modules.job_store import cleanup_old_jobs, get_job
 from modules.job_workflow import items_source_hash, sync_job_state
+from modules.notion_sync import enqueue_analysis_sync, notion_connection_state
 
 from components.styles import inject_custom_css, render_branded_header
 from components.sidebar import render_sidebar
@@ -52,6 +55,8 @@ for key, default in {
     "dark_mode": False,
     "auto_sentence_deep_dive": True,
     "auto_translation_guidance": True,
+    "auto_notion_sync": True,
+    "billing_tier": "free",
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -78,6 +83,8 @@ if not st.session_state.session_restored:
             "usd_to_jpy",
             "auto_sentence_deep_dive",
             "auto_translation_guidance",
+            "auto_notion_sync",
+            "billing_tier",
         ):
             if key in saved_settings:
                 st.session_state[key] = saved_settings[key]
@@ -114,6 +121,7 @@ def _persist_analysis() -> None:
 
 
 _WORKER_PATH = str(Path(__file__).resolve().parent / "worker.py")
+_NOTION_WORKER_PATH = str(Path(__file__).resolve().parent / "notion_worker.py")
 _PROJECT_DIR = str(Path(__file__).resolve().parent)
 cleanup_old_jobs(max_age_hours=48)
 
@@ -235,9 +243,51 @@ session_store.save_settings(
         "usd_to_jpy": config["usd_to_jpy"],
         "auto_sentence_deep_dive": config["auto_sentence_deep_dive"],
         "auto_translation_guidance": config["auto_translation_guidance"],
+        "auto_notion_sync": config["auto_notion_sync"],
+        "billing_tier": config["billing_tier"],
     },
 )
 inject_custom_css(dark_mode=config.get("dark_mode", False))
+
+
+def _dispatch_notion_run(run_id: str) -> bool:
+    """Launch one already-persisted Notion run exactly once."""
+    if not session_store.dispatch_notion_sync_run(run_id):
+        return False
+    try:
+        subprocess.Popen(
+            [sys.executable, _NOTION_WORKER_PATH, run_id],
+            stdout=subprocess.DEVNULL,
+            stderr=open(str(Path(_PROJECT_DIR) / "notion_worker_error.log"), "a"),
+            cwd=_PROJECT_DIR,
+        )
+        return True
+    except Exception as exc:
+        session_store.finish_notion_sync_run(run_id, "retry", error=str(exc))
+        return False
+
+
+# A completed analysis is displayed immediately; Notion runs separately.
+if (
+    st.session_state.analysis
+    and config.get("auto_notion_sync")
+    and notion_connection_state()["configured"]
+):
+    try:
+        notion_run = enqueue_analysis_sync(
+            st.session_state.session_id,
+            st.session_state.image_items,
+            st.session_state.analysis,
+            billing_tier=config.get("billing_tier", "free"),
+            usd_to_jpy=config.get("usd_to_jpy", 155),
+        )
+        _dispatch_notion_run(notion_run["run_id"])
+    except Exception as exc:
+        st.sidebar.warning(f"Chưa thể tạo hàng đợi Notion: {exc}")
+
+if notion_connection_state()["configured"]:
+    for due_run in session_store.list_due_notion_sync_runs(limit=2):
+        _dispatch_notion_run(due_run["run_id"])
 
 # ── Main Content Tabs ──
 tab_ocr, tab_dialogue = st.tabs(["📷 Phân tích từ Ảnh / PDF", "💬 Luyện Hội Thoại"])
@@ -254,6 +304,7 @@ with tab_ocr:
         persist_analysis_fn=_persist_analysis,
         text_analyzer_module=text_analyzer,
         worker_path=_WORKER_PATH,
+        notion_worker_path=_NOTION_WORKER_PATH,
         project_dir=_PROJECT_DIR,
     )
 

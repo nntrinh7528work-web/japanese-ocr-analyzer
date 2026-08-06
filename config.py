@@ -24,10 +24,23 @@ if GEMINI_API_KEY == "your_api_key_here":
 
 GEMINI_MODEL_VISION = _get_streamlit_secret("GEMINI_MODEL_VISION") or os.getenv("GEMINI_MODEL_VISION") or "gemini-3.5-flash"
 GEMINI_MODEL_TEXT = _get_streamlit_secret("GEMINI_MODEL_TEXT") or os.getenv("GEMINI_MODEL_TEXT") or "gemini-3.5-flash"
+
+# Notion credentials are deployment secrets.  Database/data-source IDs are
+# optional because the app can bootstrap them below NOTION_PARENT_PAGE_ID.
+NOTION_TOKEN = _get_streamlit_secret("NOTION_TOKEN") or os.getenv("NOTION_TOKEN")
+NOTION_PARENT_PAGE_ID = _get_streamlit_secret("NOTION_PARENT_PAGE_ID") or os.getenv("NOTION_PARENT_PAGE_ID")
+NOTION_LESSONS_DATABASE_ID = _get_streamlit_secret("NOTION_LESSONS_DATABASE_ID") or os.getenv("NOTION_LESSONS_DATABASE_ID")
+NOTION_LESSONS_DATA_SOURCE_ID = _get_streamlit_secret("NOTION_LESSONS_DATA_SOURCE_ID") or os.getenv("NOTION_LESSONS_DATA_SOURCE_ID")
+NOTION_ITEMS_DATABASE_ID = _get_streamlit_secret("NOTION_ITEMS_DATABASE_ID") or os.getenv("NOTION_ITEMS_DATABASE_ID")
+NOTION_ITEMS_DATA_SOURCE_ID = _get_streamlit_secret("NOTION_ITEMS_DATA_SOURCE_ID") or os.getenv("NOTION_ITEMS_DATA_SOURCE_ID")
+PUBLIC_APP_URL = (
+    _get_streamlit_secret("PUBLIC_APP_URL")
+    or os.getenv("PUBLIC_APP_URL")
+    or "https://japanese-ocr-analyzer-vn.streamlit.app/"
+)
 MAX_UPLOAD_SIZE_MB = 50
 MAX_IMAGE_SIZE_MB = 20
 MAX_PDF_SIZE_MB = 50
 MAX_PDF_PAGES = 60
 SUPPORTED_FORMATS = ["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff"]
 SUPPORTED_UPLOAD_FORMATS = [*SUPPORTED_FORMATS, "pdf"]
-

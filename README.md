@@ -32,6 +32,27 @@ GEMINI_API_KEY = "your_key_here"
 
 Không commit file `.env` hoặc `.streamlit/secrets.toml`.
 
+## Đồng bộ Notion cá nhân
+
+Tạo một Notion internal connection có quyền đọc, chèn và cập nhật nội dung;
+chia sẻ một trang cha trống với connection rồi thêm hai secret sau:
+
+```toml
+NOTION_TOKEN = "secret_..."
+NOTION_PARENT_PAGE_ID = "..."
+PUBLIC_APP_URL = "https://japanese-ocr-analyzer-vn.streamlit.app/"
+```
+
+Ở lần đồng bộ đầu tiên, app tự tạo hai bảng liên kết `Bài phân tích` và
+`Mục cần học`, cùng các view ôn tập. Token chỉ được đọc từ environment hoặc
+Streamlit Secrets; SQLite và file JSON không lưu token. Có thể điền thêm các
+database/data-source ID trong `.streamlit/secrets.toml.example` để giữ cấu hình
+ổn định khi máy chủ được tạo lại.
+
+Sau khi phân tích hoàn tất, app lưu kết quả trước rồi đồng bộ Notion trong nền.
+Lỗi quyền hoặc mạng không làm mất kết quả Gemini; giao diện có trạng thái, link
+mở trang Notion và nút thử lại.
+
 ## Luồng nhiều ảnh
 
 - Chọn nhiều ảnh trong một lần hoặc bổ sung ảnh sau đó.

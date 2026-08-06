@@ -20,6 +20,8 @@ from modules.job_store import create_job
 from modules.job_workflow import items_source_hash
 from modules.multi_image_workflow import combined_text, move_image_item
 from modules.ocr_engine import run_ocr
+from modules import session_store
+from modules.notion_sync import enqueue_analysis_sync, notion_connection_state
 from modules.result_exporter import (
     analysis_json_bytes,
     default_export_stem,
@@ -340,6 +342,7 @@ def render_ocr_tab(
     persist_analysis_fn,
     text_analyzer_module,
     worker_path: str,
+    notion_worker_path: str,
     project_dir: str,
 ) -> None:
     """Render Tab 1: Image/PDF OCR & AI Text Analysis."""
@@ -783,6 +786,76 @@ def render_ocr_tab(
                 mime="application/json",
                 use_container_width=True,
             )
+
+            st.divider()
+            st.markdown("**Lưu tự động vào Notion**")
+            notion_state = notion_connection_state()
+            sync_run = session_store.get_notion_sync_for_source(
+                st.session_state.session_id,
+                items_source_hash(items),
+            )
+            if not notion_state["configured"]:
+                st.info(
+                    "Notion chưa được kết nối. Cấu hình NOTION_TOKEN và "
+                    "NOTION_PARENT_PAGE_ID trong Streamlit Secrets để bật đồng bộ."
+                )
+            elif sync_run:
+                status = sync_run.get("status")
+                if status == "done":
+                    st.success("Đã lưu bài và các mục cần học vào Notion.")
+                elif status == "partial":
+                    st.warning(sync_run.get("error") or "Bài đã lưu nhưng còn mục cần thử lại.")
+                elif status in ("pending", "queued", "running"):
+                    st.info(
+                        f"Đang đồng bộ Notion: {sync_run.get('completed_items', 0)}/"
+                        f"{sync_run.get('total_items', 0)} mục."
+                    )
+                    st.button("🔄 Cập nhật trạng thái Notion", key="refresh_notion_status")
+                elif status == "retry":
+                    st.warning(
+                        "Notion tạm thời chưa nhận dữ liệu. App sẽ tự thử lại khi đến hạn. "
+                        + str(sync_run.get("error") or "")
+                    )
+                else:
+                    st.error(f"Đồng bộ Notion thất bại: {sync_run.get('error') or 'Không rõ lỗi'}")
+
+                if sync_run.get("notion_page_url"):
+                    st.link_button(
+                        "Mở bài trong Notion",
+                        sync_run["notion_page_url"],
+                        use_container_width=True,
+                    )
+                if status in ("partial", "retry", "failed") and st.button(
+                    "Thử đồng bộ Notion lại",
+                    key="retry_notion_sync",
+                    use_container_width=True,
+                ):
+                    session_store.retry_notion_sync_run(sync_run["run_id"])
+                    if session_store.dispatch_notion_sync_run(sync_run["run_id"]):
+                        subprocess.Popen(
+                            [_sys.executable, notion_worker_path, sync_run["run_id"]],
+                            stdout=subprocess.DEVNULL,
+                            stderr=open(project_dir + "/notion_worker_error.log", "a"),
+                            cwd=project_dir,
+                        )
+                    st.rerun()
+            elif st.button("Lưu bài này vào Notion ngay", use_container_width=True):
+                run = enqueue_analysis_sync(
+                    st.session_state.session_id,
+                    items,
+                    analysis,
+                    billing_tier=billing_tier,
+                    usd_to_jpy=usd_to_jpy,
+                    force=True,
+                )
+                if session_store.dispatch_notion_sync_run(run["run_id"]):
+                    subprocess.Popen(
+                        [_sys.executable, notion_worker_path, run["run_id"]],
+                        stdout=subprocess.DEVNULL,
+                        stderr=open(project_dir + "/notion_worker_error.log", "a"),
+                        cwd=project_dir,
+                    )
+                st.rerun()
 
         page_analyses = analysis.get("page_analyses") or [analysis]
         tab_titles = [page.get("source_label") or page.get("page_name") or f"Trang {i+1}" for i, page in enumerate(page_analyses)]
