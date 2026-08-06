@@ -828,6 +828,8 @@ def render_ocr_tab(
                 )
             elif sync_run:
                 status = sync_run.get("status")
+                sync_payload = sync_run.get("payload") or {}
+                missing_notion_fields = int(sync_payload.get("unrendered_field_count") or 0)
                 if status == "done":
                     st.success("Đã lưu bài phân tích nguyên trạng và các mục cần học vào Notion.")
                 elif status == "partial":
@@ -845,6 +847,17 @@ def render_ocr_tab(
                     )
                 else:
                     st.error(f"Đồng bộ Notion thất bại: {sync_run.get('error') or 'Không rõ lỗi'}")
+
+                if missing_notion_fields:
+                    st.warning(
+                        f"Notion còn {missing_notion_fields} trường chưa biểu diễn. "
+                        "File JSON gốc vẫn giữ đầy đủ dữ liệu để đồng bộ lại."
+                    )
+                elif sync_payload.get("layout_version"):
+                    st.caption(
+                        f"Bố cục Notion {sync_payload['layout_version']} · "
+                        "đã biểu diễn đầy đủ dữ liệu phân tích hiện có."
+                    )
 
                 if sync_run.get("notion_page_url"):
                     st.link_button(

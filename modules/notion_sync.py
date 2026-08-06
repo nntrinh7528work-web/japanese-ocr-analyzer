@@ -26,15 +26,24 @@ from config import (
 from modules import session_store
 from modules.cost_estimator import estimate_cost, estimate_run_costs, sum_costs
 from modules.job_workflow import items_source_hash
-from modules.sentence_analyzer import analysis_markdown
+from modules.notion_renderer import (
+    NOTION_LAYOUT_VERSION,
+    render_notion_item_markdown,
+    render_notion_lesson_markdown,
+)
 
 NOTION_API_BASE = "https://api.notion.com/v1"
 NOTION_API_VERSION = "2026-03-11"
 MAX_MARKDOWN_CHARS = 120_000
 RAW_ARCHIVE_SCHEMA_VERSION = "2.0"
-NOTION_SCHEMA_VERSION = 2
+NOTION_SCHEMA_VERSION = 3
+NOTION_VIEWS_VERSION = 3
 DIRECT_UPLOAD_LIMIT = 20 * 1024 * 1024
 MULTIPART_CHUNK_SIZE = 10 * 1024 * 1024
+LEARNING_VIEW_NAMES = [
+    "Tất cả", "Từ vựng", "Từ khó", "Kanji", "Cụm từ", "Từ nối",
+    "Ngữ pháp", "Mẫu câu", "Câu dài", "Ôn hôm nay", "Theo bài", "Đã nhớ",
+]
 
 
 class NotionAPIError(RuntimeError):
@@ -290,16 +299,10 @@ def _lesson_schema() -> dict:
         "Analysis hash": {"rich_text": {}},
         "Bản JSON gốc": {"files": {}},
         "Phiên bản dữ liệu": {"rich_text": {}},
-        "OCR gốc": {"rich_text": {}},
-        "Hướng dẫn dịch": {"rich_text": {}},
-        "Dịch tự nhiên": {"rich_text": {}},
-        "Từ vựng": {"rich_text": {}},
-        "Kanji / Cụm từ": {"rich_text": {}},
-        "Từ nối": {"rich_text": {}},
-        "Ngữ pháp": {"rich_text": {}},
-        "Mẫu câu": {"rich_text": {}},
-        "Câu dài": {"rich_text": {}},
-        "Cảnh báo OCR": {"rich_text": {}},
+        "Phiên bản bố cục": {"rich_text": {}},
+        "Đủ nội dung Notion": {"checkbox": {}},
+        "Số trường chưa hiển thị": {"number": {"format": "number"}},
+        "Lỗi đồng bộ": {"rich_text": {}},
         "Số câu": {"number": {"format": "number"}},
         "Số từ vựng": {"number": {"format": "number"}},
         "Số kanji / cụm từ": {"number": {"format": "number"}},
@@ -331,6 +334,7 @@ def _item_schema() -> dict:
         "Bản dịch": {"rich_text": {}},
         "ID câu nguồn": {"rich_text": {}},
         "Trang": {"number": {"format": "number"}},
+        "Thứ tự nguồn": {"number": {"format": "number"}},
         "Mức độ": {"select": _select_options(["N5", "N4", "N3", "N2", "N1", "A1", "A2", "B1", "B2", "C1", "C2", "Câu khó"])},
         "Trạng thái": {"select": _select_options(["Mới", "Đang học", "Đã nhớ"])},
         "Ngày ôn tiếp": {"date": {}},
@@ -415,17 +419,55 @@ def _create_learning_views(
     data_source_id: str,
     existing_names: list[str] | None = None,
 ) -> list[str]:
-    created_names = list(existing_names or [])
-    if not created_names:
-        listed = client.request("GET", f"/views?database_id={database_id}")
-        for entry in listed.get("results") or []:
-            view_id = entry.get("id") or (entry.get("view") or {}).get("id")
-            if not view_id:
-                continue
-            view = client.request("GET", f"/views/{view_id}")
-            if view.get("name"):
-                created_names.append(str(view["name"]))
+    del existing_names  # The API is authoritative; the local cache may be stale.
+    existing_views: dict[str, str] = {}
+    listed = client.request("GET", f"/views?database_id={database_id}")
+    for entry in listed.get("results") or []:
+        view_id = entry.get("id") or (entry.get("view") or {}).get("id")
+        if not view_id:
+            continue
+        view = client.request("GET", f"/views/{view_id}")
+        if view.get("name"):
+            existing_views[str(view["name"])] = str(view_id)
+    source = client.request("GET", f"/data_sources/{data_source_id}")
+    property_ids = {
+        name: str(value.get("id") or "")
+        for name, value in (source.get("properties") or {}).items()
+        if value.get("id")
+    }
+    visible_names = {
+        "Tên", "Loại", "Cách đọc", "Nghĩa tiếng Việt", "Mức độ", "Trang",
+        "Thứ tự nguồn", "Bài phân tích", "Trạng thái", "Ngày ôn tiếp", "Quan trọng",
+    }
+    configuration = None
+    if property_ids:
+        configuration = {
+            "type": "table",
+            "properties": [
+                {
+                    "property_id": property_id,
+                    "visible": name in visible_names,
+                    "wrap": name in {"Tên", "Cách đọc", "Nghĩa tiếng Việt"},
+                }
+                for name, property_id in property_ids.items()
+            ],
+            "wrap_cells": True,
+            "frozen_column_index": 1,
+        }
+    source_sorts = [
+        {"property": "Trang", "direction": "ascending"},
+        {"property": "Thứ tự nguồn", "direction": "ascending"},
+    ]
     views = [
+        ("Tất cả", None, source_sorts),
+        ("Từ vựng", {"property": "Loại", "select": {"equals": "Từ vựng"}}, source_sorts),
+        ("Từ khó", {"property": "Quan trọng", "checkbox": {"equals": True}}, source_sorts),
+        ("Kanji", {"property": "Loại", "select": {"equals": "Kanji"}}, source_sorts),
+        ("Cụm từ", {"property": "Loại", "select": {"equals": "Cụm từ"}}, source_sorts),
+        ("Từ nối", {"property": "Loại", "select": {"equals": "Từ nối"}}, source_sorts),
+        ("Ngữ pháp", {"property": "Loại", "select": {"equals": "Ngữ pháp"}}, source_sorts),
+        ("Mẫu câu", {"property": "Loại", "select": {"equals": "Mẫu câu"}}, source_sorts),
+        ("Câu dài", {"property": "Loại", "select": {"equals": "Câu dài"}}, source_sorts),
         (
             "Ôn hôm nay",
             {
@@ -436,29 +478,35 @@ def _create_learning_views(
             },
             [{"property": "Ngày ôn tiếp", "direction": "ascending"}],
         ),
-        ("Mục mới", {"property": "Trạng thái", "select": {"equals": "Mới"}}, []),
-        ("Theo loại", None, [{"property": "Loại", "direction": "ascending"}]),
-        ("Theo bài", None, [{"property": "Trang", "direction": "ascending"}]),
+        ("Theo bài", None, source_sorts),
         ("Đã nhớ", {"property": "Trạng thái", "select": {"equals": "Đã nhớ"}}, []),
     ]
+    created_names: list[str] = []
     for name, view_filter, sorts in views:
-        if name in created_names:
-            continue
-        payload: dict[str, Any] = {
-            "database_id": database_id,
-            "data_source_id": data_source_id,
-            "name": name,
-            "type": "table",
-        }
-        if view_filter:
-            payload["filter"] = view_filter
-        if sorts:
-            payload["sorts"] = sorts
-        client.request("POST", "/views", payload)
+        if name in existing_views:
+            update_payload: dict[str, Any] = {"filter": view_filter, "sorts": sorts or None}
+            if configuration:
+                update_payload["configuration"] = configuration
+            client.request("PATCH", f"/views/{existing_views[name]}", update_payload)
+        else:
+            payload: dict[str, Any] = {
+                "database_id": database_id,
+                "data_source_id": data_source_id,
+                "name": name,
+                "type": "table",
+            }
+            if view_filter:
+                payload["filter"] = view_filter
+            if sorts:
+                payload["sorts"] = sorts
+            if configuration:
+                payload["configuration"] = configuration
+            client.request("POST", "/views", payload)
         created_names.append(name)
-        cached = session_store.load_notion_workspace_config()
-        cached["view_names"] = created_names
-        session_store.save_notion_workspace_config(cached)
+    cached = session_store.load_notion_workspace_config()
+    cached["view_names"] = created_names
+    cached["views_version"] = NOTION_VIEWS_VERSION
+    session_store.save_notion_workspace_config(cached)
     return created_names
 
 
@@ -526,22 +574,31 @@ def ensure_notion_workspace(client: NotionClient, settings: NotionSettings | Non
     session_store.save_notion_workspace_config(local)
 
     local = session_store.load_notion_workspace_config()
-    view_names = _create_learning_views(
-        client,
-        str(item_db),
-        str(item_ds),
-        existing_names=list(local.get("view_names") or []),
-    )
+    cached_view_names = list(local.get("view_names") or [])
+    if (
+        int(local.get("views_version") or 0) >= NOTION_VIEWS_VERSION
+        and set(LEARNING_VIEW_NAMES).issubset(cached_view_names)
+    ):
+        view_names = cached_view_names
+    else:
+        view_names = _create_learning_views(
+            client,
+            str(item_db),
+            str(item_ds),
+            existing_names=cached_view_names,
+        )
 
     workspace = {
+        **session_store.load_notion_workspace_config(),
         "lessons_database_id": lesson_db,
         "lessons_data_source_id": lesson_ds,
         "items_database_id": item_db,
         "items_data_source_id": item_ds,
         "relation_created": True,
         "view_names": view_names,
-        "views_created": len(view_names) >= 5,
+        "views_created": len(view_names) >= 12,
         "schema_version": NOTION_SCHEMA_VERSION,
+        "views_version": NOTION_VIEWS_VERSION,
     }
     session_store.save_notion_workspace_config(workspace)
     return workspace
@@ -561,16 +618,35 @@ def _normalize_key(value: str) -> str:
     return re.sub(r"\s+", " ", value.strip().lower())
 
 
-def _learning_external_id(language: str, item_type: str, title: str, reading: str = "") -> str:
-    raw = "|".join((language, item_type, _normalize_key(title), _normalize_key(reading)))
+def _learning_external_id(
+    lesson_external_id: str,
+    language: str,
+    item_type: str,
+    page_index: int,
+    title: str,
+    reading: str = "",
+) -> str:
+    raw = "|".join(
+        (
+            lesson_external_id,
+            language,
+            item_type,
+            str(page_index),
+            _normalize_key(title),
+            _normalize_key(reading),
+        )
+    )
     return "learn:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def extract_learning_items(analysis: dict[str, Any]) -> list[dict[str, Any]]:
+def extract_learning_items(
+    analysis: dict[str, Any], lesson_external_id: str = "analysis"
+) -> list[dict[str, Any]]:
     """Extract every study row while retaining the original structured record."""
     language = str(analysis.get("analysis_language") or "japanese")
     pages = analysis.get("page_analyses") or [analysis]
     result: dict[str, dict[str, Any]] = {}
+    source_orders: dict[tuple[int, str], int] = {}
 
     def add(
         item_type: str,
@@ -586,7 +662,16 @@ def extract_learning_items(analysis: dict[str, Any]) -> list[dict[str, Any]]:
         if not title:
             return
         reading = _first(row, *fields.get("reading", ()))
-        external_id = _learning_external_id(language, item_type, title, reading)
+        external_id = _learning_external_id(
+            lesson_external_id, language, item_type, page_index, title, reading
+        )
+        existing = result.get(external_id)
+        order_key = (page_index, item_type)
+        if existing:
+            source_order = int(existing.get("source_order") or 0)
+        else:
+            source_order = source_orders.get(order_key, 0) + 1
+            source_orders[order_key] = source_order
         source_json = json.dumps(row, ensure_ascii=False, sort_keys=True, default=str)
         item = {
             "external_id": external_id,
@@ -600,6 +685,7 @@ def extract_learning_items(analysis: dict[str, Any]) -> list[dict[str, Any]]:
             "translation_vi": _first(row, *fields.get("translation", ())),
             "sentence_id": _first(row, *fields.get("sentence_id", ())),
             "page_index": page_index,
+            "source_order": source_order,
             "difficulty": _first(row, *fields.get("difficulty", ())),
             "important": important,
             "part_of_speech": _first(row, *fields.get("part_of_speech", ())),
@@ -616,7 +702,6 @@ def extract_learning_items(analysis: dict[str, Any]) -> list[dict[str, Any]]:
             "source_checksum": hashlib.sha256(source_json.encode("utf-8")).hexdigest(),
             "occurrences_in_analysis": 1,
         }
-        existing = result.get(external_id)
         if existing:
             if count_occurrence:
                 existing["occurrences_in_analysis"] = int(existing.get("occurrences_in_analysis") or 1) + 1
@@ -645,8 +730,13 @@ def extract_learning_items(analysis: dict[str, Any]) -> list[dict[str, Any]]:
             add(
                 "Từ vựng", page_index, row, title_keys=("word", "phrase"),
                 important=True, count_occurrence=False,
-                reading=("reading", "hiragana"), meaning=("meaning", "meaning_vi"),
-                example=("example",), example_reading=("example_hiragana", "example_reading"),
+                reading=("reading", "hiragana"),
+                meaning=("meaning", "meaning_vi", "vn_meaning", "definition"),
+                example=("example", "example_text", "example_1", "example_2"),
+                example_reading=(
+                    "example_hiragana", "example_text_hiragana", "example_1_hiragana",
+                    "example_2_hiragana", "example_reading",
+                ),
                 translation=("example_translation", "translation"), difficulty=("jlpt", "cefr", "difficulty"),
                 part_of_speech=("part_of_speech", "type"), base_form=("base_form",),
                 formation=("formation", "structure"), nuance=("nuance", "usage", "note"),
@@ -712,7 +802,16 @@ def extract_learning_items(analysis: dict[str, Any]) -> list[dict[str, Any]]:
                 chunked_translation=("chunked_translation",), literal_translation=("literal_translation",),
                 nuance=("simplified_vi",),
             )
-            result[_learning_external_id(language, "Câu dài", _first(row, "original"), _first(row, "reading"))]["difficulty"] = "Câu khó"
+            result[
+                _learning_external_id(
+                    lesson_external_id,
+                    language,
+                    "Câu dài",
+                    page_index,
+                    _first(row, "original"),
+                    _first(row, "reading"),
+                )
+            ]["difficulty"] = "Câu khó"
     return list(result.values())
 
 
@@ -895,6 +994,30 @@ def _analysis_column_snapshot(
     return {**{key: "\n".join(values) for key, values in sections.items()}, **counts}
 
 
+def refresh_notion_render(
+    payload: dict[str, Any],
+    items: list[dict[str, Any]],
+    analysis: dict[str, Any],
+) -> dict[str, Any]:
+    """Rebuild page content and coverage after payload metadata changes."""
+    rendered = render_notion_lesson_markdown(items, analysis, payload)
+    payload.update(
+        {
+            "markdown": rendered["markdown"],
+            "markdown_sections": rendered["sections"],
+            "layout_version": rendered["layout_version"],
+            "render_coverage": {
+                "complete": rendered["coverage_complete"],
+                "rendered_field_paths": rendered["rendered_field_paths"],
+                "unrendered_field_paths": rendered["unrendered_field_paths"],
+            },
+            "unrendered_field_count": rendered["unrendered_field_count"],
+            "section_manifest": rendered["section_manifest"],
+        }
+    )
+    return payload
+
+
 def build_notion_sync_payload(
     session_id: str,
     items: list[dict[str, Any]],
@@ -935,27 +1058,7 @@ def build_notion_sync_payload(
     external_id = f"analysis:{source_hash}:{analysis_hash[:16]}"
     columns = _analysis_column_snapshot(items, analysis)
     app_url = PUBLIC_APP_URL.rstrip("/") + "/?" + urlencode({"session": session_id})
-    status_note = ""
-    if sync_status == "Một phần":
-        missing_label = ", ".join(str(index) for index in missing_page_indices) or "không xác định"
-        status_note = (
-            "> ⚠️ Đồng bộ một phần: tài liệu có "
-            f"{source_page_count} trang nguồn nhưng mới có kết quả của {analyzed_page_count} trang. "
-            f"Trang chưa có kết quả: {missing_label}."
-        )
-    markdown = "\n\n".join(
-        part for part in (
-            f"# {title}",
-            f"> Nguồn OCR: {', '.join(names) or 'Không rõ'}",
-            status_note,
-            (
-                f"> Bản JSON gốc được đính kèm với SHA-256 `{analysis_hash}`. "
-                "Các cột chỉ là bản tóm lược để tìm kiếm; nội dung gốc không bị diễn giải lại."
-            ),
-            analysis_markdown(analysis).strip(),
-        ) if part
-    )
-    return {
+    payload = {
         "external_id": external_id,
         "source_hash": source_hash,
         "session_id": session_id,
@@ -973,14 +1076,14 @@ def build_notion_sync_payload(
         "cost_jpy": float(cost.get("total_cost_jpy", 0)),
         "cost_breakdown": cost.get("breakdown") or {},
         "app_url": app_url,
-        "markdown": markdown,
         "analysis_hash": analysis_hash,
         "raw_json": raw_json,
         "raw_json_filename": f"analysis-{analysis_hash[:16]}.json",
         "archive_schema_version": RAW_ARCHIVE_SCHEMA_VERSION,
         "columns": columns,
-        "learning_items": extract_learning_items(analysis),
+        "learning_items": extract_learning_items(analysis, external_id),
     }
+    return refresh_notion_render(payload, items, analysis)
 
 
 def split_markdown(content: str, max_chars: int = MAX_MARKDOWN_CHARS) -> list[str]:
@@ -1050,16 +1153,10 @@ def _lesson_properties(payload: dict) -> dict:
         "Đồng bộ lúc": {"date": {"start": dt.datetime.now(dt.timezone.utc).isoformat()}},
         "Analysis hash": {"rich_text": _text(payload.get("analysis_hash"))},
         "Phiên bản dữ liệu": {"rich_text": _text(payload.get("archive_schema_version"))},
-        "OCR gốc": {"rich_text": _text(columns.get("ocr"))},
-        "Hướng dẫn dịch": {"rich_text": _text(columns.get("guidance"))},
-        "Dịch tự nhiên": {"rich_text": _text(columns.get("natural"))},
-        "Từ vựng": {"rich_text": _text(columns.get("vocabulary"))},
-        "Kanji / Cụm từ": {"rich_text": _text(columns.get("script"))},
-        "Từ nối": {"rich_text": _text(columns.get("markers"))},
-        "Ngữ pháp": {"rich_text": _text(columns.get("grammar"))},
-        "Mẫu câu": {"rich_text": _text(columns.get("patterns"))},
-        "Câu dài": {"rich_text": _text(columns.get("sentences"))},
-        "Cảnh báo OCR": {"rich_text": _text(columns.get("warnings"))},
+        "Phiên bản bố cục": {"rich_text": _text(payload.get("layout_version") or NOTION_LAYOUT_VERSION)},
+        "Đủ nội dung Notion": {"checkbox": bool((payload.get("render_coverage") or {}).get("complete"))},
+        "Số trường chưa hiển thị": {"number": int(payload.get("unrendered_field_count") or 0)},
+        "Lỗi đồng bộ": {"rich_text": []},
         "Số câu": {"number": int(columns.get("sentence_count") or 0)},
         "Số từ vựng": {"number": int(columns.get("vocabulary_count") or 0)},
         "Số kanji / cụm từ": {"number": int(columns.get("script_count") or 0)},
@@ -1078,8 +1175,26 @@ def _lesson_properties(payload: dict) -> dict:
     }
 
 
-def _write_lesson_markdown(client: NotionClient, page_id: str, markdown: str) -> None:
-    chunks = split_markdown(markdown)
+def _write_lesson_markdown(
+    client: NotionClient,
+    page_id: str,
+    markdown: str,
+    sections: list[str] | None = None,
+) -> None:
+    chunks: list[str] = []
+    if sections:
+        current = ""
+        for section in sections:
+            candidate = section if not current else current + "\n\n" + section
+            if current and len(candidate) > MAX_MARKDOWN_CHARS:
+                chunks.extend(split_markdown(current))
+                current = section
+            else:
+                current = candidate
+        if current:
+            chunks.extend(split_markdown(current))
+    else:
+        chunks = split_markdown(markdown)
     first = chunks[0] if chunks else "Không có nội dung phân tích."
     client.request(
         "PATCH",
@@ -1105,7 +1220,12 @@ def _upsert_lesson(client: NotionClient, data_source_id: str, payload: dict) -> 
             "/pages",
             {"parent": {"type": "data_source_id", "data_source_id": data_source_id}, "properties": properties},
         )
-    _write_lesson_markdown(client, str(page["id"]), str(payload.get("markdown") or ""))
+    _write_lesson_markdown(
+        client,
+        str(page["id"]),
+        str(payload.get("markdown") or ""),
+        list(payload.get("markdown_sections") or []),
+    )
     existing_properties = (existing or {}).get("properties") or {}
     existing_hash = "".join(
         str(value.get("plain_text") or "")
@@ -1171,6 +1291,7 @@ def _item_properties(item: dict, lesson_page_id: str, existing: dict | None) -> 
         "Bản dịch": {"rich_text": _text(_plain_preview(item.get("translation_vi")))},
         "ID câu nguồn": {"rich_text": _text(item.get("sentence_id"))},
         "Trang": {"number": int(item.get("page_index") or 0)},
+        "Thứ tự nguồn": {"number": int(item.get("source_order") or 0)},
         "Bài phân tích": {"relation": relations[:100]},
         "Số lần xuất hiện": {"number": occurrence or 1},
         "Quan trọng": {"checkbox": bool(item.get("important"))},
@@ -1206,12 +1327,15 @@ def _upsert_learning_item(client: NotionClient, data_source_id: str, item: dict,
     existing = _query_external_id(client, data_source_id, item["external_id"])
     properties = _item_properties(item, lesson_page_id, existing)
     if existing:
-        return client.request("PATCH", f"/pages/{existing['id']}", {"properties": properties})
-    return client.request(
-        "POST",
-        "/pages",
-        {"parent": {"type": "data_source_id", "data_source_id": data_source_id}, "properties": properties},
-    )
+        page = client.request("PATCH", f"/pages/{existing['id']}", {"properties": properties})
+    else:
+        page = client.request(
+            "POST",
+            "/pages",
+            {"parent": {"type": "data_source_id", "data_source_id": data_source_id}, "properties": properties},
+        )
+    _write_lesson_markdown(client, str(page["id"]), render_notion_item_markdown(item))
+    return page
 
 
 def execute_notion_sync(run: dict, client: NotionClient | None = None) -> dict:
@@ -1221,6 +1345,10 @@ def execute_notion_sync(run: dict, client: NotionClient | None = None) -> dict:
         raise NotionAPIError("Notion chưa được cấu hình trong Streamlit Secrets.", 401, "not_configured")
     client = client or NotionClient(settings.token)
     workspace = ensure_notion_workspace(client, settings)
+    if workspace.get("lessons_database_id") and workspace.get("items_database_id"):
+        from modules.notion_migration import migrate_notion_workspace_v3_if_needed
+
+        migrate_notion_workspace_v3_if_needed(client, settings, workspace)
     payload = run["payload"]
     lesson = _upsert_lesson(client, workspace["lessons_data_source_id"], payload)
     page_id = str(lesson["id"])
@@ -1244,7 +1372,16 @@ def execute_notion_sync(run: dict, client: NotionClient | None = None) -> dict:
         client.request(
             "PATCH",
             f"/pages/{page_id}",
-            {"properties": {"Trạng thái": {"select": {"name": "Một phần"}}}},
+            {
+                "properties": {
+                    "Trạng thái": {"select": {"name": "Một phần"}},
+                    "Lỗi đồng bộ": {
+                        "rich_text": _text(
+                            f"{len(errors)} mục cần học chưa đồng bộ được. Hãy thử lại từ ứng dụng."
+                        )
+                    },
+                }
+            },
         )
     return {"page_id": page_id, "page_url": page_url, "item_errors": errors}
 

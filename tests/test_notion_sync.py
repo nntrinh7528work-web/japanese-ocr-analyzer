@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from modules import notion_sync, session_store
+from modules import notion_migration, notion_sync, session_store
 
 
 @pytest.fixture(autouse=True)
@@ -66,7 +66,7 @@ def _items():
     ]
 
 
-def test_build_payload_extracts_high_value_rows_and_full_markdown():
+def test_build_payload_extracts_all_rows_and_structured_notion_markdown():
     payload = notion_sync.build_notion_sync_payload(
         "session-a",
         _items(),
@@ -78,8 +78,12 @@ def test_build_payload_extracts_high_value_rows_and_full_markdown():
     assert payload["external_id"].startswith("analysis:")
     assert payload["page_count"] == 1
     assert payload["total_tokens"] == 37
-    assert "Phân tích" in payload["markdown"]
+    assert "Đối chiếu OCR và giáo viên hướng dẫn dịch" in payload["markdown"]
     assert "Trang 1: lesson.png" in payload["markdown"]
+    assert "Từ vựng" in payload["markdown"]
+    assert payload["render_coverage"]["complete"] is True
+    assert payload["unrendered_field_count"] == 0
+    assert payload["layout_version"] == "3.0"
     assert {row["type"] for row in payload["learning_items"]} == {
         "Từ vựng", "Kanji", "Từ nối", "Ngữ pháp", "Câu dài"
     }
@@ -146,6 +150,7 @@ def test_notion_property_previews_strip_markdown_without_changing_source_json():
     assert properties["Nghĩa tiếng Việt"]["rich_text"][0]["text"]["content"] == "vang vọng"
     assert properties["Công thức / Cấu tạo"]["rich_text"][0]["text"]["content"] == "~てくれる"
     assert "**響**" in properties["Dữ liệu nguồn"]["rich_text"][0]["text"]["content"]
+    assert properties["Thứ tự nguồn"]["number"] == 0
 
 
 def test_extracts_all_vocabulary_and_sentence_patterns_with_study_fields():
@@ -192,6 +197,99 @@ def test_extract_english_rows_includes_collocations_and_discourse_markers():
     assert "Cụm từ" in {row["type"] for row in rows}
     assert any(row["title"] == "however" and row["type"] == "Từ nối" for row in rows)
     assert not any(row["type"] == "Kanji" for row in rows)
+
+
+def test_learning_items_are_scoped_to_lesson_and_page_with_source_order():
+    analysis = _analysis()
+    analysis["page_analyses"].append({
+        **analysis["page_analyses"][0],
+        "page_index": 2,
+        "source_label": "Trang 2",
+    })
+
+    first_lesson = notion_sync.extract_learning_items(analysis, "analysis:first")
+    second_lesson = notion_sync.extract_learning_items(analysis, "analysis:second")
+
+    first_rain = [row for row in first_lesson if row["title"] == "雨"]
+    assert {row["page_index"] for row in first_rain} == {1, 2}
+    assert len({row["external_id"] for row in first_rain}) == 2
+    assert {row["source_order"] for row in first_rain} == {1}
+    assert {row["external_id"] for row in first_lesson}.isdisjoint(
+        {row["external_id"] for row in second_lesson}
+    )
+
+
+def test_renderer_preserves_unknown_structured_fields_in_supplemental_section():
+    analysis = _analysis()
+    analysis["page_analyses"][0]["grammar_points"][0]["usage"] = "Dùng khi nêu nguyên nhân khách quan"
+    analysis["page_analyses"][0]["new_prompt_section"] = {
+        "special_note": "Không được làm mất nội dung này",
+        "nested": [{"value": "Chi tiết lồng"}],
+    }
+
+    payload = notion_sync.build_notion_sync_payload("session-a", _items(), analysis)
+
+    assert "Dữ liệu bổ sung" in payload["markdown"]
+    assert "Không được làm mất nội dung này" in payload["markdown"]
+    assert "Chi tiết lồng" in payload["markdown"]
+    assert "Dùng khi nêu nguyên nhân khách quan" in payload["markdown"]
+    assert payload["unrendered_field_count"] == 0
+
+
+def test_renderer_splits_large_ocr_and_large_tables_on_semantic_boundaries():
+    analysis = _analysis()
+    page = analysis["page_analyses"][0]
+    page["source_text"] = "長い文。\n" * 25_000
+    page["vocabulary_all"] = [
+        {"num": index, "word": f"単語{index}", "reading": "たんご", "meaning": "từ vựng"}
+        for index in range(101)
+    ]
+    items = _items()
+    items[0]["edited_text"] = page["source_text"]
+
+    payload = notion_sync.build_notion_sync_payload("session-a", items, analysis)
+
+    ocr_sections = [section for section in payload["markdown_sections"] if "OCR gốc đã được duyệt" in section]
+    assert len(ocr_sections) > 1
+    assert all(section.count("<details") == section.count("</details>") == 1 for section in ocr_sections)
+    assert payload["markdown"].count('<table fit-page-width="true"') >= 3
+    assert payload["unrendered_field_count"] == 0
+
+
+def test_lesson_properties_are_metadata_only_and_report_render_coverage():
+    payload = notion_sync.build_notion_sync_payload("session-a", _items(), _analysis())
+    properties = notion_sync._lesson_properties(payload)
+
+    assert "OCR gốc" not in properties
+    assert "Ngữ pháp" not in properties
+    assert properties["Đủ nội dung Notion"]["checkbox"] is True
+    assert properties["Số trường chưa hiển thị"]["number"] == 0
+    assert properties["Phiên bản bố cục"]["rich_text"][0]["text"]["content"] == "3.0"
+
+
+def test_study_item_page_body_keeps_every_source_field():
+    source = {
+        "name": "～ので",
+        "meaning": "vì",
+        "usage": "Nêu nguyên nhân khách quan",
+        "example_1": "雨なので、行かない。",
+        "example_1_hiragana": "あめなので、いかない。",
+        "comparison": {"with": "～から", "difference": "khách quan hơn"},
+    }
+    item = {
+        "title": "～ので",
+        "type": "Ngữ pháp",
+        "page_index": 1,
+        "source_order": 2,
+        "meaning_vi": "vì",
+        "source_json": json.dumps(source, ensure_ascii=False),
+        "source_checksum": "checksum",
+    }
+
+    markdown = notion_sync.render_notion_item_markdown(item)
+
+    for value in ("Nêu nguyên nhân khách quan", "雨なので、行かない。", "あめなので、いかない。", "khách quan hơn"):
+        assert value in markdown
 
 
 def test_split_markdown_respects_chunk_limit_and_preserves_text():
@@ -337,10 +435,180 @@ def test_learning_views_use_dynamic_today_filter():
     client = Client()
     names = notion_sync._create_learning_views(client, "database", "source")
 
-    assert names == ["Ôn hôm nay", "Mục mới", "Theo loại", "Theo bài", "Đã nhớ"]
-    today_filter = client.created[0]["filter"]["and"][0]
+    assert names == [
+        "Tất cả", "Từ vựng", "Từ khó", "Kanji", "Cụm từ", "Từ nối",
+        "Ngữ pháp", "Mẫu câu", "Câu dài", "Ôn hôm nay", "Theo bài", "Đã nhớ",
+    ]
+    today_filter = client.created[9]["filter"]["and"][0]
     assert today_filter == {"property": "Ngày ôn tiếp", "date": {"on_or_before": "today"}}
     assert "Đến hạn" not in notion_sync._item_schema()
+
+
+def test_existing_learning_view_is_updated_instead_of_duplicated():
+    class Client:
+        def __init__(self):
+            self.calls = []
+
+        def request(self, method, path, payload=None):
+            self.calls.append((method, path, payload))
+            if path.startswith("/views?database_id"):
+                return {"results": [{"id": "view-all"}]}
+            if path == "/views/view-all":
+                return {"id": "view-all", "name": "Tất cả"}
+            if path.startswith("/data_sources/") and method == "GET":
+                return {"properties": {}}
+            return {"id": "created"}
+
+    client = Client()
+    notion_sync._create_learning_views(client, "database", "source")
+
+    assert any(method == "PATCH" and path == "/views/view-all" for method, path, _ in client.calls)
+    assert not any(
+        method == "POST" and (payload or {}).get("name") == "Tất cả"
+        for method, _, payload in client.calls
+    )
+
+
+def test_migration_preflight_keeps_lesson_without_readable_archive(monkeypatch):
+    lesson = {"id": "lesson-1", "properties": {"Tên bài": {"title": []}}}
+
+    class Client:
+        def request(self, method, path, payload=None):
+            if path.endswith("/lessons/query"):
+                return {"results": [lesson], "has_more": False}
+            if path.endswith("/items/query"):
+                return {"results": [], "has_more": False}
+            raise AssertionError(f"Unexpected mutation during preflight: {method} {path}")
+
+    monkeypatch.setattr(
+        notion_migration,
+        "ensure_notion_workspace",
+        lambda client, settings: {
+            "lessons_data_source_id": "lessons",
+            "items_data_source_id": "items",
+            "lessons_database_id": "lesson-db",
+        },
+    )
+    settings = notion_sync.NotionSettings("token", "parent", "lesson-db", "lessons", "item-db", "items")
+
+    result = notion_migration.rebuild_notion_workspace_v3(Client(), settings, confirm=False)
+
+    assert result["status"] == "dry_run"
+    assert result["readable_lesson_count"] == 0
+    assert result["unreadable_lessons"][0]["page_id"] == "lesson-1"
+    assert result["would_remove_obsolete_columns"] is False
+
+
+def test_confirmed_migration_backs_up_before_archive_and_restores_study_state(monkeypatch):
+    archive = {
+        "sources": _items(),
+        "analysis": _analysis(),
+        "source_hash": "source",
+        "schema_version": "2.0",
+    }
+    lesson = {
+        "id": "old-lesson",
+        "properties": {
+            "External ID": {"rich_text": [{"plain_text": "analysis:old"}]},
+            "Ngày phân tích": {"date": {"start": "2026-08-01T00:00:00+00:00"}},
+            "Bản JSON gốc": {"files": [{"type": "file", "file": {"url": "https://files/archive.json"}}]},
+        },
+    }
+    item = {
+        "id": "old-item",
+        "properties": {
+            "Tên": {"title": [{"plain_text": "変更"}]},
+            "Loại": {"select": {"name": "Từ vựng"}},
+            "Ngôn ngữ": {"select": {"name": "Tiếng Nhật"}},
+            "Cách đọc": {"rich_text": [{"plain_text": "へんこう"}]},
+            "Trạng thái": {"select": {"name": "Đang học"}},
+            "Ngày ôn tiếp": {"date": {"start": "2026-08-10"}},
+            "Số lần ôn": {"number": 3},
+            "Bài phân tích": {"relation": [{"id": "old-lesson"}]},
+        },
+    }
+
+    class Response:
+        status_code = 200
+        content = json.dumps(archive, ensure_ascii=False).encode("utf-8")
+
+    class HTTP:
+        def request(self, method, url, **kwargs):
+            assert method == "GET"
+            return Response()
+
+    class Client:
+        http = HTTP()
+
+        def __init__(self):
+            self.calls = []
+
+        def request(self, method, path, payload=None):
+            self.calls.append((method, path, payload))
+            if path.endswith("/lessons/query"):
+                return {"results": [lesson], "has_more": False}
+            if path.endswith("/items/query"):
+                return {"results": [item], "has_more": False}
+            if method == "POST" and path == "/pages":
+                return {"id": "backup-page"}
+            return {"id": path.rsplit("/", 1)[-1]}
+
+        def upload_file(self, filename, content, content_type):
+            self.calls.append(("UPLOAD", filename, content_type))
+            return {"id": "backup-upload"}
+
+    client = Client()
+    monkeypatch.setattr(
+        notion_migration,
+        "ensure_notion_workspace",
+        lambda client, settings: {
+            "lessons_data_source_id": "lessons",
+            "items_data_source_id": "items",
+            "lessons_database_id": "lesson-db",
+            "items_database_id": "item-db",
+        },
+    )
+    monkeypatch.setattr(notion_migration, "_remove_obsolete_columns", lambda *args: None)
+    monkeypatch.setattr(notion_migration, "_remove_obsolete_views", lambda *args: None)
+    def _new_lesson(client, data_source_id, payload):
+        client.calls.append(("UPSERT_LESSON", payload["external_id"], None))
+        return {"id": "new-lesson"}
+
+    monkeypatch.setattr(notion_migration, "_upsert_lesson", _new_lesson)
+
+    created_items = []
+
+    def _new_item(client, data_source_id, value, lesson_page_id):
+        created_items.append(value)
+        return {"id": f"new-item-{len(created_items)}"}
+
+    monkeypatch.setattr(notion_migration, "_upsert_learning_item", _new_item)
+    settings = notion_sync.NotionSettings("token", "parent", "lesson-db", "lessons", "item-db", "items")
+
+    result = notion_migration.rebuild_notion_workspace_v3(client, settings, confirm=True)
+
+    backup_index = next(index for index, call in enumerate(client.calls) if call[0] == "UPLOAD")
+    rebuild_index = next(index for index, call in enumerate(client.calls) if call[0] == "UPSERT_LESSON")
+    assert backup_index < rebuild_index
+    assert result["status"] == "complete"
+    assert result["rebuilt_lessons"] == 1
+    assert result["rebuilt_items"] == len(created_items)
+    restored = [
+        call for call in client.calls
+        if call[0] == "PATCH" and str(call[1]).startswith("/pages/new-item-")
+        and (call[2] or {}).get("properties", {}).get("Trạng thái")
+    ]
+    assert restored
+    assert restored[0][2]["properties"]["Trạng thái"]["select"]["name"] == "Đang học"
+    assert restored[0][2]["properties"]["Số lần ôn"]["number"] == 3
+    assert not any(
+        call[0] == "PATCH" and call[1] == "/pages/old-lesson" and (call[2] or {}).get("in_trash")
+        for call in client.calls
+    )
+    assert any(
+        call[0] == "PATCH" and call[1] == "/pages/old-item" and (call[2] or {}).get("in_trash")
+        for call in client.calls
+    )
 
 
 def test_durable_queue_is_idempotent_and_can_retry():
