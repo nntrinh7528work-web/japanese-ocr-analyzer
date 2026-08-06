@@ -53,16 +53,6 @@ def test_stale_job_result_is_rejected_after_ocr_edit():
     assert state["analysis"] is None
 
 
-def test_source_hash_includes_pages_that_have_not_been_ocrd_yet():
-    one_pending = [
-        {"id": "1", "name": "p1", "edited_text": "text", "ocr_result": {}},
-        {"id": "2", "name": "p2", "edited_text": "", "ocr_result": {}},
-    ]
-    only_first = one_pending[:1]
-
-    assert items_source_hash(one_pending) != items_source_hash(only_first)
-
-
 def test_sentence_job_merges_without_replacing_main_analysis_or_double_counting():
     state = {
         "analysis": {

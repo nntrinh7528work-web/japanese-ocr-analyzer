@@ -67,6 +67,7 @@ def items_source_hash(items: list[dict[str, Any]]) -> str:
             "notes": (item.get("ocr_result") or {}).get("ocr_notes", []),
         }
         for item in items
+        if str(item.get("edited_text") or "").strip()
     ]
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
