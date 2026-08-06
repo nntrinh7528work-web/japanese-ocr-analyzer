@@ -82,7 +82,10 @@ def _is_english_period_boundary(text: str, index: int) -> bool:
 
 def split_sentences(text: str, language: str, page_index: int) -> list[dict[str, Any]]:
     """Split source text in order and assign stable page/sentence IDs."""
-    source = re.sub(r"[ \t]+", " ", str(text or "")).strip()
+    source = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+    source = re.sub(r"(?<!\n)\n(?!\n)", " ", source)
+    source = re.sub(r"\n{2,}", "\n", source)
+    source = re.sub(r"[ \t]+", " ", source).strip()
     if not source:
         return []
     lang = _language(language)
@@ -563,16 +566,20 @@ def sentence_breakdowns_markdown(page: dict[str, Any]) -> str:
 
 def analysis_markdown(analysis: dict[str, Any]) -> str:
     """Render exports dynamically so deep-dive sections are never duplicated."""
+    from modules.translation_guidance import guidance_markdown
+
     pages = analysis.get("page_analyses")
     if not pages:
         base = str(analysis.get("full_markdown") or "").strip()
-        deep = sentence_breakdowns_markdown(analysis)
-        return "\n\n".join(part for part in (base, deep) if part)
+        guidance = guidance_markdown(analysis)
+        deep = "" if guidance else sentence_breakdowns_markdown(analysis)
+        return "\n\n".join(part for part in (base, guidance, deep) if part)
     rendered = []
     for page in pages:
         label = page.get("source_label") or page.get("page_name") or "Trang"
         base = str(page.get("full_markdown") or "").strip()
-        deep = sentence_breakdowns_markdown(page)
-        content = "\n\n".join(part for part in (base, deep) if part)
+        guidance = guidance_markdown(page)
+        deep = "" if guidance else sentence_breakdowns_markdown(page)
+        content = "\n\n".join(part for part in (base, guidance, deep) if part)
         rendered.append(f"# {label}\n\n{content}".strip())
     return "\n\n---\n\n".join(rendered)

@@ -14,3 +14,11 @@ def test_dark_theme_styles_streamlit_portals_and_header():
 def test_light_and_dark_theme_have_distinct_backgrounds():
     assert "#0B0E17" in build_custom_css(dark_mode=True)
     assert "#F8FAFF" in build_custom_css(dark_mode=False)
+
+
+def test_mobile_sentence_cards_stack_columns():
+    css = build_custom_css(dark_mode=True)
+
+    assert "@media (max-width: 768px)" in css
+    assert 'stVerticalBlockBorderWrapper' in css
+    assert "flex-direction: column" in css

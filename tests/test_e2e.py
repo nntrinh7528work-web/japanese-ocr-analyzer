@@ -147,7 +147,7 @@ def test_two_images_ocr_and_combined_analysis(monkeypatch):
         }
         for index, item in enumerate(items, 1)
     ]
-    analysis = text_analyzer.run_page_analyses(pages)
+    analysis = text_analyzer.run_page_analyses(pages, auto_translation_guidance=False)
     assert analysis["summary"]
     assert len(analysis["page_analyses"]) == 2
     assert len(analysis_model.prompts) == 2

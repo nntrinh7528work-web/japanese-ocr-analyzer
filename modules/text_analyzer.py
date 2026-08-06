@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -17,6 +18,13 @@ from modules.sentence_analyzer import (
     attach_sentence_data,
     build_sentence_catalog,
     select_auto_sentences,
+)
+from modules.translation_guidance import (
+    add_related_analysis,
+    aggregate_guidance_fields,
+    analyze_guidance_batch,
+    apply_guidance_batch,
+    guidance_batches,
 )
 
 
@@ -775,6 +783,7 @@ def merge_page_analyses(
         for page in ordered_pages
         if page.get("sentence_analysis_error")
     ]
+    merged.update(aggregate_guidance_fields(ordered_pages))
     merged["model_used"] = ordered_pages[0].get("model_used", "gemini-3.5-flash") if ordered_pages else "gemini-3.5-flash"
     return merged
 
@@ -805,6 +814,7 @@ def run_page_analyses(
     model_name: str | None = None,
     reasoning_effort: str = "standard",
     auto_sentence_deep_dive: bool = True,
+    auto_translation_guidance: bool = True,
 ) -> dict[str, Any]:
     """Analyze each OCR page concurrently, then return a merged report with per-page details.
 
@@ -819,6 +829,8 @@ def run_page_analyses(
         reasoning_effort: ``"standard"`` or ``"deep"``.
         auto_sentence_deep_dive: Analyze up to 3 complex sentences per page and
             15 across the document in a separate, non-blocking Gemini phase.
+        auto_translation_guidance: Generate compact Vietnamese teacher guidance
+            for every source sentence before the deep-dive phase.
     """
     language = _analysis_language(analysis_language)
     prepared_pages = prepare_pages(pages)
@@ -826,6 +838,12 @@ def run_page_analyses(
     total = len(prepared_pages)
     catalogs = build_sentence_catalog(prepared_pages, language)
     selected = select_auto_sentences(catalogs) if auto_sentence_deep_dive else {}
+    callback_lock = threading.Lock()
+
+    def _emit_page(page_result: dict[str, Any]) -> None:
+        if page_done_callback:
+            with callback_lock:
+                page_done_callback(copy.deepcopy(page_result))
 
     # Main analysis is persisted first. The sentence phase below only enriches it.
     page_analyses: list[dict[str, Any] | None] = [None] * total
@@ -833,14 +851,18 @@ def run_page_analyses(
 
     def _work(index: int, page: dict) -> tuple[int, dict[str, Any]]:
         base = analyze_single_page(model, page, language, reasoning_effort=reasoning_effort)
-        return index, attach_sentence_data(base, catalogs.get(int(page["page_index"]), []))
+        result = attach_sentence_data(base, catalogs.get(int(page["page_index"]), []))
+        result.setdefault("translation_guidance", [])
+        result.setdefault("translation_guidance_usage", dict(ZERO_USAGE))
+        result.setdefault("translation_guidance_runs", [])
+        result.setdefault("translation_guidance_errors", [])
+        return index, result
 
     if total == 1:
         idx, page_result = _work(0, prepared_pages[0])
         page_analyses[idx] = page_result
         completed = 1
-        if page_done_callback:
-            page_done_callback(page_result)
+        _emit_page(page_result)
         if progress_callback:
             progress_callback(1, 1, page_result["page_name"])
     else:
@@ -854,13 +876,51 @@ def run_page_analyses(
                 idx, page_result = future.result()
                 page_analyses[idx] = page_result
                 completed += 1
-                if page_done_callback:
-                    page_done_callback(page_result)
+                _emit_page(page_result)
                 if progress_callback:
                     progress_callback(completed, total, page_result["page_name"])
 
+    page_lookup = {int(page["page_index"]): (index, page) for index, page in enumerate(prepared_pages)}
+
+    if auto_translation_guidance:
+        model_used = getattr(model, "target_model_name", model_name or "gemini-3.5-flash")
+
+        def _guidance_work(page_index: int) -> None:
+            result_index, source_page = page_lookup[page_index]
+            current = page_analyses[result_index]
+            if current is None:
+                return
+            for batch_index, batch in enumerate(guidance_batches(catalogs.get(page_index, [])), 1):
+                run_id = f"auto-guidance-p{page_index}-b{batch_index}"
+                try:
+                    rows, usage = analyze_guidance_batch(
+                        model,
+                        batch,
+                        source_page["text"],
+                        language,
+                        reasoning_effort=reasoning_effort,
+                    )
+                    rows = add_related_analysis(rows, current, language)
+                    error = None
+                except Exception as exc:
+                    rows, usage, error = [], dict(ZERO_USAGE), str(exc)
+                current = apply_guidance_batch(
+                    current,
+                    rows,
+                    usage,
+                    model_used,
+                    run_id,
+                    error,
+                )
+                page_analyses[result_index] = current
+                _emit_page(current)
+
+        with ThreadPoolExecutor(max_workers=min(max_workers, total)) as executor:
+            futures = [executor.submit(_guidance_work, page_index) for page_index in page_lookup]
+            for future in as_completed(futures):
+                future.result()
+
     if selected:
-        page_lookup = {int(page["page_index"]): (index, page) for index, page in enumerate(prepared_pages)}
 
         def _deep_work(page_index: int, sentence_rows: list[dict[str, Any]]) -> tuple[int, list[dict[str, Any]], dict[str, int], str | None]:
             _index, source_page = page_lookup[page_index]
@@ -897,7 +957,6 @@ def run_page_analyses(
                     model_used=getattr(model, "target_model_name", model_name or "gemini-3.5-flash"),
                 )
                 page_analyses[result_index] = enriched
-                if page_done_callback:
-                    page_done_callback(enriched)
+                _emit_page(enriched)
 
     return merge_page_analyses([p for p in page_analyses if p is not None], language)

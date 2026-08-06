@@ -14,7 +14,7 @@ from config import (
     MAX_PDF_SIZE_MB,
     SUPPORTED_UPLOAD_FORMATS,
 )
-from modules.cost_estimator import budget_status, estimate_cost, format_cost, sum_costs
+from modules.cost_estimator import budget_status, estimate_cost, estimate_run_costs, format_cost, sum_costs
 from modules.doc_exporter import export_to_docx
 from modules.job_store import create_job
 from modules.job_workflow import items_source_hash
@@ -27,6 +27,7 @@ from modules.result_exporter import (
     safe_export_stem,
 )
 from modules.sentence_analyzer import analysis_markdown, split_sentences
+from modules.tts_engine import get_audio_cache_key, text_to_speech
 
 from components.helpers import (
     display_rows,
@@ -44,81 +45,116 @@ def _render_labeled_items(title: str, rows: list[dict], fields: tuple[str, ...])
         st.markdown("- " + " | ".join(value for value in values if value))
 
 
-def _render_sentence_breakdown(row: dict, language: str) -> None:
-    origin = "Tự động" if row.get("analysis_origin") == "auto" else "Phân tích thêm"
-    label = f"Câu {row.get('ordinal', '?')} · {origin} · độ phức tạp {row.get('complexity_score', 0)}"
-    with st.expander(label, expanded=False):
-        st.markdown("**Nguyên văn**")
-        st.code(row.get("original") or "", language=None)
-        if language == "japanese" and row.get("reading"):
-            st.markdown(f"**Hiragana:** {row['reading']}")
-
-        segments = row.get("segments") or []
-        if segments:
-            st.markdown("**Cụm từ có nhãn vai trò**")
-            st.dataframe(
-                [
-                    {
-                        "Cụm": item.get("text", ""),
-                        "Hiragana": item.get("reading", "") if language == "japanese" else "",
-                        "Nhãn/Vai trò": item.get("role", ""),
-                        "Nghĩa tiếng Việt": item.get("meaning_vi", ""),
-                        "Bổ nghĩa cho": item.get("modifies", ""),
-                    }
-                    for item in segments
-                ],
-                use_container_width=True,
-                hide_index=True,
-            )
-        clauses = row.get("clauses") or []
-        if clauses:
-            st.markdown("**Ranh giới và quan hệ mệnh đề**")
-            st.dataframe(
-                [
-                    {
-                        "Nhãn mệnh đề": item.get("label", ""),
-                        "Nội dung": item.get("text", ""),
-                        "Vai trò": item.get("role", ""),
-                        "Quan hệ với mệnh đề chính": item.get("relation_to_main", ""),
-                    }
-                    for item in clauses
-                ],
-                use_container_width=True,
-                hide_index=True,
-            )
-        if row.get("structure_summary"):
-            st.markdown(f"**Cấu trúc câu:** {row['structure_summary']}")
-
-        translations = row.get("translations") or {}
-        st.markdown(f"**Dịch sát từng cụm:** {translations.get('chunked') or 'Chưa có'}")
-        st.markdown(f"**Dịch sát toàn câu:** {translations.get('literal') or 'Chưa có'}")
-        st.success(f"Dịch tự nhiên: {translations.get('natural') or 'Chưa có'}")
-
-        _render_labeled_items("Thành phần lược bỏ", row.get("omitted_elements") or [], ("element", "recovered", "reason"))
-        _render_labeled_items("Từ quy chiếu", row.get("references") or [], ("expression", "referent", "reason"))
-        _render_labeled_items("Luồng logic", row.get("logic") or [], ("marker", "relation", "scope"))
-
-        st.markdown(f"**Câu viết lại đơn giản:** {row.get('simplified_source') or 'Chưa có'}")
-        st.markdown(f"**Nghĩa tiếng Việt:** {row.get('simplified_vi') or 'Chưa có'}")
-        questions = row.get("questions") or []
-        if questions:
-            st.markdown("**Câu hỏi kiểm tra hiểu**")
+def _render_deep_details(row: dict, language: str) -> None:
+    st.markdown("#### Giải mã câu dài (8 lớp)")
+    segments = row.get("segments") or []
+    if segments:
+        st.markdown("**Cụm từ có nhãn vai trò**")
+        st.dataframe(
+            [
+                {
+                    "Cụm": item.get("text", ""),
+                    "Hiragana": item.get("reading", "") if language == "japanese" else "",
+                    "Nhãn/Vai trò": item.get("role", ""),
+                    "Nghĩa tiếng Việt": item.get("meaning_vi", ""),
+                    "Bổ nghĩa cho": item.get("modifies", ""),
+                }
+                for item in segments
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+    clauses = row.get("clauses") or []
+    if clauses:
+        st.markdown("**Ranh giới và quan hệ mệnh đề**")
+        st.dataframe(
+            [
+                {
+                    "Nhãn mệnh đề": item.get("label", ""),
+                    "Nội dung": item.get("text", ""),
+                    "Vai trò": item.get("role", ""),
+                    "Quan hệ với mệnh đề chính": item.get("relation_to_main", ""),
+                }
+                for item in clauses
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+    if row.get("structure_summary"):
+        st.markdown(f"**Cấu trúc câu:** {row['structure_summary']}")
+    _render_labeled_items("Thành phần lược bỏ", row.get("omitted_elements") or [], ("element", "recovered", "reason"))
+    _render_labeled_items("Từ quy chiếu", row.get("references") or [], ("expression", "referent", "reason"))
+    _render_labeled_items("Luồng logic", row.get("logic") or [], ("marker", "relation", "scope"))
+    st.markdown(f"**Câu viết lại đơn giản:** {row.get('simplified_source') or 'Chưa có'}")
+    st.markdown(f"**Nghĩa tiếng Việt:** {row.get('simplified_vi') or 'Chưa có'}")
+    questions = row.get("questions") or []
+    if questions:
+        st.markdown("**Câu hỏi kiểm tra hiểu**")
+        for question_index, question in enumerate(questions, 1):
+            st.write(f"{question_index}. {question.get('question') or ''}")
+        show_answers = st.toggle(
+            "Hiện đáp án",
+            value=False,
+            key=f"answers_{row.get('sentence_id')}",
+        )
+        if show_answers:
             for question_index, question in enumerate(questions, 1):
-                st.write(f"{question_index}. {question.get('question') or ''}")
-            show_answers = st.toggle(
-                "Hiện đáp án",
-                value=False,
-                key=f"answers_{row.get('sentence_id')}",
-            )
-            if show_answers:
-                for question_index, question in enumerate(questions, 1):
-                    st.info(
-                        f"{question_index}. {question.get('answer') or 'Chưa có đáp án'}\n\n"
-                        f"{question.get('explanation') or ''}"
-                    )
+                st.info(
+                    f"{question_index}. {question.get('answer') or 'Chưa có đáp án'}\n\n"
+                    f"{question.get('explanation') or ''}"
+                )
 
 
-def _render_sentence_deep_dive(
+def _render_audio_control(text: str, lang: str, slow: bool, label: str, key: str) -> None:
+    cache_key = "teacher_tts_" + get_audio_cache_key(text, lang, slow)
+    if st.button(label, key=key, use_container_width=True, disabled=not bool(text.strip())):
+        with st.spinner("Đang tạo audio..."):
+            audio = text_to_speech(text, lang=lang, slow=slow)
+        if audio:
+            st.session_state[cache_key] = audio
+        else:
+            st.warning("Không thể tạo audio. Kết quả dịch vẫn được giữ nguyên.")
+    if st.session_state.get(cache_key):
+        st.audio(st.session_state[cache_key], format="audio/mp3")
+
+
+def _start_guidance_job(
+    missing: list[dict],
+    page: dict,
+    source_text: str,
+    language: str,
+    model_name: str,
+    reasoning_effort: str,
+    items: list[dict],
+    worker_path: str,
+    project_dir: str,
+) -> None:
+    payload = {
+        "catalog": missing,
+        "page_text": source_text,
+        "page_index": int(page.get("page_index", 0)),
+        "model_name": model_name,
+        "reasoning_effort": reasoning_effort,
+    }
+    lang = "guidance_ja" if language == "japanese" else "guidance_en"
+    job_id = create_job(
+        json.dumps(payload, ensure_ascii=False),
+        lang,
+        session_id=st.session_state.session_id,
+        source_hash=items_source_hash(items),
+    )
+    subprocess.Popen(
+        [_sys.executable, worker_path, job_id],
+        stdout=subprocess.DEVNULL,
+        stderr=open(project_dir + "/worker_error.log", "a"),
+        cwd=project_dir,
+    )
+    st.session_state.current_job_id = job_id
+    st.query_params["job_id"] = job_id
+    st.rerun()
+
+
+def _render_translation_guidance(
     page: dict,
     language: str,
     source_text: str,
@@ -129,25 +165,125 @@ def _render_sentence_deep_dive(
     worker_path: str,
     project_dir: str,
 ) -> None:
-    st.subheader("🧠 Giải mã câu dài")
+    st.subheader("Đối chiếu OCR và giáo viên hướng dẫn dịch")
     if not page.get("sentence_catalog"):
         page["sentence_catalog"] = split_sentences(source_text, language, int(page.get("page_index", 1)))
         page.setdefault("sentence_breakdowns", [])
         page.setdefault("sentence_analysis_usage", {})
         persist_analysis_fn()
 
+    if page.get("translation_guidance_errors"):
+        st.warning(
+            f"Có {len(page['translation_guidance_errors'])} batch hướng dẫn chưa hoàn tất. "
+            "Kết quả chính và các câu đã dịch vẫn được giữ."
+        )
     if page.get("sentence_analysis_error"):
         st.warning(f"Phân tích chính vẫn được giữ. Giải mã câu dài gặp lỗi: {page['sentence_analysis_error']}")
 
-    breakdowns = sorted(page.get("sentence_breakdowns") or [], key=lambda row: int(row.get("ordinal", 0)))
-    if breakdowns:
-        for row in breakdowns:
-            _render_sentence_breakdown(row, language)
-    else:
-        st.caption("Trang này chưa có câu dài được giải mã.")
+    guidance = {row.get("sentence_id"): row for row in page.get("translation_guidance", [])}
+    breakdowns = {row.get("sentence_id"): row for row in page.get("sentence_breakdowns", [])}
+    catalog = sorted(page.get("sentence_catalog") or [], key=lambda row: int(row.get("ordinal", 0)))
+    slow_source = st.toggle(
+        "Nói chậm nguyên văn",
+        value=False,
+        key=f"teacher_tts_slow_{page.get('page_index')}",
+    )
+    source_lang = "ja" if language == "japanese" else "en"
 
-    analyzed_ids = {row.get("sentence_id") for row in breakdowns}
-    remaining = [row for row in page.get("sentence_catalog", []) if row.get("sentence_id") not in analyzed_ids]
+    for sentence in catalog:
+        sentence_id = sentence.get("sentence_id")
+        row = guidance.get(sentence_id) or {}
+        deep = breakdowns.get(sentence_id)
+        translations = row.get("translations") or (deep or {}).get("translations") or {}
+        original = str(sentence.get("original") or "")
+        reading = row.get("reading") or (deep or {}).get("reading") or ""
+        labels = [f"Câu {sentence.get('ordinal', '?')}"]
+        if sentence.get("eligible"):
+            labels.append(f"Câu khó · điểm {sentence.get('complexity_score', 0)}")
+        if deep:
+            labels.append("Đã giải mã sâu")
+        if row.get("ocr_warning"):
+            labels.append("Có cảnh báo OCR")
+        with st.container(border=True):
+            st.markdown("**" + " | ".join(labels) + "**")
+            source_col, teacher_col = st.columns(2)
+            with source_col:
+                st.markdown("**Văn bản OCR đã duyệt**")
+                st.code(original, language=None)
+                if language == "japanese" and reading:
+                    st.caption(f"Hiragana: {reading}")
+                _render_audio_control(
+                    original,
+                    source_lang,
+                    slow_source,
+                    "Nghe nguyên văn",
+                    f"listen_source_{sentence_id}",
+                )
+            with teacher_col:
+                st.markdown("**Giáo viên dịch tự nhiên**")
+                natural = str(translations.get("natural") or "")
+                if natural:
+                    st.success(natural)
+                else:
+                    st.info("Câu này chưa có hướng dẫn dịch.")
+                for point in (row.get("key_points") or [])[:3]:
+                    source = f" · `{point.get('source')}`" if point.get("source") else ""
+                    st.markdown(
+                        f"- **{point.get('label') or 'Điểm mấu chốt'}**{source}: "
+                        f"{point.get('explanation_vi') or ''}"
+                    )
+                _render_audio_control(
+                    natural,
+                    "vi",
+                    False,
+                    "Nghe bản dịch tiếng Việt",
+                    f"listen_vi_{sentence_id}",
+                )
+
+            if row or deep:
+                with st.expander(f"Chi tiết dịch và phân tích câu {sentence.get('ordinal', '?')}", expanded=False):
+                    st.markdown(f"**Dịch theo cụm:** {translations.get('chunked') or 'Chưa có'}")
+                    st.markdown(f"**Dịch sát toàn câu:** {translations.get('literal') or 'Chưa có'}")
+                    if row.get("translation_steps"):
+                        st.markdown("**Thứ tự dịch đề xuất**")
+                        for step in row["translation_steps"]:
+                            st.markdown(
+                                f"- {step.get('order')}. `{step.get('source_chunk')}` → "
+                                f"{step.get('meaning_vi')}: {step.get('advice_vi')}"
+                            )
+                    if row.get("ocr_warning"):
+                        st.warning(f"Đề xuất kiểm tra OCR: {row['ocr_warning']}")
+                    if row.get("related_analysis"):
+                        st.markdown("**Phân tích liên quan ở các mục bên dưới**")
+                        for ref in row["related_analysis"]:
+                            st.markdown(
+                                f"- [{ref.get('category_label')}] **{ref.get('label')}**: "
+                                f"{ref.get('summary') or 'Xem bảng đầy đủ bên dưới.'}"
+                            )
+                    if deep:
+                        _render_deep_details(deep, language)
+
+    analyzed_ids = set(breakdowns)
+    remaining = [row for row in catalog if row.get("sentence_id") not in analyzed_ids]
+    missing_guidance = [row for row in catalog if row.get("sentence_id") not in guidance]
+    if missing_guidance and st.button(
+        f"Tạo hướng dẫn cho {len(missing_guidance)} câu còn thiếu",
+        key=f"run_guidance_{page.get('page_index')}",
+        type="primary",
+        use_container_width=True,
+    ):
+        _start_guidance_job(
+            missing_guidance,
+            page,
+            source_text,
+            language,
+            model_name,
+            reasoning_effort,
+            items,
+            worker_path,
+            project_dir,
+        )
+
     with st.expander("Phân tích thêm câu khác", expanded=False):
         if not remaining:
             st.info("Tất cả câu trong trang đã được phân tích.")
@@ -479,6 +615,7 @@ def render_ocr_tab(
                     model_name=text_model_choice,
                     reasoning_effort=reasoning_effort,
                     auto_sentence_deep_dive=config.get("auto_sentence_deep_dive", True),
+                    auto_translation_guidance=config.get("auto_translation_guidance", True),
                 )
                 all_page_analyses = partial + new_results.get("page_analyses", [])
                 st.session_state.analysis = text_analyzer_module.merge_page_analyses(
@@ -500,6 +637,7 @@ def render_ocr_tab(
                     "model_name": text_model_choice,
                     "reasoning_effort": reasoning_effort,
                     "auto_sentence_deep_dive": config.get("auto_sentence_deep_dive", True),
+                    "auto_translation_guidance": config.get("auto_translation_guidance", True),
                 }
                 input_text = json.dumps(input_data)
                 job_id = create_job(
@@ -528,6 +666,7 @@ def render_ocr_tab(
                     "model_name": text_model_choice,
                     "reasoning_effort": reasoning_effort,
                     "auto_sentence_deep_dive": config.get("auto_sentence_deep_dive", True),
+                    "auto_translation_guidance": config.get("auto_translation_guidance", True),
                 }
                 input_text = json.dumps(input_data)
                 job_id = create_job(
@@ -565,34 +704,31 @@ def render_ocr_tab(
             if item.get("ocr_result")
         ]
         analysis_cost = estimate_cost(analysis.get("usage"), used_model_name, billing_tier)
-        sentence_runs = analysis.get("sentence_analysis_runs") or []
-        if sentence_runs:
-            sentence_cost = sum_costs(
-                [
-                    estimate_cost(
-                        run.get("usage"),
-                        run.get("model_used") or used_model_name,
-                        billing_tier,
-                    )
-                    for run in sentence_runs
-                ]
-            )
-        else:
-            sentence_cost = estimate_cost(
-                analysis.get("sentence_analysis_usage"),
-                analysis.get("sentence_analysis_model") or used_model_name,
-                billing_tier,
-            )
-        session_cost = sum_costs([*ocr_costs, analysis_cost, sentence_cost])
+        sentence_cost = estimate_run_costs(
+            analysis.get("sentence_analysis_runs"),
+            analysis.get("sentence_analysis_usage"),
+            analysis.get("sentence_analysis_model") or used_model_name,
+            billing_tier,
+        )
+        guidance_cost = estimate_run_costs(
+            analysis.get("translation_guidance_runs"),
+            analysis.get("translation_guidance_usage"),
+            analysis.get("translation_guidance_model") or used_model_name,
+            billing_tier,
+        )
+        session_cost = sum_costs([*ocr_costs, analysis_cost, guidance_cost, sentence_cost])
 
         with st.expander("💰 Tổng chi phí phiên phân tích", expanded=True):
-            cost1, cost2, cost3 = st.columns(3)
+            cost1, cost2 = st.columns(2)
             cost1.metric("OCR ảnh", format_cost(sum(float(cost["total_cost_usd"]) for cost in ocr_costs), usd_to_jpy))
             cost2.metric("Phân tích văn bản", format_cost(analysis_cost["total_cost_usd"], usd_to_jpy))
-            cost3.metric("Giải mã câu dài", format_cost(sentence_cost["total_cost_usd"], usd_to_jpy))
-            cost4, cost5 = st.columns(2)
-            cost4.metric("Tổng token", f"{session_cost['input_tokens'] + session_cost['output_tokens']:,}")
-            cost5.metric("Tổng ước tính", format_cost(session_cost["total_cost_usd"], usd_to_jpy))
+            cost3, cost4 = st.columns(2)
+            cost3.metric("Giáo viên hướng dẫn dịch", format_cost(guidance_cost["total_cost_usd"], usd_to_jpy))
+            cost4.metric("Giải mã câu dài", format_cost(sentence_cost["total_cost_usd"], usd_to_jpy))
+            cost5, cost6 = st.columns(2)
+            cost5.metric("Tổng token", f"{session_cost['input_tokens'] + session_cost['output_tokens']:,}")
+            cost6.metric("Tổng ước tính", format_cost(session_cost["total_cost_usd"], usd_to_jpy))
+            st.caption("Audio Edge TTS/gTTS được tạo khi bấm và không tính vào token Gemini.")
 
             if billing_tier == "free":
                 st.caption(
@@ -654,18 +790,26 @@ def render_ocr_tab(
         tabs = st.tabs(tab_titles)
         for index, (tab, page) in enumerate(zip(tabs, page_analyses)):
             with tab:
-                st.subheader("📝 Tóm tắt nội dung")
-                st.write(page.get("confirmed_text") or "Không có văn bản xác nhận.")
-                st.info(page.get("summary") or "Không có tóm tắt.")
-
                 source_page = next(
                     (candidate for candidate in pages_to_analyze if int(candidate.get("page_index", 0)) == int(page.get("page_index", index + 1))),
                     {},
                 )
-                _render_sentence_deep_dive(
+                source_text = page.get("source_text") or source_page.get("text") or ""
+                st.subheader("Văn bản OCR đã duyệt")
+                st.text_area(
+                    "Nguyên văn dùng làm nguồn dịch",
+                    value=source_text,
+                    height=180,
+                    disabled=True,
+                    key=f"source_ocr_{page.get('page_index', index + 1)}",
+                )
+                st.subheader("Tóm tắt nội dung")
+                st.info(page.get("summary") or "Không có tóm tắt.")
+
+                _render_translation_guidance(
                     page,
                     result_language,
-                    page.get("source_text") or source_page.get("text") or "",
+                    source_text,
                     used_model_name,
                     reasoning_effort,
                     items,

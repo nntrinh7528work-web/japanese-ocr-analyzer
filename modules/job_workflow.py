@@ -8,6 +8,7 @@ import json
 from typing import Any
 
 from modules.sentence_analyzer import merge_manual_breakdown
+from modules.translation_guidance import merge_guidance_job
 
 
 def sync_job_state(
@@ -36,7 +37,13 @@ def sync_job_state(
     if status == "done" and state.get("applied_job_id") != job_id:
         result = job.get("result") or {}
         is_sentence_job = str(job.get("lang") or "").startswith("sentence_") or result.get("job_kind") == "sentence_deep_dive"
-        if is_sentence_job:
+        is_guidance_job = str(job.get("lang") or "").startswith("guidance_") or result.get("job_kind") == "translation_guidance"
+        if is_guidance_job:
+            merged, merged_changed = merge_guidance_job(state.get("analysis"), result, job_id)
+            if merged_changed:
+                state["analysis"] = merged
+                changed = True
+        elif is_sentence_job:
             merged, merged_changed = merge_manual_breakdown(state.get("analysis"), result, job_id)
             if merged_changed:
                 state["analysis"] = merged

@@ -77,3 +77,41 @@ def test_markdown_and_json_include_structured_sentence_breakdowns():
         document_xml = archive.read("word/document.xml").decode("utf-8")
     assert "Giải mã câu dài" in document_xml
     assert "ながいぶんです" in document_xml
+
+
+def test_unified_guidance_export_contains_ocr_teacher_and_deep_once():
+    page = {
+        "source_label": "Trang 1: guide",
+        "full_markdown": "# Phân tích chính",
+        "sentence_catalog": [{"sentence_id": "p1-s1", "ordinal": 1, "original": "長い文です。"}],
+        "translation_guidance": [
+            {
+                "sentence_id": "p1-s1", "ordinal": 1, "original": "長い文です。",
+                "reading": "ながいぶんです。",
+                "translations": {"chunked": "Câu / dài", "literal": "Là câu dài.", "natural": "Đây là một câu dài."},
+                "key_points": [{"label": "Chủ đề", "source": "文", "explanation_vi": "Danh từ trung tâm."}],
+                "translation_steps": [], "related_analysis": [], "ocr_warning": "",
+            }
+        ],
+        "sentence_breakdowns": [
+            {
+                "sentence_id": "p1-s1", "segments": [], "clauses": [],
+                "structure_summary": "Chủ đề + vị ngữ", "omitted_elements": [],
+                "references": [], "logic": [], "questions": [],
+            }
+        ],
+    }
+    analysis = {"page_analyses": [page]}
+    md = markdown_bytes(analysis).decode("utf-8")
+    payload = json.loads(analysis_json_bytes([], analysis, {}, "paid", 155).decode("utf-8"))
+
+    assert md.count("Đối chiếu OCR và giáo viên hướng dẫn dịch") == 1
+    assert md.count("Giải mã câu dài") == 1
+    assert md.count("長い文です。") == 1
+    assert payload["analysis"]["page_analyses"][0]["translation_guidance"][0]["translations"]["natural"]
+
+    docx = export_to_docx(md, "teacher-guidance.docx")
+    with zipfile.ZipFile(io.BytesIO(docx)) as archive:
+        xml = archive.read("word/document.xml").decode("utf-8")
+    assert "giáo viên hướng dẫn dịch" in xml
+    assert "ながいぶんです" in xml

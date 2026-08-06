@@ -1,4 +1,4 @@
-from modules.cost_estimator import budget_status, estimate_cost, format_cost, sum_costs
+from modules.cost_estimator import budget_status, estimate_cost, estimate_run_costs, format_cost, sum_costs
 
 
 def test_paid_cost_uses_gemini_flash_rates():
@@ -59,3 +59,27 @@ def test_budget_status_tracks_remaining_jpy():
     assert status["total_spent_jpy"] == 20_155
     assert status["remaining_jpy"] == 79_845
     assert status["remaining_ratio"] == 0.79845
+
+
+def test_model_aware_runs_are_priced_once():
+    repeated = {
+        "run_id": "same-run",
+        "model_used": "gemini-3.5-flash",
+        "usage": {"input_tokens": 1_000_000, "output_tokens": 0},
+    }
+    result = estimate_run_costs(
+        [
+            repeated,
+            repeated,
+            {
+                "run_id": "lite-run",
+                "model_used": "gemini-3.5-flash-lite",
+                "usage": {"input_tokens": 1_000_000, "output_tokens": 0},
+            },
+        ],
+        {},
+        "gemini-3.5-flash",
+    )
+
+    assert result["input_tokens"] == 2_000_000
+    assert result["total_cost_usd"] == 1.80

@@ -671,6 +671,21 @@ def build_custom_css(dark_mode: bool = False) -> str:
             margin-bottom: 12px;
             color: {text_primary} !important;
         }}
+
+        /* Sentence comparison cards stack source above guidance on phones. */
+        @media (max-width: 768px) {{
+            [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stHorizontalBlock"] {{
+                flex-direction: column !important;
+                gap: 0.5rem !important;
+            }}
+            [data-testid="stVerticalBlockBorderWrapper"] [data-testid="column"] {{
+                width: 100% !important;
+                flex: 1 1 100% !important;
+            }}
+            [data-testid="stVerticalBlockBorderWrapper"] button {{
+                width: 100% !important;
+            }}
+        }}
         </style>
         """
 

@@ -30,6 +30,17 @@ def test_english_split_keeps_abbreviations_and_decimal_together():
     assert rows[1]["sentence_id"] == "p2-s2"
 
 
+def test_ocr_line_wrap_does_not_split_one_sentence():
+    rows = split_sentences(
+        "Although the document is long,\nit remains one sentence because the line break came from OCR.",
+        "english",
+        1,
+    )
+
+    assert len(rows) == 1
+    assert "long, it remains" in rows[0]["original"]
+
+
 def test_selection_enforces_page_and_document_caps_with_source_tie_break():
     catalog = {}
     for page_index in range(1, 8):

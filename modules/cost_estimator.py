@@ -50,6 +50,35 @@ def sum_costs(costs: list[dict[str, Any]]) -> dict[str, float | int]:
     }
 
 
+def estimate_run_costs(
+    runs: list[dict[str, Any]] | None,
+    fallback_usage: dict[str, Any] | None,
+    fallback_model: str,
+    billing_tier: str = "paid",
+) -> dict[str, float | int]:
+    """Price model-aware usage runs once, with a legacy aggregate fallback."""
+    unique_runs = []
+    seen_ids: set[str] = set()
+    for index, run in enumerate(runs or []):
+        run_id = str(run.get("run_id") or f"legacy-run-{index}")
+        if run_id in seen_ids:
+            continue
+        seen_ids.add(run_id)
+        unique_runs.append(run)
+    if not unique_runs:
+        return sum_costs([estimate_cost(fallback_usage, fallback_model, billing_tier)])
+    return sum_costs(
+        [
+            estimate_cost(
+                run.get("usage"),
+                str(run.get("model_used") or fallback_model),
+                billing_tier,
+            )
+            for run in unique_runs
+        ]
+    )
+
+
 def format_cost(usd: float, usd_to_jpy: float = 155) -> str:
     """Format a small USD estimate with its approximate JPY equivalent."""
     return f"${usd:.6f} (~¥{usd * usd_to_jpy:,.0f} JPY)"

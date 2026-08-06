@@ -351,6 +351,7 @@ def test_run_page_analyses_keeps_per_page_results(monkeypatch):
         ],
         progress_callback=_on_progress,
         page_done_callback=_on_page_done,
+        auto_translation_guidance=False,
     )
 
     assert len(model.prompts) == 2
@@ -390,12 +391,61 @@ def test_sentence_deep_dive_failure_does_not_fail_main_page(monkeypatch):
     result = text_analyzer.run_page_analyses(
         [{"page_index": 1, "page_name": "p1", "text": long_sentence, "notes": []}],
         page_done_callback=callbacks.append,
+        auto_translation_guidance=False,
     )
 
     assert result["vocabulary_all"]
     assert result["page_analyses"][0]["sentence_analysis_error"] == "deep failed"
     assert result["page_analyses"][0]["sentence_breakdowns"] == []
     assert len(callbacks) == 2
+
+
+def test_guidance_batches_persist_and_one_failure_does_not_block_later_batch(monkeypatch):
+    class Model:
+        def generate_content(self, _prompt, generation_config):
+            return SimpleNamespace(
+                text=RESPONSE,
+                usage_metadata=SimpleNamespace(prompt_token_count=3, candidates_token_count=5),
+            )
+
+    monkeypatch.setattr(text_analyzer, "_init_model", lambda: Model())
+    calls = 0
+
+    def _guidance(_model, batch, _text, _language, reasoning_effort="standard"):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("first batch failed")
+        return (
+            [
+                {
+                    "sentence_id": row["sentence_id"], "ordinal": row["ordinal"],
+                    "original": row["original"], "translations": {"natural": "Dịch"},
+                    "key_points": [], "translation_steps": [], "related_analysis": [],
+                }
+                for row in batch
+            ],
+            {"input_tokens": 2, "output_tokens": 3},
+        )
+
+    monkeypatch.setattr(text_analyzer, "analyze_guidance_batch", _guidance)
+    callbacks = []
+    source = " ".join(
+        f"This is sentence number {index}, and it contains enough words to remain a complete example."
+        for index in range(1, 10)
+    )
+    result = text_analyzer.run_page_analyses(
+        [{"page_index": 1, "page_name": "p1", "text": source, "notes": []}],
+        page_done_callback=callbacks.append,
+        auto_sentence_deep_dive=False,
+    )
+    page = result["page_analyses"][0]
+
+    assert calls == 2
+    assert len(page["translation_guidance_errors"]) == 1
+    assert len(page["translation_guidance"]) == 1
+    assert page["translation_guidance_usage"]["input_tokens"] == 2
+    assert len(callbacks) == 3  # main result, failed batch, successful batch
 
 
 def test_empty_text_rejected():

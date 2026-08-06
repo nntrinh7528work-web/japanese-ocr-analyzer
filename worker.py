@@ -5,6 +5,7 @@ import json
 from modules.job_store import update_job, get_job
 from modules.text_analyzer import run_analysis, run_page_analyses
 from modules.sentence_analyzer import analyze_manual_sentence
+from modules.translation_guidance import analyze_guidance_job
 
 
 def run_job(job_id: str, text: str, lang: str):
@@ -17,7 +18,18 @@ def run_job(job_id: str, text: str, lang: str):
             text = job_data["input_text"]
             lang = job_data["lang"]
 
-        if lang.startswith("sentence_"):
+        if lang.startswith("guidance_"):
+            data = json.loads(text)
+            analysis_lang = "japanese" if lang == "guidance_ja" else "english"
+            result = analyze_guidance_job(
+                data.get("catalog", []),
+                data.get("page_text", ""),
+                analysis_lang,
+                page_index=int(data.get("page_index", 0)),
+                model_name=data.get("model_name"),
+                reasoning_effort=data.get("reasoning_effort", "standard"),
+            )
+        elif lang.startswith("sentence_"):
             data = json.loads(text)
             analysis_lang = "japanese" if lang == "sentence_ja" else "english"
             result = analyze_manual_sentence(
@@ -34,6 +46,7 @@ def run_job(job_id: str, text: str, lang: str):
             model_name = pages_data.get("model_name")
             reasoning_effort = pages_data.get("reasoning_effort", "standard")
             auto_sentence_deep_dive = bool(pages_data.get("auto_sentence_deep_dive", True))
+            auto_translation_guidance = bool(pages_data.get("auto_translation_guidance", True))
             analysis_lang = "japanese" if lang == "pdf_ja" else "english"
             partial_results = list(job_data.get("partial_result") or []) if job_data else []
 
@@ -53,6 +66,7 @@ def run_job(job_id: str, text: str, lang: str):
                 model_name=model_name,
                 reasoning_effort=reasoning_effort,
                 auto_sentence_deep_dive=auto_sentence_deep_dive,
+                auto_translation_guidance=auto_translation_guidance,
                 page_done_callback=_persist_page,
             )
         else:

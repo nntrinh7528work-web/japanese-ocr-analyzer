@@ -1,6 +1,6 @@
 """Text-to-Speech engine using edge-tts (expressive Azure neural voices).
 
-Provides audio generation for Japanese and English dialogue turns.
+Provides audio generation for Japanese, English, and Vietnamese learning text.
 Includes caching to avoid regenerating audio for the same text.
 """
 
@@ -24,6 +24,11 @@ VOICES = {
         "A": "en-US-EmmaNeural",     # Natural Female (US)
         "B": "en-US-BrianNeural",    # Natural Male (US)
         "default": "en-US-EmmaNeural"
+    },
+    "vi": {
+        "A": "vi-VN-HoaiMyNeural",
+        "B": "vi-VN-NamMinhNeural",
+        "default": "vi-VN-HoaiMyNeural"
     }
 }
 
@@ -59,7 +64,8 @@ def text_to_speech(
         return None
 
     # Normalise language code
-    lang_key = "en" if "en" in lang.lower() else "ja"
+    normalized_lang = str(lang or "ja").lower()
+    lang_key = "vi" if "vi" in normalized_lang else ("en" if "en" in normalized_lang else "ja")
     
     # Select voice
     voice_map = VOICES.get(lang_key, VOICES["ja"])
@@ -82,7 +88,7 @@ def text_to_speech(
         try:
             from gtts import gTTS
             import io
-            gtts_lang = "en" if lang_key == "en" else "ja"
+            gtts_lang = lang_key
             tts = gTTS(text=text.strip(), lang=gtts_lang, slow=slow)
             buffer = io.BytesIO()
             tts.write_to_fp(buffer)

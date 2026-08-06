@@ -88,3 +88,39 @@ def test_sentence_job_merges_without_replacing_main_analysis_or_double_counting(
     assert changed_again is False
     assert state["analysis"]["summary"] == "main stays"
     assert state["analysis"]["sentence_analysis_usage"]["output_tokens"] == 6
+
+
+def test_guidance_job_merges_without_replacing_main_analysis():
+    state = {
+        "analysis": {
+            "summary": "main",
+            "analysis_language": "english",
+            "page_analyses": [{"page_index": 1, "translation_guidance": [], "vocabulary_all": []}],
+        }
+    }
+    job = {
+        "status": "done",
+        "lang": "guidance_en",
+        "session_id": "mine",
+        "result": {
+            "job_kind": "translation_guidance",
+            "page_index": 1,
+            "analysis_language": "english",
+            "model_used": "gemini-test",
+            "batch_results": [
+                {
+                    "batch_index": 1,
+                    "rows": [{"sentence_id": "p1-s1", "ordinal": 1, "original": "Text.", "translations": {"natural": "Dịch."}}],
+                    "usage": {"input_tokens": 1, "output_tokens": 2},
+                    "error": None,
+                }
+            ],
+        },
+    }
+
+    status, changed = sync_job_state(state, "guide-job", job, "mine")
+
+    assert status == "done"
+    assert changed is True
+    assert state["analysis"]["summary"] == "main"
+    assert state["analysis"]["translation_guidance_usage"]["output_tokens"] == 2

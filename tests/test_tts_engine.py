@@ -54,6 +54,18 @@ class TestTextToSpeech(unittest.TestCase):
             text_to_speech("テスト", lang="ja", slow=True)
             mock_cls.assert_called_once_with("テスト", "ja-JP-NanamiNeural", rate="-20%")
 
+    def test_vietnamese_voice(self):
+        from modules.tts_engine import text_to_speech
+
+        fake_module, mock_cls = self._setup_edge_tts_mock()
+        with patch.dict(sys.modules, {"edge_tts": fake_module}):
+            result = text_to_speech("Đây là bản dịch.", lang="vi")
+
+        self.assertEqual(result, b"fake_audio_data")
+        mock_cls.assert_called_once_with(
+            "Đây là bản dịch.", "vi-VN-HoaiMyNeural", rate="+0%"
+        )
+
 
 class TestGenerateDialogueAudio(unittest.TestCase):
     """Tests for generate_dialogue_audio function."""

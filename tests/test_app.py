@@ -157,8 +157,23 @@ def test_app_renders_sentence_card_hiragana_and_hidden_answers():
         "analysis_language": "japanese", "vocabulary_all": [], "vocabulary_important": [],
         "kanji_analysis": [], "connectors": [], "grammar_points": [], "sentence_patterns": [],
         "full_markdown": "# Báo cáo", "usage": {},
-        "sentence_catalog": [{"sentence_id": "p1-s1", "ordinal": 1, "original": item["edited_text"], "analyzed": True}],
+        "sentence_catalog": [{"sentence_id": "p1-s1", "ordinal": 1, "original": item["edited_text"], "analyzed": True, "eligible": True, "complexity_score": 7}],
         "sentence_breakdowns": [breakdown], "sentence_analysis_usage": {"input_tokens": 2, "output_tokens": 3},
+        "translation_guidance": [
+            {
+                "sentence_id": "p1-s1", "ordinal": 1, "original": item["edited_text"],
+                "reading": "あめがふっているので、でかけません。",
+                "translations": {
+                    "chunked": "Vì trời mưa / không ra ngoài",
+                    "literal": "Vì trời đang mưa, không ra ngoài.",
+                    "natural": "Vì trời mưa nên tôi không ra ngoài.",
+                },
+                "key_points": [
+                    {"label": "Từ nối nguyên nhân", "source": "ので", "explanation_vi": "Nối lý do với kết quả."}
+                ],
+                "translation_steps": [], "related_analysis": [], "ocr_warning": "",
+            }
+        ],
     }
     app = AppTest.from_file("app.py")
     app.session_state["image_items"] = [item]
@@ -177,9 +192,14 @@ def test_app_renders_sentence_card_hiragana_and_hidden_answers():
 
     assert not app.exception
     labels = [expander.label for expander in app.get("expander")]
-    assert any("Câu 1 · Tự động" in label for label in labels)
+    assert "Chi tiết dịch và phân tích câu 1" in labels
     assert "Phân tích thêm câu khác" in labels
     assert any(toggle.label == "Hiện đáp án" and toggle.value is False for toggle in app.toggle)
+    assert any(toggle.label == "Nói chậm nguyên văn" for toggle in app.toggle)
+    button_labels = [button.label for button in app.button]
+    assert "Nghe nguyên văn" in button_labels
+    assert "Nghe bản dịch tiếng Việt" in button_labels
     markdown_values = [item.value for item in app.markdown]
-    assert any("あめがふっているので" in value for value in markdown_values)
+    assert any("Từ nối nguyên nhân" in value for value in markdown_values)
     assert any("Mệnh đề nguyên nhân" in value for value in markdown_values)
+    assert any("あめがふっているので" in item.value for item in app.caption)

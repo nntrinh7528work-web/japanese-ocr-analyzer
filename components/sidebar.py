@@ -87,6 +87,13 @@ def render_sidebar(
         )
         st.session_state["auto_sentence_deep_dive"] = auto_sentence_deep_dive
 
+        auto_translation_guidance = st.toggle(
+            "Tự động tạo hướng dẫn dịch từng câu",
+            value=bool(st.session_state.get("auto_translation_guidance", True)),
+            help="Tạo bản dịch và 1-3 gợi ý giáo viên cho mọi câu OCR sau phân tích chính.",
+        )
+        st.session_state["auto_translation_guidance"] = auto_translation_guidance
+
     if st.session_state.get("_last_analysis_language") not in (None, analysis_language):
         clear_analysis_fn()
     st.session_state["_last_analysis_language"] = analysis_language
@@ -135,6 +142,7 @@ def render_sidebar(
         "reasoning_effort": reasoning_effort,
         "analysis_language": analysis_language,
         "auto_sentence_deep_dive": auto_sentence_deep_dive,
+        "auto_translation_guidance": auto_translation_guidance,
         "billing_tier": billing_tier,
         "budget_jpy": budget_jpy,
         "spent_before_jpy": spent_before_jpy,
