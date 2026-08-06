@@ -455,14 +455,21 @@ def guidance_markdown(page: dict[str, Any]) -> str:
                 lines.append(f"- {point.get('label', '')} - `{point.get('source', '')}`: {point.get('explanation_vi', '')}")
         if row.get("translation_steps"):
             lines.append("**Thứ tự dịch đề xuất:**")
-            for step in row["translation_steps"]:
-                lines.append(f"- {step.get('order', '')}. `{step.get('source_chunk', '')}` → {step.get('meaning_vi', '')}: {step.get('advice_vi', '')}")
+            for index, step in enumerate(row["translation_steps"], 1):
+                order = step.get("order") or index
+                lines.append(
+                    f"{order}. `{step.get('source_chunk', '')}` → "
+                    f"{step.get('meaning_vi', '')}: {step.get('advice_vi', '')}"
+                )
         if row.get("ocr_warning"):
             lines.append(f"**Cảnh báo OCR:** {row['ocr_warning']}")
         if row.get("related_analysis"):
             lines.append("**Phân tích liên quan:**")
             for ref in row["related_analysis"]:
-                lines.append(f"- [{ref.get('category_label', '')}] {ref.get('label', '')}: {ref.get('summary', '')}")
+                lines.append(
+                    f"- **{ref.get('category_label', '')}: {ref.get('label', '')}**: "
+                    f"{ref.get('summary', '')}"
+                )
         if deep:
             lines.extend(_deep_markdown_lines(deep))
     return "\n".join(lines).strip()

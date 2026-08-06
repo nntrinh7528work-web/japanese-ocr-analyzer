@@ -105,6 +105,49 @@ def test_changed_analysis_creates_a_new_immutable_external_id():
     assert first["external_id"] != second["external_id"]
 
 
+def test_incomplete_page_analysis_is_marked_partial_and_reports_missing_page():
+    items = _items() + [
+        {
+            "id": "two",
+            "name": "lesson-2.png",
+            "edited_text": "二ページ目。",
+            "ocr_result": {"ocr_notes": [], "usage": {}},
+        }
+    ]
+
+    payload = notion_sync.build_notion_sync_payload("session-a", items, _analysis())
+    properties = notion_sync._lesson_properties(payload)
+
+    assert payload["page_count"] == 2
+    assert payload["analyzed_page_count"] == 1
+    assert payload["missing_page_indices"] == [2]
+    assert payload["sync_status"] == "Một phần"
+    assert "Trang chưa có kết quả: 2" in payload["markdown"]
+    assert properties["Số trang"]["number"] == 2
+    assert properties["Số trang đã phân tích"]["number"] == 1
+    assert properties["Trạng thái"]["select"]["name"] == "Một phần"
+
+
+def test_notion_property_previews_strip_markdown_without_changing_source_json():
+    item = {
+        "title": "**響**",
+        "external_id": "learn:one",
+        "type": "Kanji",
+        "language": "japanese",
+        "meaning_vi": "**vang vọng**",
+        "formation": r"\~てくれる",
+        "source_json": '{"kanji":"**響**"}',
+        "source_checksum": "checksum",
+    }
+
+    properties = notion_sync._item_properties(item, "lesson", None)
+
+    assert properties["Tên"]["title"][0]["text"]["content"] == "響"
+    assert properties["Nghĩa tiếng Việt"]["rich_text"][0]["text"]["content"] == "vang vọng"
+    assert properties["Công thức / Cấu tạo"]["rich_text"][0]["text"]["content"] == "~てくれる"
+    assert "**響**" in properties["Dữ liệu nguồn"]["rich_text"][0]["text"]["content"]
+
+
 def test_extracts_all_vocabulary_and_sentence_patterns_with_study_fields():
     analysis = _analysis()
     page = analysis["page_analyses"][0]

@@ -256,6 +256,15 @@ def _text(content: Any, limit: int = 2000) -> list[dict]:
     return [{"type": "text", "text": {"content": value}}] if value else []
 
 
+def _plain_preview(content: Any) -> str:
+    """Remove Markdown decoration from searchable Notion property previews."""
+    value = str(content or "").strip()
+    value = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", value)
+    value = value.replace("**", "").replace("__", "").replace("`", "")
+    value = re.sub(r"\\([\\`*_\[\]{}()#+\-.!~>|])", r"\1", value)
+    return re.sub(r"[ \t]+", " ", value).strip()
+
+
 def _select_options(names: list[str]) -> dict:
     colors = ["blue", "green", "purple", "orange", "pink", "yellow", "gray"]
     return {"options": [{"name": name, "color": colors[index % len(colors)]} for index, name in enumerate(names)]}
@@ -268,6 +277,7 @@ def _lesson_schema() -> dict:
         "Ngôn ngữ": {"select": _select_options(["Tiếng Nhật", "Tiếng Anh"])},
         "Ngày phân tích": {"date": {}},
         "Số trang": {"number": {"format": "number"}},
+        "Số trang đã phân tích": {"number": {"format": "number"}},
         "Nguồn file": {"rich_text": {}},
         "Tóm tắt": {"rich_text": {}},
         "Model": {"rich_text": {}},
@@ -783,8 +793,8 @@ def _raw_analysis_archive(
 
 
 def _row_preview(row: dict, title_keys: tuple[str, ...], detail_keys: tuple[str, ...]) -> str:
-    title = _first(row, *title_keys)
-    detail = _first(row, *detail_keys)
+    title = _plain_preview(_first(row, *title_keys))
+    detail = _plain_preview(_first(row, *detail_keys))
     if title and detail:
         return f"{title}: {detail}"
     return title or detail
@@ -818,17 +828,18 @@ def _analysis_column_snapshot(
         counts["sentence_count"] += len(catalog) or len(guidance_rows)
         for row in guidance_rows:
             translations = row.get("translations") or {}
-            natural = str(translations.get("natural") or "").strip()
+            natural = _plain_preview(translations.get("natural"))
             key_points = row.get("key_points") or []
             points = "; ".join(
-                _first(point, "explanation_vi", "label", "source") for point in key_points
+                _plain_preview(_first(point, "explanation_vi", "label", "source"))
+                for point in key_points
             )
             sentence_id = str(row.get("sentence_id") or prefix)
             if natural or points:
                 sections["guidance"].append(f"{sentence_id}: {natural}" + (f" | {points}" if points else ""))
             if natural:
                 sections["natural"].append(f"{sentence_id}: {natural}")
-            warning = str(row.get("ocr_warning") or "").strip()
+            warning = _plain_preview(row.get("ocr_warning"))
             if warning:
                 sections["warnings"].append(f"{sentence_id}: {warning}")
 
@@ -874,13 +885,13 @@ def _analysis_column_snapshot(
         breakdown_rows = page.get("sentence_breakdowns") or []
         counts["long_sentence_count"] += len(breakdown_rows)
         for row in breakdown_rows:
-            natural = str((row.get("translations") or {}).get("natural") or "").strip()
+            natural = _plain_preview((row.get("translations") or {}).get("natural"))
             sections["sentences"].append(
                 f"{row.get('sentence_id') or prefix}: {_first(row, 'original')}"
                 + (f" → {natural}" if natural else "")
             )
         for warning in page.get("ocr_corrections") or []:
-            sections["warnings"].append(f"{prefix}: {warning}")
+            sections["warnings"].append(f"{prefix}: {_plain_preview(warning)}")
     return {**{key: "\n".join(values) for key, values in sections.items()}, **counts}
 
 
@@ -898,6 +909,21 @@ def build_notion_sync_payload(
     created = created_at or dt.datetime.now(dt.timezone.utc)
     language = str(analysis.get("analysis_language") or "japanese")
     pages = analysis.get("page_analyses") or [analysis]
+    source_page_count = len(items) or len(pages)
+    analyzed_page_count = len(pages)
+    analyzed_page_indices = {
+        int(page.get("page_index", index) or index)
+        for index, page in enumerate(pages, 1)
+    }
+    missing_page_indices = [
+        index for index in range(1, source_page_count + 1)
+        if index not in analyzed_page_indices
+    ]
+    sync_status = (
+        "Hoàn tất"
+        if source_page_count > 0 and analyzed_page_count == source_page_count and not missing_page_indices
+        else "Một phần"
+    )
     names = [str(item.get("name") or "") for item in items if item.get("name")]
     first_name = names[0].rsplit(".", 1)[0] if names else "Bài phân tích"
     title = first_name if len(names) <= 1 else f"{first_name} và {len(names) - 1} trang khác"
@@ -909,10 +935,19 @@ def build_notion_sync_payload(
     external_id = f"analysis:{source_hash}:{analysis_hash[:16]}"
     columns = _analysis_column_snapshot(items, analysis)
     app_url = PUBLIC_APP_URL.rstrip("/") + "/?" + urlencode({"session": session_id})
+    status_note = ""
+    if sync_status == "Một phần":
+        missing_label = ", ".join(str(index) for index in missing_page_indices) or "không xác định"
+        status_note = (
+            "> ⚠️ Đồng bộ một phần: tài liệu có "
+            f"{source_page_count} trang nguồn nhưng mới có kết quả của {analyzed_page_count} trang. "
+            f"Trang chưa có kết quả: {missing_label}."
+        )
     markdown = "\n\n".join(
         part for part in (
             f"# {title}",
             f"> Nguồn OCR: {', '.join(names) or 'Không rõ'}",
+            status_note,
             (
                 f"> Bản JSON gốc được đính kèm với SHA-256 `{analysis_hash}`. "
                 "Các cột chỉ là bản tóm lược để tìm kiếm; nội dung gốc không bị diễn giải lại."
@@ -927,7 +962,10 @@ def build_notion_sync_payload(
         "title": title,
         "language": language,
         "created_at": created.isoformat(),
-        "page_count": len(pages),
+        "page_count": source_page_count,
+        "analyzed_page_count": analyzed_page_count,
+        "missing_page_indices": missing_page_indices,
+        "sync_status": sync_status,
         "source_names": names,
         "summary": summary,
         "model": str(analysis.get("model_used") or ""),
@@ -1000,13 +1038,14 @@ def _lesson_properties(payload: dict) -> dict:
         "Ngôn ngữ": {"select": {"name": "Tiếng Nhật" if payload["language"] == "japanese" else "Tiếng Anh"}},
         "Ngày phân tích": {"date": {"start": payload["created_at"]}},
         "Số trang": {"number": payload["page_count"]},
+        "Số trang đã phân tích": {"number": payload.get("analyzed_page_count", payload["page_count"])},
         "Nguồn file": {"rich_text": _text(", ".join(payload.get("source_names") or []))},
         "Tóm tắt": {"rich_text": _text(payload.get("summary"))},
         "Model": {"rich_text": _text(payload.get("model"))},
         "Tổng token": {"number": payload.get("total_tokens", 0)},
         "Chi phí JPY": {"number": round(float(payload.get("cost_jpy", 0)), 4)},
         "OCR hash": {"rich_text": _text(payload["source_hash"])},
-        "Trạng thái": {"select": {"name": "Hoàn tất"}},
+        "Trạng thái": {"select": {"name": payload.get("sync_status") or "Hoàn tất"}},
         "App URL": {"url": payload.get("app_url") or None},
         "Đồng bộ lúc": {"date": {"start": dt.datetime.now(dt.timezone.utc).isoformat()}},
         "Analysis hash": {"rich_text": _text(payload.get("analysis_hash"))},
@@ -1121,30 +1160,30 @@ def _item_properties(item: dict, lesson_page_id: str, existing: dict | None) -> 
     occurrence = _property_number(existing or {}, "Số lần xuất hiện") + occurrence_delta
     difficulty = _safe_difficulty(str(item.get("difficulty") or ""))
     properties = {
-        "Tên": {"title": _text(item.get("title"), 300)},
+        "Tên": {"title": _text(_plain_preview(item.get("title")), 300)},
         "External ID": {"rich_text": _text(item.get("external_id"))},
         "Loại": {"select": {"name": item.get("type")}},
         "Ngôn ngữ": {"select": {"name": "Tiếng Nhật" if item.get("language") == "japanese" else "Tiếng Anh"}},
-        "Cách đọc": {"rich_text": _text(item.get("reading"))},
-        "Nghĩa tiếng Việt": {"rich_text": _text(item.get("meaning_vi"))},
-        "Ví dụ": {"rich_text": _text(item.get("example"))},
-        "Hiragana ví dụ": {"rich_text": _text(item.get("example_reading"))},
-        "Bản dịch": {"rich_text": _text(item.get("translation_vi"))},
+        "Cách đọc": {"rich_text": _text(_plain_preview(item.get("reading")))},
+        "Nghĩa tiếng Việt": {"rich_text": _text(_plain_preview(item.get("meaning_vi")))},
+        "Ví dụ": {"rich_text": _text(_plain_preview(item.get("example")))},
+        "Hiragana ví dụ": {"rich_text": _text(_plain_preview(item.get("example_reading")))},
+        "Bản dịch": {"rich_text": _text(_plain_preview(item.get("translation_vi")))},
         "ID câu nguồn": {"rich_text": _text(item.get("sentence_id"))},
         "Trang": {"number": int(item.get("page_index") or 0)},
         "Bài phân tích": {"relation": relations[:100]},
         "Số lần xuất hiện": {"number": occurrence or 1},
         "Quan trọng": {"checkbox": bool(item.get("important"))},
-        "Từ loại": {"rich_text": _text(item.get("part_of_speech"))},
-        "Từ gốc": {"rich_text": _text(item.get("base_form"))},
-        "Công thức / Cấu tạo": {"rich_text": _text(item.get("formation"))},
-        "Sắc thái / Chức năng": {"rich_text": _text(item.get("nuance"))},
-        "So sánh": {"rich_text": _text(item.get("comparison"))},
-        "Vai trò / Liên kết": {"rich_text": _text(item.get("linked_parts"))},
-        "Dịch theo cụm": {"rich_text": _text(item.get("chunked_translation"))},
-        "Dịch sát": {"rich_text": _text(item.get("literal_translation"))},
+        "Từ loại": {"rich_text": _text(_plain_preview(item.get("part_of_speech")))},
+        "Từ gốc": {"rich_text": _text(_plain_preview(item.get("base_form")))},
+        "Công thức / Cấu tạo": {"rich_text": _text(_plain_preview(item.get("formation")))},
+        "Sắc thái / Chức năng": {"rich_text": _text(_plain_preview(item.get("nuance")))},
+        "So sánh": {"rich_text": _text(_plain_preview(item.get("comparison")))},
+        "Vai trò / Liên kết": {"rich_text": _text(_plain_preview(item.get("linked_parts")))},
+        "Dịch theo cụm": {"rich_text": _text(_plain_preview(item.get("chunked_translation")))},
+        "Dịch sát": {"rich_text": _text(_plain_preview(item.get("literal_translation")))},
         "Dịch tự nhiên": {
-            "rich_text": _text(item.get("natural_translation") or item.get("translation_vi"))
+            "rich_text": _text(_plain_preview(item.get("natural_translation") or item.get("translation_vi")))
         },
         "Điểm phức tạp": {"number": float(item.get("complexity_score") or 0)},
         "Dữ liệu nguồn": {"rich_text": _text(item.get("source_json"))},

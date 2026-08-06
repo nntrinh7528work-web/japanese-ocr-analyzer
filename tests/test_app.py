@@ -53,6 +53,33 @@ def test_app_renders_two_independent_image_flows():
     assert "Ảnh/trang PDF trong bộ phân tích (2)" in [heading.value for heading in app.subheader]
 
 
+def test_app_blocks_analysis_until_every_uploaded_page_has_ocr_text():
+    ready = create_image_item(_image_bytes("white"), "page-1.png")
+    ready["ocr_result"] = {
+        "clean_text": "一ページ目。",
+        "ocr_notes": [],
+        "usage": {},
+        "text_direction": "horizontal",
+        "has_furigana": False,
+        "confidence": "high",
+    }
+    ready["edited_text"] = "一ページ目。"
+    pending = create_image_item(_image_bytes("black"), "page-2.png")
+
+    app = AppTest.from_file("app.py")
+    app.session_state["image_items"] = [ready, pending]
+    app.session_state["analysis"] = None
+    app.session_state["upload_messages"] = []
+    app.session_state["upload_errors"] = []
+    app.session_state["uploader_version"] = 0
+    app.session_state["camera_version"] = 0
+    app.run(timeout=20)
+
+    analyze = next(button for button in app.button if button.label == "🧠 Phân tích bằng Gemini")
+    assert analyze.disabled is True
+    assert any("còn trang chưa có OCR" in message.value for message in app.error)
+
+
 def test_app_renders_analysis_download_options():
     item = create_image_item(_image_bytes("white"), "page-1.png")
     item["ocr_result"] = {

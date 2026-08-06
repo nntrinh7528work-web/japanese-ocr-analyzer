@@ -169,3 +169,28 @@ def test_guidance_markdown_inlines_deep_analysis_once():
     assert markdown.count("Đối chiếu OCR và giáo viên hướng dẫn dịch") == 1
     assert markdown.count("Giải mã câu dài") == 1
     assert markdown.count("Sentence number 1.") == 1
+
+
+def test_guidance_markdown_renders_translation_steps_as_a_numbered_list():
+    guidance = normalize_guidance(
+        {
+            "translations": {"natural": "Bản dịch."},
+            "translation_steps": [
+                {"order": 1, "source_chunk": "First", "meaning_vi": "Đầu tiên", "advice_vi": "Dịch trước"},
+                {"order": 2, "source_chunk": "Second", "meaning_vi": "Tiếp theo", "advice_vi": "Dịch sau"},
+            ],
+        },
+        _sentence(1),
+        "english",
+    )
+    page = {
+        "sentence_catalog": [_sentence(1)],
+        "translation_guidance": [guidance],
+        "sentence_breakdowns": [],
+    }
+
+    markdown = guidance_markdown(page)
+
+    assert "1. `First`" in markdown
+    assert "2. `Second`" in markdown
+    assert "- 1. `First`" not in markdown

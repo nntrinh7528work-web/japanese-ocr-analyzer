@@ -248,9 +248,10 @@ def _render_translation_guidance(
                     st.markdown(f"**Dịch sát toàn câu:** {translations.get('literal') or 'Chưa có'}")
                     if row.get("translation_steps"):
                         st.markdown("**Thứ tự dịch đề xuất**")
-                        for step in row["translation_steps"]:
+                        for index, step in enumerate(row["translation_steps"], 1):
+                            order = step.get("order") or index
                             st.markdown(
-                                f"- {step.get('order')}. `{step.get('source_chunk')}` → "
+                                f"{order}. `{step.get('source_chunk')}` → "
                                 f"{step.get('meaning_vi')}: {step.get('advice_vi')}"
                             )
                     if row.get("ocr_warning"):
@@ -400,7 +401,7 @@ def render_ocr_tab(
 
     with controls_left:
         if st.button("🔍 OCR tất cả ảnh chưa xử lý", type="primary", use_container_width=True):
-            pending = [item for item in items if not item["ocr_result"]]
+            pending = [item for item in items if not str(item.get("edited_text") or "").strip()]
             if not pending:
                 st.info("Tất cả ảnh/trang đã có OCR.")
             else:
@@ -551,6 +552,12 @@ def render_ocr_tab(
     st.subheader("🧠 Phân tích theo từng trang")
     analysis_text = combined_text(items)
     pages_to_analyze = analysis_pages_fn(items)
+    missing_ocr_items = [
+        (index, item.get("name") or f"Trang {index}")
+        for index, item in enumerate(items, 1)
+        if not str(item.get("edited_text") or "").strip()
+    ]
+    all_pages_ready = not missing_ocr_items and len(pages_to_analyze) == len(items)
     partial = st.session_state.partial_page_analyses
 
     reasoning_effort = config.get("reasoning_effort", "standard")
@@ -558,6 +565,12 @@ def render_ocr_tab(
     if not analysis_text:
         st.warning("Chưa có văn bản OCR. Hãy OCR ít nhất một ảnh trước khi phân tích.")
     else:
+        if missing_ocr_items:
+            missing_names = ", ".join(f"trang {index} ({name})" for index, name in missing_ocr_items)
+            st.error(
+                "Chưa thể phân tích toàn bộ tài liệu vì còn trang chưa có OCR: "
+                f"{missing_names}. Hãy bấm 'OCR tất cả ảnh chưa xử lý' rồi thử lại."
+            )
         with st.expander("Xem văn bản OCR theo thứ tự trang"):
             st.text_area("Nội dung gộp theo thứ tự ảnh", value=analysis_text, height=260, disabled=True)
             st.caption(
@@ -632,7 +645,12 @@ def render_ocr_tab(
                 st.error(f"❌ Lỗi tự động phân tích tiếp tục: {exc}")
 
         if analysis_language == "japanese":
-            if st.button("🧠 Phân tích bằng Gemini", type="primary", use_container_width=True):
+            if st.button(
+                "🧠 Phân tích bằng Gemini",
+                type="primary",
+                use_container_width=True,
+                disabled=not all_pages_ready,
+            ):
                 clear_analysis_fn()
                 detected_lang = "pdf_ja"
                 input_data = {
@@ -661,7 +679,12 @@ def render_ocr_tab(
                 st.info("Bạn có thể đóng tab này — kết quả sẽ được lưu lại. Mở lại link có job_id để xem kết quả.")
                 st.rerun()
         else:
-            if st.button("🧠 Phân tích từng trang đã OCR", type="primary", use_container_width=True):
+            if st.button(
+                "🧠 Phân tích từng trang đã OCR",
+                type="primary",
+                use_container_width=True,
+                disabled=not all_pages_ready,
+            ):
                 clear_analysis_fn()
                 detected_lang = "pdf_en"
                 input_data = {
