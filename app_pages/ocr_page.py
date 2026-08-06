@@ -789,6 +789,10 @@ def render_ocr_tab(
 
             st.divider()
             st.markdown("**Lưu tự động vào Notion**")
+            st.caption(
+                "Mỗi kết quả khác nhau được giữ thành một phiên bản riêng, kèm file JSON gốc "
+                "và mã SHA-256. Các cột Notion là bản tóm lược để lọc và ôn tập."
+            )
             notion_state = notion_connection_state()
             sync_run = session_store.get_notion_sync_for_source(
                 st.session_state.session_id,
@@ -802,7 +806,7 @@ def render_ocr_tab(
             elif sync_run:
                 status = sync_run.get("status")
                 if status == "done":
-                    st.success("Đã lưu bài và các mục cần học vào Notion.")
+                    st.success("Đã lưu bài phân tích nguyên trạng và các mục cần học vào Notion.")
                 elif status == "partial":
                     st.warning(sync_run.get("error") or "Bài đã lưu nhưng còn mục cần thử lại.")
                 elif status in ("pending", "queued", "running"):

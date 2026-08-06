@@ -53,6 +53,16 @@ Sau khi phân tích hoàn tất, app lưu kết quả trước rồi đồng b�
 Lỗi quyền hoặc mạng không làm mất kết quả Gemini; giao diện có trạng thái, link
 mở trang Notion và nút thử lại.
 
+Mỗi kết quả đồng bộ được lưu thành một phiên bản độc lập theo `OCR hash` và
+`Analysis hash`; chạy lại cùng OCR với kết quả mới không ghi đè bài cũ. Trang
+`Bài phân tích` chứa nội dung đầy đủ và file JSON gốc có SHA-256 để kiểm tra tính
+toàn vẹn. Các cột OCR, hướng dẫn dịch, bản dịch, từ vựng, kanji/cụm từ, từ nối,
+ngữ pháp, mẫu câu, câu dài, token và chi phí là bản tóm lược để tìm kiếm.
+
+Bảng `Mục cần học` nhận toàn bộ từ vựng cùng kanji, cụm từ, từ nối, ngữ pháp,
+mẫu câu và câu dài. App không ghi đè các cột học tập do người dùng quản lý như
+`Trạng thái`, `Ngày ôn tiếp`, `Lần ôn gần nhất` và `Số lần ôn` khi đồng bộ lại.
+
 ## Luồng nhiều ảnh
 
 - Chọn nhiều ảnh trong một lần hoặc bổ sung ảnh sau đó.

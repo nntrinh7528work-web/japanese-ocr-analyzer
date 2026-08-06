@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import json
 
 import pytest
 
@@ -79,11 +81,59 @@ def test_build_payload_extracts_high_value_rows_and_full_markdown():
     assert "Phân tích" in payload["markdown"]
     assert "Trang 1: lesson.png" in payload["markdown"]
     assert {row["type"] for row in payload["learning_items"]} == {
-        "Từ khó", "Kanji", "Từ nối", "Ngữ pháp", "Câu dài"
+        "Từ vựng", "Kanji", "Từ nối", "Ngữ pháp", "Câu dài"
     }
     sentence = next(row for row in payload["learning_items"] if row["type"] == "Câu dài")
     assert sentence["sentence_id"] == "p1-s1"
     assert sentence["translation_vi"].startswith("Vì trời mưa")
+    raw = json.loads(payload["raw_json"])
+    assert raw["analysis"] == _analysis()
+    assert raw["sources"][0]["edited_text"] == "雨なので、予定を変更した。"
+    assert payload["analysis_hash"] == hashlib.sha256(payload["raw_json"].encode()).hexdigest()
+    assert payload["columns"]["long_sentence_count"] == 1
+    assert payload["columns"]["grammar_count"] == 1
+
+
+def test_changed_analysis_creates_a_new_immutable_external_id():
+    first = notion_sync.build_notion_sync_payload("session-a", _items(), _analysis())
+    changed = _analysis()
+    changed["page_analyses"][0]["summary"] = "Một kết quả phân tích mới."
+    second = notion_sync.build_notion_sync_payload("session-a", _items(), changed)
+
+    assert first["source_hash"] == second["source_hash"]
+    assert first["analysis_hash"] != second["analysis_hash"]
+    assert first["external_id"] != second["external_id"]
+
+
+def test_extracts_all_vocabulary_and_sentence_patterns_with_study_fields():
+    analysis = _analysis()
+    page = analysis["page_analyses"][0]
+    page["vocabulary_all"] = [
+        {"word": "予定", "reading": "よてい", "type": "danh từ", "meaning": "kế hoạch"}
+    ]
+    page["sentence_patterns"] = [
+        {"pattern": "理由 + ので + 結果", "components": "nguyên nhân + kết quả", "function": "nêu lý do"}
+    ]
+
+    rows = notion_sync.extract_learning_items(analysis)
+
+    vocab = next(row for row in rows if row["title"] == "予定")
+    pattern = next(row for row in rows if row["type"] == "Mẫu câu")
+    assert vocab["part_of_speech"] == "danh từ"
+    assert pattern["formation"] == "nguyên nhân + kết quả"
+    assert pattern["nuance"] == "nêu lý do"
+    assert vocab["source_checksum"]
+
+
+def test_detailed_vocabulary_does_not_double_count_the_same_occurrence():
+    analysis = _analysis()
+    page = analysis["page_analyses"][0]
+    page["vocabulary_all"] = [{"word": "変更", "reading": "へんこう", "meaning": "thay đổi"}]
+
+    row = next(item for item in notion_sync.extract_learning_items(analysis) if item["title"] == "変更")
+
+    assert row["important"] is True
+    assert row["occurrences_in_analysis"] == 1
 
 
 def test_extract_english_rows_includes_collocations_and_discourse_markers():
@@ -151,6 +201,83 @@ def test_client_retries_429_using_retry_after():
     assert 2 in sleeps
     assert len(http.calls) == 2
     assert http.calls[0][2]["headers"]["Notion-Version"] == "2026-03-11"
+
+
+def test_client_uploads_raw_json_as_a_notion_file():
+    http = _HTTP(
+        [
+            _Response(200, {"id": "upload-1", "status": "pending"}),
+            _Response(200, {"id": "upload-1", "status": "uploaded"}),
+        ]
+    )
+    client = notion_sync.NotionClient(
+        "secret-token", http=http, sleep=lambda _: None, monotonic=lambda: 10
+    )
+
+    result = client.upload_file("analysis.json", b'{"ok":true}', "application/json")
+
+    assert result["status"] == "uploaded"
+    assert http.calls[1][2]["files"]["file"][0] == "analysis.json"
+    assert "Content-Type" not in http.calls[1][2]["headers"]
+
+
+def test_schema_upgrade_adds_columns_and_preserves_existing_select_options():
+    class Client:
+        def __init__(self):
+            self.patch = None
+
+        def request(self, method, path, payload=None):
+            if method == "GET":
+                return {
+                    "properties": {
+                        "Tên": {"type": "title", "title": {}},
+                        "Loại": {
+                            "type": "select",
+                            "select": {"options": [{"id": "old", "name": "Từ khó", "color": "blue"}]},
+                        },
+                    }
+                }
+            self.patch = payload
+            return {}
+
+    client = Client()
+    notion_sync._ensure_data_source_schema(client, "items", notion_sync._item_schema())
+
+    properties = client.patch["properties"]
+    assert "Quan trọng" in properties
+    options = properties["Loại"]["select"]["options"]
+    assert {option.get("id") or option.get("name") for option in options} >= {"old", "Từ vựng", "Mẫu câu"}
+
+
+def test_upsert_lesson_attaches_the_exact_raw_json_archive():
+    class Client:
+        def __init__(self):
+            self.calls = []
+            self.uploaded = None
+
+        def request(self, method, path, payload=None):
+            self.calls.append((method, path, payload))
+            if path.endswith("/query"):
+                return {"results": []}
+            if method == "POST" and path == "/pages":
+                return {"id": "lesson-1", "url": "https://notion.so/lesson-1"}
+            if method == "PATCH" and path == "/pages/lesson-1" and payload.get("properties"):
+                return {"id": "lesson-1", "url": "https://notion.so/lesson-1"}
+            return {}
+
+        def upload_file(self, filename, content, content_type):
+            self.uploaded = (filename, content, content_type)
+            return {"id": "upload-1", "status": "uploaded"}
+
+    payload = notion_sync.build_notion_sync_payload("session-a", _items(), _analysis())
+    client = Client()
+
+    page = notion_sync._upsert_lesson(client, "lessons", payload)
+
+    assert page["id"] == "lesson-1"
+    assert client.uploaded[1] == payload["raw_json"].encode("utf-8")
+    attachment = client.calls[-1][2]["properties"]["Bản JSON gốc"]["files"][0]
+    assert attachment["file_upload"]["id"] == "upload-1"
 
 
 def test_learning_views_use_dynamic_today_filter():
@@ -238,7 +365,11 @@ def test_execute_sync_keeps_lesson_when_one_learning_item_fails(monkeypatch):
 
     monkeypatch.setattr(notion_sync, "_upsert_learning_item", _item)
 
-    result = notion_sync.execute_notion_sync(run, client=object())
+    class Client:
+        def request(self, method, path, payload=None):
+            return {"id": "lesson-page", "url": "https://notion.so/lesson"}
+
+    result = notion_sync.execute_notion_sync(run, client=Client())
 
     assert result["page_id"] == "lesson-page"
     assert len(result["item_errors"]) == 1
