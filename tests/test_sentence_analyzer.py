@@ -41,6 +41,46 @@ def test_ocr_line_wrap_does_not_split_one_sentence():
     assert "long, it remains" in rows[0]["original"]
 
 
+def test_blank_ocr_lines_and_commas_do_not_end_japanese_sentence():
+    rows = split_sentences(
+        "この技術は便利ですが、\n\n個人情報の扱いが分からないため、\n慎重に導入すべきです。次の文です。",
+        "japanese",
+        1,
+    )
+
+    assert len(rows) == 2
+    assert rows[0]["original"] == (
+        "この技術は便利ですが、 個人情報の扱いが分からないため、 慎重に導入すべきです。"
+    )
+
+
+def test_english_period_ends_sentence_even_when_next_sentence_is_lowercase():
+    rows = split_sentences(
+        "The first clause is long, and the second clause remains connected. next sentence starts lowercase.",
+        "english",
+        1,
+    )
+
+    assert [row["original"] for row in rows] == [
+        "The first clause is long, and the second clause remains connected.",
+        "next sentence starts lowercase.",
+    ]
+
+
+def test_japanese_ocr_ascii_period_ends_sentence_but_decimal_does_not():
+    rows = split_sentences(
+        "成功率は3.5パーセントです.次の説明です．最後です。",
+        "japanese",
+        1,
+    )
+
+    assert [row["original"] for row in rows] == [
+        "成功率は3.5パーセントです.",
+        "次の説明です．",
+        "最後です。",
+    ]
+
+
 def test_selection_enforces_page_and_document_caps_with_source_tie_break():
     catalog = {}
     for page_index in range(1, 8):

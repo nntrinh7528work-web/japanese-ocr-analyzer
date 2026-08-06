@@ -63,6 +63,8 @@ def response_usage(response: Any) -> dict[str, int]:
 
 
 def _is_english_period_boundary(text: str, index: int) -> bool:
+    if index + 1 < len(text) and text[index + 1] == ".":
+        return False
     prefix = text[: index + 1]
     token_match = re.search(r"(?:[A-Za-z](?:\.[A-Za-z])+\.|[A-Za-z]+\.)$", prefix)
     token = token_match.group(0).lower() if token_match else ""
@@ -72,19 +74,24 @@ def _is_english_period_boundary(text: str, index: int) -> bool:
         return False
     if index and index + 1 < len(text) and text[index - 1].isdigit() and text[index + 1].isdigit():
         return False
-    rest = text[index + 1 :]
-    next_match = re.search(r"\S", rest)
-    if not next_match:
-        return True
-    next_char = rest[next_match.start()]
-    return next_char.isupper() or next_char.isdigit() or next_char in "\"'“‘(["
+    if (
+        index
+        and index + 1 < len(text)
+        and text[index - 1].isalnum()
+        and text[index + 1].isalnum()
+        and text[index - 1].isascii()
+        and text[index + 1].isascii()
+    ):
+        return False
+    return True
 
 
 def split_sentences(text: str, language: str, page_index: int) -> list[dict[str, Any]]:
     """Split source text in order and assign stable page/sentence IDs."""
     source = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
-    source = re.sub(r"(?<!\n)\n(?!\n)", " ", source)
-    source = re.sub(r"\n{2,}", "\n", source)
+    # OCR often inserts visual line and paragraph breaks inside one grammatical
+    # sentence. Sentence boundaries are punctuation-driven, never layout-driven.
+    source = re.sub(r"\s*\n+\s*", " ", source)
     source = re.sub(r"[ \t]+", " ", source).strip()
     if not source:
         return []
@@ -106,12 +113,12 @@ def split_sentences(text: str, language: str, page_index: int) -> list[dict[str,
         if not stack:
             if lang == "japanese" and char in "。！？":
                 boundary = True
+            elif lang == "japanese" and char in ".．":
+                boundary = _is_english_period_boundary(source, index)
             elif lang == "english" and char in "?!":
                 boundary = True
             elif lang == "english" and char == ".":
                 boundary = _is_english_period_boundary(source, index)
-            elif char == "\n" and "".join(buffer).strip():
-                boundary = True
 
         if boundary:
             sentence = "".join(buffer).strip()
