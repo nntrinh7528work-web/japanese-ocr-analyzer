@@ -9,6 +9,16 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable
 
+from modules.sentence_analyzer import (
+    ZERO_USAGE,
+    aggregate_sentence_usage,
+    aggregate_sentence_runs,
+    analyze_sentence_batch,
+    attach_sentence_data,
+    build_sentence_catalog,
+    select_auto_sentences,
+)
+
 
 PROMPT_DIR = Path(__file__).resolve().parents[1] / "prompts"
 PROMPT_PATHS = {
@@ -713,6 +723,7 @@ def analyze_single_page(
     page_analysis["page_index"] = page["page_index"]
     page_analysis["page_name"] = page["page_name"]
     page_analysis["source_label"] = f"Trang {page['page_index']}: {page['page_name']}"
+    page_analysis["source_text"] = page["text"]
     return page_analysis
 
 
@@ -755,6 +766,15 @@ def merge_page_analyses(
     merged["full_markdown"] = "\n\n---\n\n".join(
         f"# {page['source_label']}\n\n{page['full_markdown']}" for page in ordered_pages
     )
+    merged["sentence_analysis_usage"] = aggregate_sentence_usage(ordered_pages)
+    merged["sentence_analysis_runs"] = aggregate_sentence_runs(ordered_pages)
+    sentence_models = [page.get("sentence_analysis_model") for page in ordered_pages if page.get("sentence_analysis_model")]
+    merged["sentence_analysis_model"] = sentence_models[0] if sentence_models else None
+    merged["sentence_analysis_errors"] = [
+        {"page_index": page.get("page_index"), "error": page.get("sentence_analysis_error")}
+        for page in ordered_pages
+        if page.get("sentence_analysis_error")
+    ]
     merged["model_used"] = ordered_pages[0].get("model_used", "gemini-3.5-flash") if ordered_pages else "gemini-3.5-flash"
     return merged
 
@@ -784,6 +804,7 @@ def run_page_analyses(
     max_workers: int = 3,
     model_name: str | None = None,
     reasoning_effort: str = "standard",
+    auto_sentence_deep_dive: bool = True,
 ) -> dict[str, Any]:
     """Analyze each OCR page concurrently, then return a merged report with per-page details.
 
@@ -796,41 +817,87 @@ def run_page_analyses(
         max_workers: Maximum number of concurrent API calls.
         model_name: Optional Gemini text model name to use.
         reasoning_effort: ``"standard"`` or ``"deep"``.
+        auto_sentence_deep_dive: Analyze up to 3 complex sentences per page and
+            15 across the document in a separate, non-blocking Gemini phase.
     """
     language = _analysis_language(analysis_language)
     prepared_pages = prepare_pages(pages)
     model = _init_model(model_name) if model_name else _init_model()
     total = len(prepared_pages)
+    catalogs = build_sentence_catalog(prepared_pages, language)
+    selected = select_auto_sentences(catalogs) if auto_sentence_deep_dive else {}
 
-    if total == 1:
-        # Fast path: no threading overhead for a single page.
-        result = analyze_single_page(model, prepared_pages[0], language, reasoning_effort=reasoning_effort)
-        if page_done_callback:
-            page_done_callback(result)
-        if progress_callback:
-            progress_callback(1, 1, prepared_pages[0]["page_name"])
-        return merge_page_analyses([result], language)
-
-    # Concurrent analysis with ThreadPoolExecutor.
+    # Main analysis is persisted first. The sentence phase below only enriches it.
     page_analyses: list[dict[str, Any] | None] = [None] * total
     completed = 0
 
     def _work(index: int, page: dict) -> tuple[int, dict[str, Any]]:
-        return index, analyze_single_page(model, page, language, reasoning_effort=reasoning_effort)
+        base = analyze_single_page(model, page, language, reasoning_effort=reasoning_effort)
+        return index, attach_sentence_data(base, catalogs.get(int(page["page_index"]), []))
 
-    workers = min(max_workers, total)
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = {
-            executor.submit(_work, idx, page): idx
-            for idx, page in enumerate(prepared_pages)
-        }
-        for future in as_completed(futures):
-            idx, page_result = future.result()
-            page_analyses[idx] = page_result
-            completed += 1
-            if page_done_callback:
-                page_done_callback(page_result)
-            if progress_callback:
-                progress_callback(completed, total, page_result["page_name"])
+    if total == 1:
+        idx, page_result = _work(0, prepared_pages[0])
+        page_analyses[idx] = page_result
+        completed = 1
+        if page_done_callback:
+            page_done_callback(page_result)
+        if progress_callback:
+            progress_callback(1, 1, page_result["page_name"])
+    else:
+        workers = min(max_workers, total)
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(_work, idx, page): idx
+                for idx, page in enumerate(prepared_pages)
+            }
+            for future in as_completed(futures):
+                idx, page_result = future.result()
+                page_analyses[idx] = page_result
+                completed += 1
+                if page_done_callback:
+                    page_done_callback(page_result)
+                if progress_callback:
+                    progress_callback(completed, total, page_result["page_name"])
+
+    if selected:
+        page_lookup = {int(page["page_index"]): (index, page) for index, page in enumerate(prepared_pages)}
+
+        def _deep_work(page_index: int, sentence_rows: list[dict[str, Any]]) -> tuple[int, list[dict[str, Any]], dict[str, int], str | None]:
+            _index, source_page = page_lookup[page_index]
+            try:
+                rows, usage = analyze_sentence_batch(
+                    model,
+                    sentence_rows,
+                    source_page["text"],
+                    language,
+                    reasoning_effort=reasoning_effort,
+                    origin="auto",
+                )
+                return page_index, rows, usage, None
+            except Exception as exc:
+                return page_index, [], dict(ZERO_USAGE), str(exc)
+
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(selected))) as executor:
+            futures = [
+                executor.submit(_deep_work, page_index, sentence_rows)
+                for page_index, sentence_rows in selected.items()
+            ]
+            for future in as_completed(futures):
+                page_index, rows, usage, error = future.result()
+                result_index, _source_page = page_lookup[page_index]
+                current = page_analyses[result_index]
+                if current is None:
+                    continue
+                enriched = attach_sentence_data(
+                    current,
+                    current.get("sentence_catalog", []),
+                    breakdowns=rows,
+                    usage=usage,
+                    error=error,
+                    model_used=getattr(model, "target_model_name", model_name or "gemini-3.5-flash"),
+                )
+                page_analyses[result_index] = enriched
+                if page_done_callback:
+                    page_done_callback(enriched)
 
     return merge_page_analyses([p for p in page_analyses if p is not None], language)

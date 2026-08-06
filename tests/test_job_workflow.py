@@ -51,3 +51,40 @@ def test_stale_job_result_is_rejected_after_ocr_edit():
     assert status == "stale"
     assert changed is False
     assert state["analysis"] is None
+
+
+def test_sentence_job_merges_without_replacing_main_analysis_or_double_counting():
+    state = {
+        "analysis": {
+            "summary": "main stays",
+            "page_analyses": [
+                {
+                    "page_index": 1,
+                    "sentence_catalog": [{"sentence_id": "p1-s1", "analyzed": False}],
+                    "sentence_breakdowns": [],
+                    "sentence_analysis_usage": {},
+                }
+            ],
+        }
+    }
+    job = {
+        "status": "done",
+        "lang": "sentence_en",
+        "session_id": "mine",
+        "result": {
+            "job_kind": "sentence_deep_dive",
+            "page_index": 1,
+            "sentence_id": "p1-s1",
+            "breakdown": {"sentence_id": "p1-s1", "ordinal": 1},
+            "usage": {"input_tokens": 4, "output_tokens": 6},
+        },
+    }
+
+    status, changed = sync_job_state(state, "sentence-job", job, "mine")
+    _status_again, changed_again = sync_job_state(state, "sentence-job", job, "mine")
+
+    assert status == "done"
+    assert changed is True
+    assert changed_again is False
+    assert state["analysis"]["summary"] == "main stays"
+    assert state["analysis"]["sentence_analysis_usage"]["output_tokens"] == 6

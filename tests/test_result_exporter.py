@@ -1,7 +1,10 @@
 import json
+import io
+import zipfile
 from datetime import datetime
 
 from modules.result_exporter import analysis_json_bytes, default_export_stem, markdown_bytes, safe_export_stem
+from modules.doc_exporter import export_to_docx
 
 
 def test_safe_export_stem_and_default_name():
@@ -43,3 +46,34 @@ def test_markdown_and_json_exports_are_readable():
     assert payload["analysis"]["summary"] == "Tóm tắt"
     assert payload["usd_to_jpy"] == 155
     assert payload["budget"]["remaining_jpy"] == 99_845
+
+
+def test_markdown_and_json_include_structured_sentence_breakdowns():
+    page = {
+        "source_label": "Trang 1: p1",
+        "full_markdown": "# Chính",
+        "sentence_catalog": [{"sentence_id": "p1-s1"}],
+        "sentence_breakdowns": [
+            {
+                "sentence_id": "p1-s1", "ordinal": 1, "original": "長い文です。",
+                "reading": "ながいぶんです。", "analysis_origin": "auto",
+                "segments": [], "clauses": [], "translations": {"natural": "Đây là câu dài."},
+                "omitted_elements": [], "references": [], "logic": [], "questions": [],
+            }
+        ],
+    }
+    analysis = {"page_analyses": [page], "full_markdown": "legacy"}
+    md = markdown_bytes(analysis).decode("utf-8")
+    payload = json.loads(
+        analysis_json_bytes([], analysis, {}, "paid", 155).decode("utf-8")
+    )
+
+    assert md.count("Giải mã câu dài") == 1
+    assert "ながいぶんです" in md
+    assert payload["analysis"]["page_analyses"][0]["sentence_catalog"][0]["sentence_id"] == "p1-s1"
+
+    docx = export_to_docx(md, "sentences.docx")
+    with zipfile.ZipFile(io.BytesIO(docx)) as archive:
+        document_xml = archive.read("word/document.xml").decode("utf-8")
+    assert "Giải mã câu dài" in document_xml
+    assert "ながいぶんです" in document_xml

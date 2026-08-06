@@ -123,3 +123,63 @@ def test_app_renders_analysis_download_options():
     assert any("Sắc thái / Văn phong" in value for value in markdown_values)
     assert any("Phân biệt cấu trúc gần nghĩa" in item.value for item in app.info)
     assert any("Chức năng giao tiếp" in value for value in markdown_values)
+
+
+def test_app_renders_sentence_card_hiragana_and_hidden_answers():
+    item = create_image_item(_image_bytes("white"), "page-1.png")
+    item["ocr_result"] = {
+        "clean_text": "雨が降っているので、出かけません。",
+        "ocr_notes": [],
+        "usage": {},
+        "confidence": "high",
+        "text_direction": "horizontal",
+        "has_furigana": False,
+    }
+    item["edited_text"] = item["ocr_result"]["clean_text"]
+    breakdown = {
+        "sentence_id": "p1-s1",
+        "ordinal": 1,
+        "original": item["edited_text"],
+        "reading": "あめがふっているので、でかけません。",
+        "analysis_origin": "auto",
+        "complexity_score": 7,
+        "segments": [{"text": "雨が", "reading": "あめが", "role": "S", "meaning_vi": "trời mưa"}],
+        "clauses": [{"label": "Mệnh đề phụ", "text": "雨が降っているので", "role": "nguyên nhân"}],
+        "structure_summary": "Mệnh đề nguyên nhân + mệnh đề chính",
+        "translations": {"chunked": "Vì trời mưa / không đi ra ngoài", "literal": "Vì trời đang mưa, không ra ngoài.", "natural": "Vì trời mưa nên tôi không ra ngoài."},
+        "omitted_elements": [], "references": [], "logic": [],
+        "simplified_source": "雨です。出かけません。", "simplified_vi": "Trời mưa. Tôi không ra ngoài.",
+        "questions": [{"question": "Vì sao người nói không ra ngoài?", "answer": "Vì trời mưa.", "explanation": "ので nêu lý do."}],
+    }
+    page = {
+        "page_index": 1, "page_name": "page-1.png", "source_label": "Trang 1: page-1.png",
+        "source_text": item["edited_text"], "confirmed_text": item["edited_text"], "summary": "Trời mưa.",
+        "analysis_language": "japanese", "vocabulary_all": [], "vocabulary_important": [],
+        "kanji_analysis": [], "connectors": [], "grammar_points": [], "sentence_patterns": [],
+        "full_markdown": "# Báo cáo", "usage": {},
+        "sentence_catalog": [{"sentence_id": "p1-s1", "ordinal": 1, "original": item["edited_text"], "analyzed": True}],
+        "sentence_breakdowns": [breakdown], "sentence_analysis_usage": {"input_tokens": 2, "output_tokens": 3},
+    }
+    app = AppTest.from_file("app.py")
+    app.session_state["image_items"] = [item]
+    app.session_state["analysis"] = {
+        **page,
+        "page_analyses": [page],
+        "usage": {},
+        "sentence_analysis_usage": {"input_tokens": 2, "output_tokens": 3},
+        "model_used": "gemini-3.5-flash",
+    }
+    app.session_state["upload_messages"] = []
+    app.session_state["upload_errors"] = []
+    app.session_state["uploader_version"] = 0
+    app.session_state["camera_version"] = 0
+    app.run(timeout=20)
+
+    assert not app.exception
+    labels = [expander.label for expander in app.get("expander")]
+    assert any("Câu 1 · Tự động" in label for label in labels)
+    assert "Phân tích thêm câu khác" in labels
+    assert any(toggle.label == "Hiện đáp án" and toggle.value is False for toggle in app.toggle)
+    markdown_values = [item.value for item in app.markdown]
+    assert any("あめがふっているので" in value for value in markdown_values)
+    assert any("Mệnh đề nguyên nhân" in value for value in markdown_values)

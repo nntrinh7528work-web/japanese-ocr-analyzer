@@ -7,6 +7,8 @@ import re
 from datetime import datetime
 from typing import Any
 
+from modules.sentence_analyzer import analysis_markdown
+
 
 def safe_export_stem(value: str) -> str:
     """Return a filesystem-safe filename stem."""
@@ -26,7 +28,7 @@ def default_export_stem(items: list[dict[str, Any]], created_at: datetime | None
 
 def markdown_bytes(analysis: dict[str, Any]) -> bytes:
     """Return the full analysis Markdown as UTF-8 bytes."""
-    content = str(analysis.get("full_markdown") or "").strip()
+    content = analysis_markdown(analysis).strip()
     if not content:
         raise ValueError("Không có nội dung Markdown để lưu.")
     return content.encode("utf-8")

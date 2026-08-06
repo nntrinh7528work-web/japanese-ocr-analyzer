@@ -367,6 +367,37 @@ def test_run_page_analyses_keeps_per_page_results(monkeypatch):
     assert len(page_done_calls) == 2
 
 
+def test_sentence_deep_dive_failure_does_not_fail_main_page(monkeypatch):
+    class Model:
+        def generate_content(self, _prompt, generation_config):
+            return SimpleNamespace(
+                text=RESPONSE,
+                usage_metadata=SimpleNamespace(prompt_token_count=3, candidates_token_count=5),
+            )
+
+    monkeypatch.setattr(text_analyzer, "_init_model", lambda: Model())
+    monkeypatch.setattr(
+        text_analyzer,
+        "analyze_sentence_batch",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("deep failed")),
+    )
+    callbacks = []
+    long_sentence = (
+        "Although the proposal appeared reasonable, the committee rejected it because "
+        "the evidence that the researchers provided was incomplete and difficult to verify."
+    )
+
+    result = text_analyzer.run_page_analyses(
+        [{"page_index": 1, "page_name": "p1", "text": long_sentence, "notes": []}],
+        page_done_callback=callbacks.append,
+    )
+
+    assert result["vocabulary_all"]
+    assert result["page_analyses"][0]["sentence_analysis_error"] == "deep failed"
+    assert result["page_analyses"][0]["sentence_breakdowns"] == []
+    assert len(callbacks) == 2
+
+
 def test_empty_text_rejected():
     with pytest.raises(ValueError):
         text_analyzer.run_analysis(" ", [])

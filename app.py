@@ -50,6 +50,7 @@ for key, default in {
     "dialogue_history_id": None,
     "dialogue_quiz_results": {},
     "dark_mode": False,
+    "auto_sentence_deep_dive": True,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default
@@ -70,7 +71,7 @@ if not st.session_state.session_restored:
         if saved_partial:
             st.session_state.partial_page_analyses = saved_partial
         saved_settings = session_store.load_settings(query_sid)
-        for key in ("budget_jpy", "spent_before_jpy", "usd_to_jpy"):
+        for key in ("budget_jpy", "spent_before_jpy", "usd_to_jpy", "auto_sentence_deep_dive"):
             if key in saved_settings:
                 st.session_state[key] = saved_settings[key]
         session_store.update_session_timestamp(query_sid)
@@ -225,6 +226,7 @@ session_store.save_settings(
         "budget_jpy": config["budget_jpy"],
         "spent_before_jpy": config["spent_before_jpy"],
         "usd_to_jpy": config["usd_to_jpy"],
+        "auto_sentence_deep_dive": config["auto_sentence_deep_dive"],
     },
 )
 inject_custom_css(dark_mode=config.get("dark_mode", False))

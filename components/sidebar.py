@@ -80,6 +80,13 @@ def render_sidebar(
             horizontal=False,
         )
 
+        auto_sentence_deep_dive = st.toggle(
+            "Tự động giải mã câu dài",
+            value=bool(st.session_state.get("auto_sentence_deep_dive", True)),
+            help="Tự chọn tối đa 3 câu khó mỗi trang và 15 câu trong toàn tài liệu để phân tích sâu.",
+        )
+        st.session_state["auto_sentence_deep_dive"] = auto_sentence_deep_dive
+
     if st.session_state.get("_last_analysis_language") not in (None, analysis_language):
         clear_analysis_fn()
     st.session_state["_last_analysis_language"] = analysis_language
@@ -127,6 +134,7 @@ def render_sidebar(
         "text_model_choice": text_model_choice,
         "reasoning_effort": reasoning_effort,
         "analysis_language": analysis_language,
+        "auto_sentence_deep_dive": auto_sentence_deep_dive,
         "billing_tier": billing_tier,
         "budget_jpy": budget_jpy,
         "spent_before_jpy": spent_before_jpy,

@@ -26,12 +26,171 @@ from modules.result_exporter import (
     markdown_bytes,
     safe_export_stem,
 )
+from modules.sentence_analyzer import analysis_markdown, split_sentences
 
 from components.helpers import (
     display_rows,
     render_grammar_points,
     render_important_vocabulary,
 )
+
+
+def _render_labeled_items(title: str, rows: list[dict], fields: tuple[str, ...]) -> None:
+    if not rows:
+        return
+    st.markdown(f"**{title}:**")
+    for row in rows:
+        values = [str(row.get(field) or "").strip() for field in fields]
+        st.markdown("- " + " | ".join(value for value in values if value))
+
+
+def _render_sentence_breakdown(row: dict, language: str) -> None:
+    origin = "Tự động" if row.get("analysis_origin") == "auto" else "Phân tích thêm"
+    label = f"Câu {row.get('ordinal', '?')} · {origin} · độ phức tạp {row.get('complexity_score', 0)}"
+    with st.expander(label, expanded=False):
+        st.markdown("**Nguyên văn**")
+        st.code(row.get("original") or "", language=None)
+        if language == "japanese" and row.get("reading"):
+            st.markdown(f"**Hiragana:** {row['reading']}")
+
+        segments = row.get("segments") or []
+        if segments:
+            st.markdown("**Cụm từ có nhãn vai trò**")
+            st.dataframe(
+                [
+                    {
+                        "Cụm": item.get("text", ""),
+                        "Hiragana": item.get("reading", "") if language == "japanese" else "",
+                        "Nhãn/Vai trò": item.get("role", ""),
+                        "Nghĩa tiếng Việt": item.get("meaning_vi", ""),
+                        "Bổ nghĩa cho": item.get("modifies", ""),
+                    }
+                    for item in segments
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+        clauses = row.get("clauses") or []
+        if clauses:
+            st.markdown("**Ranh giới và quan hệ mệnh đề**")
+            st.dataframe(
+                [
+                    {
+                        "Nhãn mệnh đề": item.get("label", ""),
+                        "Nội dung": item.get("text", ""),
+                        "Vai trò": item.get("role", ""),
+                        "Quan hệ với mệnh đề chính": item.get("relation_to_main", ""),
+                    }
+                    for item in clauses
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+        if row.get("structure_summary"):
+            st.markdown(f"**Cấu trúc câu:** {row['structure_summary']}")
+
+        translations = row.get("translations") or {}
+        st.markdown(f"**Dịch sát từng cụm:** {translations.get('chunked') or 'Chưa có'}")
+        st.markdown(f"**Dịch sát toàn câu:** {translations.get('literal') or 'Chưa có'}")
+        st.success(f"Dịch tự nhiên: {translations.get('natural') or 'Chưa có'}")
+
+        _render_labeled_items("Thành phần lược bỏ", row.get("omitted_elements") or [], ("element", "recovered", "reason"))
+        _render_labeled_items("Từ quy chiếu", row.get("references") or [], ("expression", "referent", "reason"))
+        _render_labeled_items("Luồng logic", row.get("logic") or [], ("marker", "relation", "scope"))
+
+        st.markdown(f"**Câu viết lại đơn giản:** {row.get('simplified_source') or 'Chưa có'}")
+        st.markdown(f"**Nghĩa tiếng Việt:** {row.get('simplified_vi') or 'Chưa có'}")
+        questions = row.get("questions") or []
+        if questions:
+            st.markdown("**Câu hỏi kiểm tra hiểu**")
+            for question_index, question in enumerate(questions, 1):
+                st.write(f"{question_index}. {question.get('question') or ''}")
+            show_answers = st.toggle(
+                "Hiện đáp án",
+                value=False,
+                key=f"answers_{row.get('sentence_id')}",
+            )
+            if show_answers:
+                for question_index, question in enumerate(questions, 1):
+                    st.info(
+                        f"{question_index}. {question.get('answer') or 'Chưa có đáp án'}\n\n"
+                        f"{question.get('explanation') or ''}"
+                    )
+
+
+def _render_sentence_deep_dive(
+    page: dict,
+    language: str,
+    source_text: str,
+    model_name: str,
+    reasoning_effort: str,
+    items: list[dict],
+    persist_analysis_fn,
+    worker_path: str,
+    project_dir: str,
+) -> None:
+    st.subheader("🧠 Giải mã câu dài")
+    if not page.get("sentence_catalog"):
+        page["sentence_catalog"] = split_sentences(source_text, language, int(page.get("page_index", 1)))
+        page.setdefault("sentence_breakdowns", [])
+        page.setdefault("sentence_analysis_usage", {})
+        persist_analysis_fn()
+
+    if page.get("sentence_analysis_error"):
+        st.warning(f"Phân tích chính vẫn được giữ. Giải mã câu dài gặp lỗi: {page['sentence_analysis_error']}")
+
+    breakdowns = sorted(page.get("sentence_breakdowns") or [], key=lambda row: int(row.get("ordinal", 0)))
+    if breakdowns:
+        for row in breakdowns:
+            _render_sentence_breakdown(row, language)
+    else:
+        st.caption("Trang này chưa có câu dài được giải mã.")
+
+    analyzed_ids = {row.get("sentence_id") for row in breakdowns}
+    remaining = [row for row in page.get("sentence_catalog", []) if row.get("sentence_id") not in analyzed_ids]
+    with st.expander("Phân tích thêm câu khác", expanded=False):
+        if not remaining:
+            st.info("Tất cả câu trong trang đã được phân tích.")
+            return
+        options = {f"Câu {row['ordinal']}: {row['original'][:120]}": row for row in remaining}
+        selected_label = st.selectbox(
+            "Chọn câu chưa xử lý",
+            options=list(options),
+            key=f"manual_sentence_{page.get('page_index')}",
+        )
+        selected = options[selected_label]
+        st.caption(
+            f"Điểm phức tạp: {selected.get('complexity_score', 0)} · "
+            + (", ".join(selected.get("complexity_signals") or []) or "câu ngắn/ít cấu trúc lồng")
+        )
+        if st.button(
+            "Phân tích câu đã chọn trong nền",
+            key=f"run_manual_sentence_{page.get('page_index')}",
+            use_container_width=True,
+        ):
+            payload = {
+                "sentence": selected,
+                "page_text": source_text,
+                "model_name": model_name,
+                "reasoning_effort": reasoning_effort,
+            }
+            lang = "sentence_ja" if language == "japanese" else "sentence_en"
+            job_id = create_job(
+                json.dumps(payload, ensure_ascii=False),
+                lang,
+                session_id=st.session_state.session_id,
+                source_hash=items_source_hash(items),
+            )
+            subprocess.Popen(
+                [_sys.executable, worker_path, job_id],
+                stdout=subprocess.DEVNULL,
+                stderr=open(project_dir + "/worker_error.log", "a"),
+                cwd=project_dir,
+            )
+            st.session_state.current_job_id = job_id
+            st.query_params["job_id"] = job_id
+            st.success("Đã đưa câu vào hàng đợi. Có thể đóng tab và mở lại đúng link phiên này.")
+            st.rerun()
 
 
 def render_ocr_tab(
@@ -302,6 +461,11 @@ def render_ocr_tab(
                 resumed_pages = list(partial)
 
                 def _resume_page_done(page_result: dict) -> None:
+                    page_index = int(page_result.get("page_index", 0))
+                    resumed_pages[:] = [
+                        page for page in resumed_pages
+                        if int(page.get("page_index", 0)) != page_index
+                    ]
                     resumed_pages.append(page_result)
                     resumed_pages.sort(key=lambda page: int(page.get("page_index", 0)))
                     st.session_state.partial_page_analyses = list(resumed_pages)
@@ -314,6 +478,7 @@ def render_ocr_tab(
                     page_done_callback=_resume_page_done,
                     model_name=text_model_choice,
                     reasoning_effort=reasoning_effort,
+                    auto_sentence_deep_dive=config.get("auto_sentence_deep_dive", True),
                 )
                 all_page_analyses = partial + new_results.get("page_analyses", [])
                 st.session_state.analysis = text_analyzer_module.merge_page_analyses(
@@ -334,6 +499,7 @@ def render_ocr_tab(
                     "pages": pages_to_analyze,
                     "model_name": text_model_choice,
                     "reasoning_effort": reasoning_effort,
+                    "auto_sentence_deep_dive": config.get("auto_sentence_deep_dive", True),
                 }
                 input_text = json.dumps(input_data)
                 job_id = create_job(
@@ -361,6 +527,7 @@ def render_ocr_tab(
                     "pages": pages_to_analyze,
                     "model_name": text_model_choice,
                     "reasoning_effort": reasoning_effort,
+                    "auto_sentence_deep_dive": config.get("auto_sentence_deep_dive", True),
                 }
                 input_text = json.dumps(input_data)
                 job_id = create_job(
@@ -398,14 +565,34 @@ def render_ocr_tab(
             if item.get("ocr_result")
         ]
         analysis_cost = estimate_cost(analysis.get("usage"), used_model_name, billing_tier)
-        session_cost = sum_costs([*ocr_costs, analysis_cost])
+        sentence_runs = analysis.get("sentence_analysis_runs") or []
+        if sentence_runs:
+            sentence_cost = sum_costs(
+                [
+                    estimate_cost(
+                        run.get("usage"),
+                        run.get("model_used") or used_model_name,
+                        billing_tier,
+                    )
+                    for run in sentence_runs
+                ]
+            )
+        else:
+            sentence_cost = estimate_cost(
+                analysis.get("sentence_analysis_usage"),
+                analysis.get("sentence_analysis_model") or used_model_name,
+                billing_tier,
+            )
+        session_cost = sum_costs([*ocr_costs, analysis_cost, sentence_cost])
 
         with st.expander("💰 Tổng chi phí phiên phân tích", expanded=True):
-            cost1, cost2, cost3, cost4 = st.columns(4)
+            cost1, cost2, cost3 = st.columns(3)
             cost1.metric("OCR ảnh", format_cost(sum(float(cost["total_cost_usd"]) for cost in ocr_costs), usd_to_jpy))
             cost2.metric("Phân tích văn bản", format_cost(analysis_cost["total_cost_usd"], usd_to_jpy))
-            cost3.metric("Tổng token", f"{session_cost['input_tokens'] + session_cost['output_tokens']:,}")
-            cost4.metric("Tổng ước tính", format_cost(session_cost["total_cost_usd"], usd_to_jpy))
+            cost3.metric("Giải mã câu dài", format_cost(sentence_cost["total_cost_usd"], usd_to_jpy))
+            cost4, cost5 = st.columns(2)
+            cost4.metric("Tổng token", f"{session_cost['input_tokens'] + session_cost['output_tokens']:,}")
+            cost5.metric("Tổng ước tính", format_cost(session_cost["total_cost_usd"], usd_to_jpy))
 
             if billing_tier == "free":
                 st.caption(
@@ -433,7 +620,7 @@ def render_ocr_tab(
             docx_name = f"{export_stem}.docx"
             md_name = f"{export_stem}.md"
             json_name = f"{export_stem}.json"
-            docx_bytes = export_to_docx(analysis["full_markdown"], docx_name)
+            docx_bytes = export_to_docx(analysis_markdown(analysis), docx_name)
             json_bytes = analysis_json_bytes(
                 items, analysis, session_cost, billing_tier, usd_to_jpy, budget=budget
             )
@@ -470,6 +657,22 @@ def render_ocr_tab(
                 st.subheader("📝 Tóm tắt nội dung")
                 st.write(page.get("confirmed_text") or "Không có văn bản xác nhận.")
                 st.info(page.get("summary") or "Không có tóm tắt.")
+
+                source_page = next(
+                    (candidate for candidate in pages_to_analyze if int(candidate.get("page_index", 0)) == int(page.get("page_index", index + 1))),
+                    {},
+                )
+                _render_sentence_deep_dive(
+                    page,
+                    result_language,
+                    page.get("source_text") or source_page.get("text") or "",
+                    used_model_name,
+                    reasoning_effort,
+                    items,
+                    persist_analysis_fn,
+                    worker_path,
+                    project_dir,
+                )
 
                 st.subheader("📊 Từ vựng")
                 if page.get("vocabulary_all"):

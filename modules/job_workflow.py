@@ -7,6 +7,8 @@ import hashlib
 import json
 from typing import Any
 
+from modules.sentence_analyzer import merge_manual_breakdown
+
 
 def sync_job_state(
     state: MutableMapping[str, Any],
@@ -32,10 +34,18 @@ def sync_job_state(
             changed = True
 
     if status == "done" and state.get("applied_job_id") != job_id:
-        state["analysis"] = job.get("result")
-        state["partial_page_analyses"] = []
-        state["applied_job_id"] = job_id
-        changed = True
+        result = job.get("result") or {}
+        is_sentence_job = str(job.get("lang") or "").startswith("sentence_") or result.get("job_kind") == "sentence_deep_dive"
+        if is_sentence_job:
+            merged, merged_changed = merge_manual_breakdown(state.get("analysis"), result, job_id)
+            if merged_changed:
+                state["analysis"] = merged
+                changed = True
+        else:
+            state["analysis"] = result
+            state["partial_page_analyses"] = []
+            state["applied_job_id"] = job_id
+            changed = True
 
     return status, changed
 

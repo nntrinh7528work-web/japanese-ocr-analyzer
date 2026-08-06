@@ -4,6 +4,7 @@ import sys
 import json
 from modules.job_store import update_job, get_job
 from modules.text_analyzer import run_analysis, run_page_analyses
+from modules.sentence_analyzer import analyze_manual_sentence
 
 
 def run_job(job_id: str, text: str, lang: str):
@@ -16,16 +17,32 @@ def run_job(job_id: str, text: str, lang: str):
             text = job_data["input_text"]
             lang = job_data["lang"]
 
-        if lang.startswith("pdf_"):
+        if lang.startswith("sentence_"):
+            data = json.loads(text)
+            analysis_lang = "japanese" if lang == "sentence_ja" else "english"
+            result = analyze_manual_sentence(
+                data["sentence"],
+                data.get("page_text", ""),
+                analysis_lang,
+                model_name=data.get("model_name"),
+                reasoning_effort=data.get("reasoning_effort", "standard"),
+            )
+        elif lang.startswith("pdf_"):
             # PDF/Image page analysis
             pages_data = json.loads(text)
             pages = pages_data.get("pages", [])
             model_name = pages_data.get("model_name")
             reasoning_effort = pages_data.get("reasoning_effort", "standard")
+            auto_sentence_deep_dive = bool(pages_data.get("auto_sentence_deep_dive", True))
             analysis_lang = "japanese" if lang == "pdf_ja" else "english"
             partial_results = list(job_data.get("partial_result") or []) if job_data else []
 
             def _persist_page(page_result: dict) -> None:
+                page_index = int(page_result.get("page_index", 0))
+                partial_results[:] = [
+                    page for page in partial_results
+                    if int(page.get("page_index", 0)) != page_index
+                ]
                 partial_results.append(page_result)
                 partial_results.sort(key=lambda page: int(page.get("page_index", 0)))
                 update_job(job_id, "running", partial_result=partial_results)
@@ -35,6 +52,7 @@ def run_job(job_id: str, text: str, lang: str):
                 analysis_language=analysis_lang,
                 model_name=model_name,
                 reasoning_effort=reasoning_effort,
+                auto_sentence_deep_dive=auto_sentence_deep_dive,
                 page_done_callback=_persist_page,
             )
         else:
