@@ -18,6 +18,7 @@ from modules.notion_sync import (
     _sync_payload_entities,
     _upsert_learning_item,
     _upsert_lesson,
+    _find_child_databases,
     build_notion_sync_payload,
     ensure_notion_workspace,
     extract_learning_items,
@@ -511,6 +512,32 @@ def _append_hub_v4_links(client: NotionClient, parent_page_id: str, workspace: d
     )
 
 
+def _workspace_signature(workspace: dict[str, Any]) -> str:
+    source_ids = [
+        str(workspace.get(f"{key}_data_source_id") or "")
+        for key in ("lessons", "items", "sentences", "kanji", "language")
+    ]
+    return hashlib.sha256("|".join(source_ids).encode("utf-8")).hexdigest()
+
+
+def _archive_duplicate_v4_databases(
+    client: NotionClient, parent_page_id: str, workspace: dict[str, Any]
+) -> list[str]:
+    """Archive only non-canonical v4 databases after the canonical rebuild succeeds."""
+    archived: list[str] = []
+    for key, title in (
+        ("sentences", "Câu & bản dịch"),
+        ("kanji", "Kanji"),
+        ("language", "Ngữ pháp & liên kết"),
+    ):
+        canonical_id = str(workspace.get(f"{key}_database_id") or "")
+        for database_id, _ in _find_child_databases(client, parent_page_id, {title}):
+            if database_id and database_id != canonical_id:
+                client.request("PATCH", f"/databases/{database_id}", {"in_trash": True})
+                archived.append(database_id)
+    return archived
+
+
 def rebuild_notion_workspace_v4(
     client: NotionClient,
     settings: NotionSettings,
@@ -563,6 +590,8 @@ def rebuild_notion_workspace_v4(
 
     config = session_store.load_notion_workspace_config()
     migration = dict(config.get("migration_v4") or {})
+    workspace_signature = _workspace_signature(workspace)
+    checkpoint_matches = migration.get("workspace_signature") == workspace_signature
     backup_page_id = str(migration.get("backup_page_id") or "")
     if not backup_page_id:
         parent_id = _resolve_backup_parent(client, settings, workspace)
@@ -573,14 +602,15 @@ def rebuild_notion_workspace_v4(
         "completed_lessons": int(migration.get("completed_lessons") or 0),
         "total_lessons": len(archives),
         "lock_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "workspace_signature": workspace_signature,
     }
     session_store.save_notion_workspace_config(config)
     _rename_vocabulary_database(client, workspace)
 
     migration = dict(session_store.load_notion_workspace_config().get("migration_v4") or {})
-    completed_page_ids = set(migration.get("completed_page_ids") or [])
+    completed_page_ids = set(migration.get("completed_page_ids") or []) if checkpoint_matches else set()
     rebuilt_lessons = len(completed_page_ids)
-    rebuilt_items = int(migration.get("rebuilt_items") or 0)
+    rebuilt_items = int(migration.get("rebuilt_items") or 0) if checkpoint_matches else 0
     replacement_vocab_ids: set[str] = set()
     for archive_entry in archives:
         archive = archive_entry["archive"]
@@ -646,6 +676,14 @@ def rebuild_notion_workspace_v4(
             client.request("PATCH", f"/pages/{page['id']}", {"in_trash": True})
     if not unreadable:
         _remove_v4_obsolete_columns(client, workspace)
+        if settings.parent_page_id:
+            archived_duplicates = _archive_duplicate_v4_databases(
+                client, settings.parent_page_id, workspace
+            )
+        else:
+            archived_duplicates = []
+    else:
+        archived_duplicates = []
     config = session_store.load_notion_workspace_config()
     if settings.parent_page_id and not (config.get("migration_v4") or {}).get("hub_links_created"):
         _append_hub_v4_links(client, settings.parent_page_id, workspace)
@@ -657,11 +695,15 @@ def rebuild_notion_workspace_v4(
         **dict(config.get("migration_v4") or {}), "status": final_status,
         "completed_lessons": rebuilt_lessons, "rebuilt_items": rebuilt_items,
         "unreadable_lessons": unreadable,
+        "archived_duplicate_databases": archived_duplicates,
+        "workspace_signature": workspace_signature,
+        "error": "",
     }
     session_store.save_notion_workspace_config(config)
     return {
         **summary, "status": final_status, "backup_page_id": backup_page_id,
         "rebuilt_lessons": rebuilt_lessons, "rebuilt_items": rebuilt_items,
+        "archived_duplicate_databases": archived_duplicates,
     }
 
 

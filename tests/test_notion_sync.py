@@ -486,6 +486,52 @@ def test_bootstrapped_database_is_rediscovered_after_local_cache_reset():
     ) == ("sentence-db", "sentence-source")
 
 
+def test_duplicate_v4_database_cleanup_archives_only_noncanonical(monkeypatch):
+    discovered = {
+        "Câu & bản dịch": [("sentence-db", "sentence-source"), ("sentence-copy", "sentence-copy-source")],
+        "Kanji": [("kanji-copy", "kanji-copy-source"), ("kanji-db", "kanji-source")],
+        "Ngữ pháp & liên kết": [("language-db", "language-source")],
+    }
+    monkeypatch.setattr(
+        notion_migration,
+        "_find_child_databases",
+        lambda client, parent_id, titles: discovered[next(iter(titles))],
+    )
+
+    class Client:
+        def __init__(self):
+            self.calls = []
+
+        def request(self, method, path, payload=None):
+            self.calls.append((method, path, payload))
+            return {}
+
+    client = Client()
+    archived = notion_migration._archive_duplicate_v4_databases(
+        client,
+        "hub",
+        {
+            "sentences_database_id": "sentence-db",
+            "kanji_database_id": "kanji-db",
+            "language_database_id": "language-db",
+        },
+    )
+
+    assert archived == ["sentence-copy", "kanji-copy"]
+    assert client.calls == [
+        ("PATCH", "/databases/sentence-copy", {"in_trash": True}),
+        ("PATCH", "/databases/kanji-copy", {"in_trash": True}),
+    ]
+
+
+def test_workspace_signature_changes_when_a_database_changes():
+    first = {f"{key}_data_source_id": key for key in ("lessons", "items", "sentences", "kanji", "language")}
+    second = dict(first, kanji_data_source_id="different-kanji")
+
+    assert notion_migration._workspace_signature(first) == notion_migration._workspace_signature(dict(first))
+    assert notion_migration._workspace_signature(first) != notion_migration._workspace_signature(second)
+
+
 def test_occurrence_count_is_idempotent_for_the_same_lesson_relation():
     item = {
         "external_id": "concept:vocabulary:one", "title": "対応",

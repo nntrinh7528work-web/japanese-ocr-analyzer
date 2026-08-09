@@ -99,6 +99,8 @@ def render_sidebar(
         notion_state = notion_connection_state()
         if notion_state["configured"]:
             st.success(f"Notion: {notion_state['label']}")
+            if notion_state.get("migration_error"):
+                st.caption(f"Lỗi nâng cấp gần nhất: {notion_state['migration_error']}")
         else:
             st.info(f"Notion: {notion_state['label']}")
             st.caption(

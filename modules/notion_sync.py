@@ -125,7 +125,12 @@ def notion_connection_state() -> dict[str, Any]:
     if migration_status in {"starting", "backed_up", "running"}:
         return {"configured": True, "label": "Đang nâng cấp bố cục v4", "workspace_ready": False}
     if migration_status == "retry":
-        return {"configured": True, "label": "Nâng cấp v4 sẽ tự thử lại", "workspace_ready": False}
+        return {
+            "configured": True,
+            "label": "Nâng cấp v4 sẽ tự thử lại",
+            "workspace_ready": False,
+            "migration_error": str(migration.get("error") or ""),
+        }
     if all((settings.lessons_data_source_id, settings.items_data_source_id,
             settings.sentences_data_source_id, settings.kanji_data_source_id,
             settings.language_data_source_id)):
@@ -470,11 +475,12 @@ def _database_id_for_source(client: NotionClient, data_source_id: str) -> str:
     return str((source.get("parent") or {}).get("database_id") or "")
 
 
-def _find_child_database(
+def _find_child_databases(
     client: NotionClient, parent_page_id: str, titles: set[str]
-) -> tuple[str, str] | None:
+) -> list[tuple[str, str]]:
     """Rediscover bootstrapped databases when the app's local SQLite is recreated."""
     cursor = ""
+    matches: list[tuple[str, str]] = []
     while True:
         path = f"/blocks/{parent_page_id}/children?page_size=100"
         if cursor:
@@ -487,12 +493,19 @@ def _find_child_database(
             if title in titles:
                 database_id = str(block.get("id") or "")
                 database = client.request("GET", f"/databases/{database_id}")
-                return database_id, _database_data_source_id(client, database)
+                matches.append((database_id, _database_data_source_id(client, database)))
         if not response.get("has_more"):
-            return None
+            return matches
         cursor = str(response.get("next_cursor") or "")
         if not cursor:
-            return None
+            return matches
+
+
+def _find_child_database(
+    client: NotionClient, parent_page_id: str, titles: set[str]
+) -> tuple[str, str] | None:
+    matches = _find_child_databases(client, parent_page_id, titles)
+    return matches[0] if matches else None
 
 
 def _ensure_data_source_schema(client: NotionClient, data_source_id: str, desired: dict) -> None:
