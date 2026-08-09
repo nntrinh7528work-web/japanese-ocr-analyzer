@@ -120,10 +120,17 @@ def notion_connection_state() -> dict[str, Any]:
         return {"configured": False, "label": "Chưa có NOTION_TOKEN"}
     if not settings.configured:
         return {"configured": False, "label": "Thiếu trang cha hoặc database ID"}
+    migration = session_store.load_notion_workspace_config().get("migration_v4") or {}
+    migration_status = str(migration.get("status") or "")
+    if migration_status in {"starting", "backed_up", "running"}:
+        return {"configured": True, "label": "Đang nâng cấp bố cục v4", "workspace_ready": False}
+    if migration_status == "retry":
+        return {"configured": True, "label": "Nâng cấp v4 sẽ tự thử lại", "workspace_ready": False}
     if all((settings.lessons_data_source_id, settings.items_data_source_id,
             settings.sentences_data_source_id, settings.kanji_data_source_id,
             settings.language_data_source_id)):
-        return {"configured": True, "label": "Đã kết nối", "workspace_ready": True}
+        label = "Đã kết nối · bố cục v4" if migration_status in {"complete", "partial", "not_needed"} else "Đã kết nối"
+        return {"configured": True, "label": label, "workspace_ready": True}
     return {"configured": True, "label": "Sẵn sàng tạo bảng", "workspace_ready": False}
 
 

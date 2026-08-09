@@ -122,6 +122,9 @@ def _persist_analysis() -> None:
 
 _WORKER_PATH = str(Path(__file__).resolve().parent / "worker.py")
 _NOTION_WORKER_PATH = str(Path(__file__).resolve().parent / "notion_worker.py")
+_NOTION_MIGRATION_WORKER_PATH = str(
+    Path(__file__).resolve().parent / "notion_migration_worker.py"
+)
 _PROJECT_DIR = str(Path(__file__).resolve().parent)
 cleanup_old_jobs(max_age_hours=48)
 
@@ -267,11 +270,36 @@ def _dispatch_notion_run(run_id: str) -> bool:
         return False
 
 
+def _dispatch_notion_migration() -> bool:
+    if st.session_state.get("_notion_v4_migration_dispatched"):
+        return False
+    st.session_state["_notion_v4_migration_dispatched"] = True
+    try:
+        subprocess.Popen(
+            [sys.executable, _NOTION_MIGRATION_WORKER_PATH],
+            stdout=subprocess.DEVNULL,
+            stderr=open(str(Path(_PROJECT_DIR) / "notion_migration_error.log"), "a"),
+            cwd=_PROJECT_DIR,
+        )
+        return True
+    except Exception as exc:
+        st.sidebar.warning(f"Chưa thể khởi động nâng cấp Notion: {exc}")
+        return False
+
+
+notion_state = notion_connection_state()
+migration_status = str(
+    (session_store.load_notion_workspace_config().get("migration_v4") or {}).get("status") or ""
+)
+if notion_state["configured"] and migration_status not in {"complete", "partial", "not_needed"}:
+    _dispatch_notion_migration()
+
 # A completed analysis is displayed immediately; Notion runs separately.
 if (
     st.session_state.analysis
     and config.get("auto_notion_sync")
-    and notion_connection_state()["configured"]
+    and notion_state["configured"]
+    and migration_status in {"complete", "partial", "not_needed"}
 ):
     try:
         notion_run = enqueue_analysis_sync(
@@ -285,7 +313,7 @@ if (
     except Exception as exc:
         st.sidebar.warning(f"Chưa thể tạo hàng đợi Notion: {exc}")
 
-if notion_connection_state()["configured"]:
+if notion_state["configured"] and migration_status in {"complete", "partial", "not_needed"}:
     for due_run in session_store.list_due_notion_sync_runs(limit=2):
         _dispatch_notion_run(due_run["run_id"])
 
