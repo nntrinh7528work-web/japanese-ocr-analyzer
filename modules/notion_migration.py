@@ -640,7 +640,16 @@ def rebuild_notion_workspace_v4(
         lesson = _upsert_lesson(client, str(workspace["lessons_data_source_id"]), payload)
         errors = _sync_payload_entities(client, workspace, payload, str(lesson["id"]))
         if errors:
-            raise NotionAPIError(f"Migration v4 còn {len(errors)} mục lỗi; dữ liệu cũ chưa bị archive.", 400, "migration_item_error")
+            details = "; ".join(
+                f"{error.get('collection') or 'unknown'} / {error.get('title') or error.get('external_id')}: "
+                f"{error.get('error') or 'Lỗi xác thực dữ liệu'}"
+                for error in errors[:3]
+            )
+            raise NotionAPIError(
+                f"Migration v4 còn {len(errors)} mục lỗi; dữ liệu cũ chưa bị archive. {details}",
+                400,
+                "migration_item_error",
+            )
 
         for kind, key, source_key in (
             ("sentence", "sentences", "sentences_data_source_id"),
