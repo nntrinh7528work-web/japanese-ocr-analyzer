@@ -29,7 +29,7 @@ from modules.result_exporter import (
     safe_export_stem,
 )
 from modules.sentence_analyzer import analysis_markdown, split_sentences
-from modules.tts_engine import get_audio_cache_key, text_to_speech
+from modules.tts_engine import get_audio_cache_key, get_last_tts_error, text_to_speech
 
 from components.helpers import (
     display_rows,
@@ -109,15 +109,27 @@ def _render_deep_details(row: dict, language: str) -> None:
 
 def _render_audio_control(text: str, lang: str, slow: bool, label: str, key: str) -> None:
     cache_key = "teacher_tts_" + get_audio_cache_key(text, lang, slow)
+    autoplay_key = cache_key + "_autoplay"
     if st.button(label, key=key, use_container_width=True, disabled=not bool(text.strip())):
         with st.spinner("Đang tạo audio..."):
             audio = text_to_speech(text, lang=lang, slow=slow)
         if audio:
             st.session_state[cache_key] = audio
+            st.session_state[autoplay_key] = True
         else:
-            st.warning("Không thể tạo audio. Kết quả dịch vẫn được giữ nguyên.")
+            detail = get_last_tts_error()
+            st.warning(
+                "Không thể tạo audio. Kết quả dịch vẫn được giữ nguyên."
+                + (f" Chi tiết: {detail}" if detail else "")
+            )
     if st.session_state.get(cache_key):
-        st.audio(st.session_state[cache_key], format="audio/mp3")
+        autoplay = bool(st.session_state.pop(autoplay_key, False))
+        st.audio(
+            st.session_state[cache_key],
+            format="audio/mp3",
+            autoplay=autoplay,
+        )
+        st.caption("Nếu iPhone chặn tự phát, hãy bấm nút ▶ trong trình phát một lần.")
 
 
 def _start_guidance_job(
@@ -561,6 +573,12 @@ def render_ocr_tab(
     partial = st.session_state.partial_page_analyses
 
     reasoning_effort = config.get("reasoning_effort", "standard")
+    analysis_mode = config.get("analysis_mode", "full_analysis")
+    analyze_button_label = (
+        "🧠 Phân tích toàn bộ từ vựng, Kanji và ngữ pháp"
+        if analysis_mode == "full_analysis"
+        else "🧩 Dịch và giải thích từng câu"
+    )
 
     if not analysis_text:
         st.warning("Chưa có văn bản OCR. Hãy OCR ít nhất một ảnh trước khi phân tích.")
@@ -632,6 +650,7 @@ def render_ocr_tab(
                     reasoning_effort=reasoning_effort,
                     auto_sentence_deep_dive=config.get("auto_sentence_deep_dive", True),
                     auto_translation_guidance=config.get("auto_translation_guidance", True),
+                    analysis_mode=analysis_mode,
                 )
                 all_page_analyses = partial + new_results.get("page_analyses", [])
                 st.session_state.analysis = text_analyzer_module.merge_page_analyses(
@@ -646,7 +665,7 @@ def render_ocr_tab(
 
         if analysis_language == "japanese":
             if st.button(
-                "🧠 Phân tích bằng Gemini",
+                analyze_button_label,
                 type="primary",
                 use_container_width=True,
                 disabled=not all_pages_ready,
@@ -659,6 +678,7 @@ def render_ocr_tab(
                     "reasoning_effort": reasoning_effort,
                     "auto_sentence_deep_dive": config.get("auto_sentence_deep_dive", True),
                     "auto_translation_guidance": config.get("auto_translation_guidance", True),
+                    "analysis_mode": analysis_mode,
                 }
                 input_text = json.dumps(input_data)
                 job_id = create_job(
@@ -680,7 +700,7 @@ def render_ocr_tab(
                 st.rerun()
         else:
             if st.button(
-                "🧠 Phân tích từng trang đã OCR",
+                analyze_button_label,
                 type="primary",
                 use_container_width=True,
                 disabled=not all_pages_ready,
@@ -693,6 +713,7 @@ def render_ocr_tab(
                     "reasoning_effort": reasoning_effort,
                     "auto_sentence_deep_dive": config.get("auto_sentence_deep_dive", True),
                     "auto_translation_guidance": config.get("auto_translation_guidance", True),
+                    "analysis_mode": analysis_mode,
                 }
                 input_text = json.dumps(input_data)
                 job_id = create_job(

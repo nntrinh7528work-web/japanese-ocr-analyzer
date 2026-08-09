@@ -81,19 +81,35 @@ def render_sidebar(
             horizontal=False,
         )
 
+        analysis_mode = st.radio(
+            "Nội dung phân tích",
+            options=["full_analysis", "sentence_guidance"],
+            index=0 if st.session_state.get("analysis_mode", "full_analysis") == "full_analysis" else 1,
+            format_func=lambda value: (
+                "Toàn bộ từ vựng, Kanji và ngữ pháp"
+                if value == "full_analysis"
+                else "Dịch và giải thích từng câu (tiết kiệm token)"
+            ),
+            help=(
+                "Hai chế độ loại trừ nhau để không gọi Gemini trùng nội dung. "
+                "Chế độ từng câu bỏ qua lượt tạo bảng từ vựng/Kanji/ngữ pháp."
+            ),
+        )
+        st.session_state["analysis_mode"] = analysis_mode
+
         auto_sentence_deep_dive = st.toggle(
             "Tự động giải mã câu dài",
-            value=bool(st.session_state.get("auto_sentence_deep_dive", True)),
+            value=bool(st.session_state.get("auto_sentence_deep_dive", False)),
             help="Tự chọn tối đa 3 câu khó mỗi trang và 15 câu trong toàn tài liệu để phân tích sâu.",
         )
         st.session_state["auto_sentence_deep_dive"] = auto_sentence_deep_dive
 
-        auto_translation_guidance = st.toggle(
-            "Tự động tạo hướng dẫn dịch từng câu",
-            value=bool(st.session_state.get("auto_translation_guidance", True)),
-            help="Tạo bản dịch và 1-3 gợi ý giáo viên cho mọi câu OCR sau phân tích chính.",
-        )
+        auto_translation_guidance = analysis_mode == "sentence_guidance"
         st.session_state["auto_translation_guidance"] = auto_translation_guidance
+        if analysis_mode == "full_analysis":
+            st.caption("Chỉ chạy lượt phân tích bảng; không gọi hướng dẫn dịch cho mọi câu.")
+        else:
+            st.caption("Chỉ chạy hướng dẫn từng câu; không gọi lượt tạo bảng từ vựng/Kanji/ngữ pháp.")
 
     with st.sidebar.expander("🗂️ Lưu vào Notion", expanded=False):
         notion_state = notion_connection_state()
@@ -118,6 +134,9 @@ def render_sidebar(
     if st.session_state.get("_last_analysis_language") not in (None, analysis_language):
         clear_analysis_fn()
     st.session_state["_last_analysis_language"] = analysis_language
+    if st.session_state.get("_last_analysis_mode") not in (None, analysis_mode):
+        clear_analysis_fn()
+    st.session_state["_last_analysis_mode"] = analysis_mode
 
     # Group cost options inside expander
     with st.sidebar.expander("💰 Ước tính chi phí", expanded=False):
@@ -164,6 +183,7 @@ def render_sidebar(
         "text_model_choice": text_model_choice,
         "reasoning_effort": reasoning_effort,
         "analysis_language": analysis_language,
+        "analysis_mode": analysis_mode,
         "auto_sentence_deep_dive": auto_sentence_deep_dive,
         "auto_translation_guidance": auto_translation_guidance,
         "auto_notion_sync": auto_notion_sync,

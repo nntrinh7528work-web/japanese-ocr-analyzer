@@ -66,6 +66,47 @@ class TestTextToSpeech(unittest.TestCase):
             "Đây là bản dịch.", "vi-VN-HoaiMyNeural", rate="+0%"
         )
 
+    def test_empty_edge_audio_uses_gtts_fallback(self):
+        from modules.tts_engine import text_to_speech
+
+        edge_module = types.ModuleType("edge_tts")
+        edge_instance = MagicMock()
+
+        async def empty_stream():
+            if False:
+                yield None
+
+        edge_instance.stream = empty_stream
+        edge_module.Communicate = MagicMock(return_value=edge_instance)
+
+        gtts_module = types.ModuleType("gtts")
+        gtts_instance = MagicMock()
+        gtts_instance.write_to_fp.side_effect = lambda buffer: buffer.write(b"fallback_audio")
+        gtts_module.gTTS = MagicMock(return_value=gtts_instance)
+
+        with patch.dict(sys.modules, {"edge_tts": edge_module, "gtts": gtts_module}):
+            result = text_to_speech("テスト", lang="ja")
+
+        self.assertEqual(result, b"fallback_audio")
+        gtts_module.gTTS.assert_called_once_with(
+            text="テスト", lang="ja", slow=False, timeout=30
+        )
+
+    def test_failure_exposes_diagnostic(self):
+        from modules.tts_engine import get_last_tts_error, text_to_speech
+
+        edge_module = types.ModuleType("edge_tts")
+        edge_module.Communicate = MagicMock(side_effect=RuntimeError("edge offline"))
+        gtts_module = types.ModuleType("gtts")
+        gtts_module.gTTS = MagicMock(side_effect=RuntimeError("google offline"))
+
+        with patch.dict(sys.modules, {"edge_tts": edge_module, "gtts": gtts_module}):
+            result = text_to_speech("テスト", lang="ja")
+
+        self.assertIsNone(result)
+        self.assertIn("edge offline", get_last_tts_error())
+        self.assertIn("google offline", get_last_tts_error())
+
 
 class TestGenerateDialogueAudio(unittest.TestCase):
     """Tests for generate_dialogue_audio function."""

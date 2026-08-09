@@ -8,10 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import logging
+from contextvars import ContextVar
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+_LAST_TTS_ERROR: ContextVar[str] = ContextVar("last_tts_error", default="")
+TTS_TIMEOUT_SECONDS = 30
 
 # Highly natural Microsoft Edge Neural Voices
 VOICES = {
@@ -61,7 +65,9 @@ def text_to_speech(
         MP3 audio bytes, or None if generation fails.
     """
     if not text or not text.strip():
+        _LAST_TTS_ERROR.set("Văn bản đọc đang rỗng.")
         return None
+    _LAST_TTS_ERROR.set("")
 
     # Normalise language code
     normalized_lang = str(lang or "ja").lower()
@@ -79,24 +85,48 @@ def text_to_speech(
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            return loop.run_until_complete(_edge_tts_async(text.strip(), voice, rate))
+            audio = loop.run_until_complete(
+                asyncio.wait_for(
+                    _edge_tts_async(text.strip(), voice, rate),
+                    timeout=TTS_TIMEOUT_SECONDS,
+                )
+            )
+            if not audio:
+                raise RuntimeError("Edge TTS không trả về dữ liệu audio.")
+            return audio
         finally:
             loop.close()
+            asyncio.set_event_loop(None)
     except Exception as e:
         logger.error("Edge TTS generation failed: %s", e)
         # Fallback to gTTS if edge-tts fails for some reason
         try:
             from gtts import gTTS
-            import io
             gtts_lang = lang_key
-            tts = gTTS(text=text.strip(), lang=gtts_lang, slow=slow)
+            tts = gTTS(
+                text=text.strip(),
+                lang=gtts_lang,
+                slow=slow,
+                timeout=TTS_TIMEOUT_SECONDS,
+            )
             buffer = io.BytesIO()
             tts.write_to_fp(buffer)
             buffer.seek(0)
-            return buffer.read()
+            audio = buffer.read()
+            if not audio:
+                raise RuntimeError("gTTS không trả về dữ liệu audio.")
+            return audio
         except Exception as fallback_err:
             logger.error("Fallback gTTS also failed: %s", fallback_err)
+            _LAST_TTS_ERROR.set(
+                f"Edge TTS: {e}. Dự phòng gTTS: {fallback_err}."
+            )
             return None
+
+
+def get_last_tts_error() -> str:
+    """Return a user-safe diagnostic for the latest TTS call in this context."""
+    return _LAST_TTS_ERROR.get()
 
 
 def generate_dialogue_audio(

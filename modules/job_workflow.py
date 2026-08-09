@@ -17,17 +17,26 @@ def sync_job_state(
     job: dict[str, Any],
     session_id: str,
     current_source_hash: str | None = None,
+    current_analysis_mode: str | None = None,
 ) -> tuple[str, bool]:
     """Apply owned job progress/result and return ``(status, changed)``."""
     if job.get("session_id") not in (None, session_id):
         return "foreign", False
     if job.get("source_hash") and current_source_hash != job["source_hash"]:
         return "stale", False
+    result = job.get("result") or {}
+    partial = list(job.get("partial_result") or [])
+    result_mode = str(
+        result.get("analysis_mode")
+        or ((partial[0].get("analysis_mode") if partial else ""))
+        or ""
+    )
+    if current_analysis_mode and result_mode and result_mode != current_analysis_mode:
+        return "stale", False
 
     state["current_job_id"] = job_id
     status = str(job.get("status") or "pending")
     changed = False
-    partial = list(job.get("partial_result") or [])
 
     if partial and status in ("running", "failed"):
         if state.get("partial_page_analyses") != partial:
@@ -35,7 +44,6 @@ def sync_job_state(
             changed = True
 
     if status == "done" and state.get("applied_job_id") != job_id:
-        result = job.get("result") or {}
         is_sentence_job = str(job.get("lang") or "").startswith("sentence_") or result.get("job_kind") == "sentence_deep_dive"
         is_guidance_job = str(job.get("lang") or "").startswith("guidance_") or result.get("job_kind") == "translation_guidance"
         if is_guidance_job:

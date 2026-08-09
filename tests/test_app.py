@@ -75,9 +75,27 @@ def test_app_blocks_analysis_until_every_uploaded_page_has_ocr_text():
     app.session_state["camera_version"] = 0
     app.run(timeout=20)
 
-    analyze = next(button for button in app.button if button.label == "🧠 Phân tích bằng Gemini")
+    analyze = next(
+        button for button in app.button
+        if button.label == "🧠 Phân tích toàn bộ từ vựng, Kanji và ngữ pháp"
+    )
     assert analyze.disabled is True
     assert any("còn trang chưa có OCR" in message.value for message in app.error)
+
+
+def test_app_offers_mutually_exclusive_token_saving_analysis_modes():
+    app = AppTest.from_file("app.py").run(timeout=20)
+
+    mode = next(radio for radio in app.radio if radio.label == "Nội dung phân tích")
+    assert mode.options == [
+        "Toàn bộ từ vựng, Kanji và ngữ pháp",
+        "Dịch và giải thích từng câu (tiết kiệm token)",
+    ]
+
+    mode.set_value("sentence_guidance").run(timeout=20)
+
+    assert app.session_state["analysis_mode"] == "sentence_guidance"
+    assert app.session_state["auto_translation_guidance"] is True
 
 
 def test_app_renders_analysis_download_options():

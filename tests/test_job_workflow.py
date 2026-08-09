@@ -53,6 +53,27 @@ def test_stale_job_result_is_rejected_after_ocr_edit():
     assert state["analysis"] is None
 
 
+def test_stale_job_result_is_rejected_after_analysis_mode_change():
+    state = {"analysis": None}
+    job = {
+        "status": "done",
+        "session_id": "mine",
+        "result": {"summary": "old mode", "analysis_mode": "full_analysis"},
+    }
+
+    status, changed = sync_job_state(
+        state,
+        "job",
+        job,
+        "mine",
+        current_analysis_mode="sentence_guidance",
+    )
+
+    assert status == "stale"
+    assert changed is False
+    assert state["analysis"] is None
+
+
 def test_sentence_job_merges_without_replacing_main_analysis_or_double_counting():
     state = {
         "analysis": {

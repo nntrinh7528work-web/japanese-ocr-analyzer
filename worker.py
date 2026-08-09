@@ -54,6 +54,7 @@ def run_job(job_id: str, text: str, lang: str):
             reasoning_effort = pages_data.get("reasoning_effort", "standard")
             auto_sentence_deep_dive = bool(pages_data.get("auto_sentence_deep_dive", True))
             auto_translation_guidance = bool(pages_data.get("auto_translation_guidance", True))
+            analysis_mode = str(pages_data.get("analysis_mode") or "full_analysis")
             analysis_lang = "japanese" if lang == "pdf_ja" else "english"
             partial_results = list(job_data.get("partial_result") or []) if job_data else []
 
@@ -74,6 +75,7 @@ def run_job(job_id: str, text: str, lang: str):
                 reasoning_effort=reasoning_effort,
                 auto_sentence_deep_dive=auto_sentence_deep_dive,
                 auto_translation_guidance=auto_translation_guidance,
+                analysis_mode=analysis_mode,
                 page_done_callback=_persist_page,
             )
         else:
@@ -103,8 +105,12 @@ def run_job(job_id: str, text: str, lang: str):
             items = session_store.load_image_items(session_id)
             current_hash = items_source_hash(items)
             if not job_data.get("source_hash") or current_hash == job_data.get("source_hash"):
-                session_store.save_analysis(session_id, result, [])
                 settings = session_store.load_settings(session_id)
+                selected_mode = str(settings.get("analysis_mode") or "full_analysis")
+                result_mode = str(result.get("analysis_mode") or "full_analysis")
+                if selected_mode != result_mode:
+                    return
+                session_store.save_analysis(session_id, result, [])
                 if settings.get("auto_notion_sync", True) and notion_connection_state()["configured"]:
                     notion_run = enqueue_analysis_sync(
                         session_id,

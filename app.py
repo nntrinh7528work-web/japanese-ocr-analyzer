@@ -53,8 +53,9 @@ for key, default in {
     "dialogue_history_id": None,
     "dialogue_quiz_results": {},
     "dark_mode": False,
-    "auto_sentence_deep_dive": True,
+    "auto_sentence_deep_dive": False,
     "auto_translation_guidance": True,
+    "analysis_mode": "full_analysis",
     "auto_notion_sync": True,
     "billing_tier": "free",
 }.items():
@@ -83,6 +84,7 @@ if not st.session_state.session_restored:
             "usd_to_jpy",
             "auto_sentence_deep_dive",
             "auto_translation_guidance",
+            "analysis_mode",
             "auto_notion_sync",
             "billing_tier",
         ):
@@ -141,6 +143,7 @@ if job_id_from_url:
             job,
             st.session_state.session_id,
             current_source_hash=items_source_hash(st.session_state.image_items),
+            current_analysis_mode=st.session_state.get("analysis_mode", "full_analysis"),
         )
     if job_status == "foreign":
         st.error("Job phân tích này không thuộc phiên làm việc hiện tại.")
@@ -246,6 +249,7 @@ session_store.save_settings(
         "usd_to_jpy": config["usd_to_jpy"],
         "auto_sentence_deep_dive": config["auto_sentence_deep_dive"],
         "auto_translation_guidance": config["auto_translation_guidance"],
+        "analysis_mode": config["analysis_mode"],
         "auto_notion_sync": config["auto_notion_sync"],
         "billing_tier": config["billing_tier"],
     },

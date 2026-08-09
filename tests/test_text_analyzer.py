@@ -438,6 +438,7 @@ def test_guidance_batches_persist_and_one_failure_does_not_block_later_batch(mon
         [{"page_index": 1, "page_name": "p1", "text": source, "notes": []}],
         page_done_callback=callbacks.append,
         auto_sentence_deep_dive=False,
+        analysis_mode="sentence_guidance",
     )
     page = result["page_analyses"][0]
 
@@ -446,6 +447,48 @@ def test_guidance_batches_persist_and_one_failure_does_not_block_later_batch(mon
     assert len(page["translation_guidance"]) == 1
     assert page["translation_guidance_usage"]["input_tokens"] == 2
     assert len(callbacks) == 3  # main result, failed batch, successful batch
+
+
+def test_sentence_guidance_mode_skips_full_analysis_prompt(monkeypatch):
+    class Model:
+        target_model_name = "gemini-test"
+
+        def generate_content(self, *_args, **_kwargs):
+            raise AssertionError("Không được gọi prompt phân tích bảng")
+
+    monkeypatch.setattr(text_analyzer, "_init_model", lambda *_args: Model())
+    monkeypatch.setattr(
+        text_analyzer,
+        "analyze_guidance_batch",
+        lambda _model, batch, *_args, **_kwargs: (
+            [
+                {
+                    "sentence_id": row["sentence_id"],
+                    "ordinal": row["ordinal"],
+                    "original": row["original"],
+                    "translations": {"natural": "Bản dịch"},
+                    "key_points": [],
+                    "translation_steps": [],
+                    "related_analysis": [],
+                }
+                for row in batch
+            ],
+            {"input_tokens": 4, "output_tokens": 6},
+        ),
+    )
+
+    result = text_analyzer.run_page_analyses(
+        [{"page_index": 1, "page_name": "p1", "text": "雨が降っています。", "notes": []}],
+        analysis_language="japanese",
+        analysis_mode="sentence_guidance",
+        auto_sentence_deep_dive=False,
+    )
+
+    page = result["page_analyses"][0]
+    assert result["analysis_mode"] == "sentence_guidance"
+    assert result["usage"]["input_tokens"] == 0
+    assert page["vocabulary_all"] == []
+    assert page["translation_guidance"][0]["translations"]["natural"] == "Bản dịch"
 
 
 def test_empty_text_rejected():

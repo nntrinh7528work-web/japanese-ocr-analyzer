@@ -805,6 +805,38 @@ def prepare_pages(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return prepared
 
 
+def _sentence_guidance_page(
+    page: dict[str, Any],
+    language: str,
+    model_name: str | None,
+) -> dict[str, Any]:
+    """Build a zero-token base page when only sentence guidance is requested."""
+    source_text = str(page["text"])
+    return {
+        "analysis_language": language,
+        "analysis_mode": "sentence_guidance",
+        "confirmed_text": source_text,
+        "summary": "Dịch và giải thích từng câu từ văn bản OCR.",
+        "ocr_corrections": [],
+        "vocabulary_all": [],
+        "vocabulary_important": [],
+        "phrasal_collocations": [],
+        "discourse_markers": [],
+        "kanji_analysis": [],
+        "connectors": [],
+        "grammar_points": [],
+        "sentence_patterns": [],
+        "section_markdown": {},
+        "full_markdown": "",
+        "usage": dict(ZERO_USAGE),
+        "model_used": model_name or "gemini-3.5-flash",
+        "page_index": page["page_index"],
+        "page_name": page["page_name"],
+        "source_label": f"Trang {page['page_index']}: {page['page_name']}",
+        "source_text": source_text,
+    }
+
+
 def run_page_analyses(
     pages: list[dict[str, Any]],
     analysis_language: str = "english",
@@ -815,6 +847,7 @@ def run_page_analyses(
     reasoning_effort: str = "standard",
     auto_sentence_deep_dive: bool = True,
     auto_translation_guidance: bool = True,
+    analysis_mode: str = "full_analysis",
 ) -> dict[str, Any]:
     """Analyze each OCR page concurrently, then return a merged report with per-page details.
 
@@ -831,8 +864,14 @@ def run_page_analyses(
             15 across the document in a separate, non-blocking Gemini phase.
         auto_translation_guidance: Generate compact Vietnamese teacher guidance
             for every source sentence before the deep-dive phase.
+        analysis_mode: ``"full_analysis"`` runs the vocabulary/Kanji/grammar
+            prompt. ``"sentence_guidance"`` skips it and only calls the
+            sentence-guidance prompt, saving the main-analysis tokens.
     """
     language = _analysis_language(analysis_language)
+    if analysis_mode not in {"full_analysis", "sentence_guidance"}:
+        raise ValueError(f"Chế độ phân tích không hợp lệ: {analysis_mode}")
+    auto_translation_guidance = analysis_mode == "sentence_guidance"
     prepared_pages = prepare_pages(pages)
     model = _init_model(model_name) if model_name else _init_model()
     total = len(prepared_pages)
@@ -850,7 +889,11 @@ def run_page_analyses(
     completed = 0
 
     def _work(index: int, page: dict) -> tuple[int, dict[str, Any]]:
-        base = analyze_single_page(model, page, language, reasoning_effort=reasoning_effort)
+        if analysis_mode == "sentence_guidance":
+            base = _sentence_guidance_page(page, language, model_name)
+        else:
+            base = analyze_single_page(model, page, language, reasoning_effort=reasoning_effort)
+            base["analysis_mode"] = "full_analysis"
         result = attach_sentence_data(base, catalogs.get(int(page["page_index"]), []))
         result.setdefault("translation_guidance", [])
         result.setdefault("translation_guidance_usage", dict(ZERO_USAGE))
