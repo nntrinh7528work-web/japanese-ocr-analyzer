@@ -249,7 +249,9 @@ session_store.save_settings(
         "usd_to_jpy": config["usd_to_jpy"],
         "auto_sentence_deep_dive": config["auto_sentence_deep_dive"],
         "auto_translation_guidance": config["auto_translation_guidance"],
-        "analysis_mode": config["analysis_mode"],
+        "analysis_mode": config.get(
+            "analysis_mode", st.session_state.get("analysis_mode", "full_analysis")
+        ),
         "auto_notion_sync": config["auto_notion_sync"],
         "billing_tier": config["billing_tier"],
     },
