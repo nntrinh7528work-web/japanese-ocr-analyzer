@@ -466,6 +466,15 @@ def test_schema_upgrade_adds_columns_and_preserves_existing_select_options():
     assert "Nhóm" in properties
 
 
+def test_text_limit_uses_notion_utf16_length_for_emoji():
+    value = "a" * 1998 + "😞" + "b"
+
+    content = notion_sync._text(value)[0]["text"]["content"]
+
+    assert content == "a" * 1998 + "😞"
+    assert len(content.encode("utf-16-le")) // 2 == 2000
+
+
 def test_bootstrapped_database_is_rediscovered_after_local_cache_reset():
     class Client:
         def request(self, method, path, payload=None):

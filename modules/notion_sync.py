@@ -292,7 +292,17 @@ class NotionClient:
 
 
 def _text(content: Any, limit: int = 2000) -> list[dict]:
-    value = str(content or "").strip()[:limit]
+    value = str(content or "").strip()
+    if len(value.encode("utf-16-le")) // 2 > limit:
+        used_units = 0
+        prefix: list[str] = []
+        for character in value:
+            character_units = 2 if ord(character) > 0xFFFF else 1
+            if used_units + character_units > limit:
+                break
+            prefix.append(character)
+            used_units += character_units
+        value = "".join(prefix)
     return [{"type": "text", "text": {"content": value}}] if value else []
 
 
