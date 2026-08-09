@@ -8,7 +8,7 @@ import re
 from typing import Any, Iterable
 
 
-NOTION_LAYOUT_VERSION = "3.0"
+NOTION_LAYOUT_VERSION = "4.0"
 TABLE_ROWS_PER_BLOCK = 40
 
 _TECHNICAL_KEYS = {
@@ -555,18 +555,42 @@ def render_notion_item_markdown(item: dict[str, Any]) -> str:
         source = {"Dữ liệu nguồn": item.get("source_json")}
     coverage = _Coverage(_leaf_paths(source, "source"))
     details = _field_lines(source if isinstance(source, dict) else {"value": source}, "source", coverage)
+    item_type = str(item.get("type") or "Mục cần học")
+    summary_lines = [f"**Loại:** {_plain(item_type)}"]
+    if item_type == "Câu":
+        summary_lines.extend([
+            f"**ID câu:** {_plain(item.get('sentence_id'))}",
+            f"**Trang / thứ tự:** {int(item.get('page_index') or 0)} / {int(item.get('source_order') or 0)}",
+            f"**Nguyên văn:** {_plain(item.get('original'))}",
+            f"**Hiragana:** {_plain(item.get('reading'))}",
+            f"**Dịch tự nhiên:** {_plain(item.get('natural_translation'))}",
+            f"**Câu khó:** {'Có' if item.get('is_complex') else 'Không'}",
+        ])
+    elif item_type == "Kanji":
+        summary_lines.extend([
+            f"**Âm On:** {_plain(item.get('onyomi'))}",
+            f"**Âm Kun:** {_plain(item.get('kunyomi'))}",
+            f"**Nghĩa tiếng Việt:** {_plain(item.get('meaning_vi'))}",
+            f"**Vai trò trong bài:** {_plain(item.get('nuance'))}",
+        ])
+    elif item_type == "Từ vựng":
+        summary_lines.extend([
+            f"**Nhóm:** {_plain(item.get('groups'))}",
+            f"**Cách đọc:** {_plain(item.get('reading'))}",
+            f"**Nghĩa tiếng Việt:** {_plain(item.get('meaning_vi'))}",
+            f"**Mức độ:** {_plain(item.get('difficulty'))}",
+        ])
+    else:
+        summary_lines.extend([
+            f"**Cấu trúc:** {_plain(item.get('formation'))}",
+            f"**Nghĩa / Chức năng:** {_plain(item.get('meaning_vi'))}",
+            f"**Sắc thái:** {_plain(item.get('nuance'))}",
+            f"**Mức độ:** {_plain(item.get('difficulty'))}",
+        ])
     header = [
         f"# {_escape(item.get('title') or 'Mục cần học')}",
         _callout(
-            "\n".join(
-                [
-                    f"**Loại:** {_plain(item.get('type'))}",
-                    f"**Trang:** {int(item.get('page_index') or 0)}",
-                    f"**Thứ tự nguồn:** {int(item.get('source_order') or 0)}",
-                    f"**Cách đọc:** {_plain(item.get('reading'))}",
-                    f"**Nghĩa tiếng Việt:** {_plain(item.get('meaning_vi'))}",
-                ]
-            ),
+            "\n".join(line for line in summary_lines if not line.endswith(": ")),
             icon="📚",
             color="green_bg",
         ),

@@ -43,11 +43,13 @@ NOTION_PARENT_PAGE_ID = "..."
 PUBLIC_APP_URL = "https://japanese-ocr-analyzer-vn.streamlit.app/"
 ```
 
-Ở lần đồng bộ đầu tiên, app tự tạo hai bảng liên kết `Bài phân tích` và
-`Mục cần học`, cùng các view ôn tập. Token chỉ được đọc từ environment hoặc
+Ở lần đồng bộ đầu tiên, app tự tạo năm bảng liên kết: `Bài phân tích`,
+`Câu & bản dịch`, `Từ vựng`, `Kanji` và `Ngữ pháp & liên kết`, cùng các view
+ôn tập tối ưu cho điện thoại. Token chỉ được đọc từ environment hoặc
 Streamlit Secrets; SQLite và file JSON không lưu token. Có thể điền thêm các
 database/data-source ID trong `.streamlit/secrets.toml.example` để giữ cấu hình
-ổn định khi máy chủ được tạo lại.
+ổn định khi máy chủ được tạo lại. Nếu không điền, app tự tìm lại năm database
+theo tên bên dưới trang Study Hub trước khi tạo mới.
 
 Sau khi phân tích hoàn tất, app lưu kết quả trước rồi đồng bộ Notion trong nền.
 Lỗi quyền hoặc mạng không làm mất kết quả Gemini; giao diện có trạng thái, link
@@ -56,12 +58,18 @@ mở trang Notion và nút thử lại.
 Mỗi kết quả đồng bộ được lưu thành một phiên bản độc lập theo `OCR hash` và
 `Analysis hash`; chạy lại cùng OCR với kết quả mới không ghi đè bài cũ. Trang
 `Bài phân tích` chứa nội dung đầy đủ và file JSON gốc có SHA-256 để kiểm tra tính
-toàn vẹn. Các cột OCR, hướng dẫn dịch, bản dịch, từ vựng, kanji/cụm từ, từ nối,
-ngữ pháp, mẫu câu, câu dài, token và chi phí là bản tóm lược để tìm kiếm.
+toàn vẹn. Nội dung dài nằm trong page body; database bài chỉ giữ metadata,
+số lượng, token, chi phí và trạng thái để lọc nhanh.
 
-Bảng `Mục cần học` nhận toàn bộ từ vựng cùng kanji, cụm từ, từ nối, ngữ pháp,
-mẫu câu và câu dài. App không ghi đè các cột học tập do người dùng quản lý như
-`Trạng thái`, `Ngày ôn tiếp`, `Lần ôn gần nhất` và `Số lần ôn` khi đồng bộ lại.
+Các concept trùng nhau được gộp xuyên nhiều bài và liên kết tới mọi câu nguồn.
+Từ trong cột `Từ vựng trong bài` của phần Kanji được tạo thành mục `Từ vựng
+Kanji`; Âm On và Âm Kun được lưu riêng. App không ghi đè các cột học tập do
+người dùng quản lý như `Trạng thái`, `Ngày ôn tiếp`, `Lần ôn gần nhất` và
+`Số lần ôn` khi đồng bộ lại.
+
+Workspace cũ được backup và nâng cấp có checkpoint bằng
+`python scripts/rebuild_notion_v4.py --confirm`. Bỏ `--confirm` để chỉ chạy
+preflight đọc dữ liệu, không thay đổi Notion.
 
 ## Luồng nhiều ảnh
 

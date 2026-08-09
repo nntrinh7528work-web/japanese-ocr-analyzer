@@ -83,13 +83,13 @@ def test_build_payload_extracts_all_rows_and_structured_notion_markdown():
     assert "Từ vựng" in payload["markdown"]
     assert payload["render_coverage"]["complete"] is True
     assert payload["unrendered_field_count"] == 0
-    assert payload["layout_version"] == "3.0"
+    assert payload["layout_version"] == "4.0"
     assert {row["type"] for row in payload["learning_items"]} == {
-        "Từ vựng", "Kanji", "Từ nối", "Ngữ pháp", "Câu dài"
+        "Từ vựng", "Kanji", "Từ nối", "Ngữ pháp", "Câu"
     }
-    sentence = next(row for row in payload["learning_items"] if row["type"] == "Câu dài")
+    sentence = next(row for row in payload["learning_items"] if row["type"] == "Câu")
     assert sentence["sentence_id"] == "p1-s1"
-    assert sentence["translation_vi"].startswith("Vì trời mưa")
+    assert sentence["natural_translation"].startswith("Vì trời mưa")
     raw = json.loads(payload["raw_json"])
     assert raw["analysis"] == _analysis()
     assert raw["sources"][0]["edited_text"] == "雨なので、予定を変更した。"
@@ -132,25 +132,26 @@ def test_incomplete_page_analysis_is_marked_partial_and_reports_missing_page():
     assert properties["Trạng thái"]["select"]["name"] == "Một phần"
 
 
-def test_notion_property_previews_strip_markdown_without_changing_source_json():
+def test_kanji_properties_keep_on_and_kun_readings_separate():
     item = {
         "title": "**響**",
-        "external_id": "learn:one",
+        "external_id": "concept:kanji:one",
         "type": "Kanji",
         "language": "japanese",
         "meaning_vi": "**vang vọng**",
-        "formation": r"\~てくれる",
+        "onyomi": "キョウ",
+        "kunyomi": "ひび.く",
         "source_json": '{"kanji":"**響**"}',
         "source_checksum": "checksum",
     }
 
-    properties = notion_sync._item_properties(item, "lesson", None)
+    properties = notion_sync._entity_properties(item, "kanji", "lesson", None, {}, {})
 
-    assert properties["Tên"]["title"][0]["text"]["content"] == "響"
+    assert properties["Kanji"]["title"][0]["text"]["content"] == "響"
     assert properties["Nghĩa tiếng Việt"]["rich_text"][0]["text"]["content"] == "vang vọng"
-    assert properties["Công thức / Cấu tạo"]["rich_text"][0]["text"]["content"] == "~てくれる"
+    assert properties["Âm On"]["rich_text"][0]["text"]["content"] == "キョウ"
+    assert properties["Âm Kun"]["rich_text"][0]["text"]["content"] == "ひび.く"
     assert "**響**" in properties["Dữ liệu nguồn"]["rich_text"][0]["text"]["content"]
-    assert properties["Thứ tự nguồn"]["number"] == 0
 
 
 def test_extracts_all_vocabulary_and_sentence_patterns_with_study_fields():
@@ -184,6 +185,87 @@ def test_detailed_vocabulary_does_not_double_count_the_same_occurrence():
     assert row["occurrences_in_analysis"] == 1
 
 
+def test_v4_extracts_every_kanji_vocabulary_shape_and_links_concepts():
+    analysis = _analysis()
+    page = analysis["page_analyses"][0]
+    page["source_text"] = "対応と応答について対話する。"
+    page["vocabulary_all"] = [
+        {"word": "対応", "reading": "たいおう", "meaning": "đối ứng", "jlpt": "N3"}
+    ]
+    page["kanji_analysis"] = [
+        {
+            "kanji": "対", "onyomi": "タイ", "kunyomi": "む.かう",
+            "meaning": "đối", "vocab": "対応、対話", "example": page["source_text"],
+        },
+        {
+            "kanji": "応", "onyomi": ["オウ"], "kunyomi": "こた.える",
+            "meaning": "ứng", "vocab": ["対応", {"word": "応答", "reading": "おうとう", "meaning": "phản hồi"}],
+            "example": page["source_text"],
+        },
+    ]
+
+    entities = notion_sync.extract_notion_entities(analysis, "analysis:one")
+    vocabulary = {row["title"]: row for row in entities["vocabulary"]}
+    kanji = {row["title"]: row for row in entities["kanji"]}
+
+    assert set(vocabulary) >= {"対応", "対話", "応答"}
+    assert "Từ vựng Kanji" in vocabulary["対応"]["groups"]
+    assert vocabulary["対応"]["reading"] == "たいおう"
+    assert vocabulary["対応"]["missing_details"] is False
+    assert vocabulary["応答"]["reading"] == "おうとう"
+    assert vocabulary["応答"]["meaning_vi"] == "phản hồi"
+    assert vocabulary["応答"]["missing_details"] is False
+    assert len(vocabulary["対応"]["related_kanji_external_ids"]) == 2
+    assert kanji["対"]["onyomi"] == "タイ"
+    assert kanji["対"]["kunyomi"] == "む.かう"
+    assert kanji["応"]["related_vocabulary_external_ids"]
+
+
+def test_v3_durable_payload_is_upgraded_from_raw_json_without_gemini():
+    payload = notion_sync.build_notion_sync_payload("session-a", _items(), _analysis())
+    legacy = {key: value for key, value in payload.items() if key not in {
+        "sentences", "vocabulary", "kanji", "language_items"
+    }}
+
+    upgraded = notion_sync._upgrade_payload_v4(legacy)
+
+    assert upgraded["sentences"]
+    assert upgraded["vocabulary"]
+    assert upgraded["kanji"]
+    assert upgraded["language_items"]
+
+
+def test_kanji_vocabulary_uses_details_from_a_later_page_before_building_id():
+    analysis = _analysis()
+    first = analysis["page_analyses"][0]
+    first["vocabulary_important"] = []
+    first["kanji_analysis"] = [{"kanji": "応", "vocab": "応答", "meaning": "ứng"}]
+    second = {
+        **first,
+        "page_index": 2,
+        "source_text": "応答を待つ。",
+        "vocabulary_all": [{"word": "応答", "reading": "おうとう", "meaning": "phản hồi"}],
+        "kanji_analysis": [],
+        "sentence_breakdowns": [],
+    }
+    analysis["page_analyses"] = [first, second]
+
+    entities = notion_sync.extract_notion_entities(analysis, "analysis:one")
+    matches = [row for row in entities["vocabulary"] if row["title"] == "応答"]
+
+    assert len(matches) == 1
+    assert matches[0]["reading"] == "おうとう"
+    assert matches[0]["meaning_vi"] == "phản hồi"
+    assert "Từ vựng Kanji" in matches[0]["groups"]
+
+
+def test_language_pattern_keeps_the_display_marker():
+    entities = notion_sync.extract_notion_entities(_analysis(), "analysis:one")
+    grammar = next(row for row in entities["language_items"] if row["type"] == "Ngữ pháp")
+
+    assert grammar["title"] == "～ので"
+
+
 def test_extract_english_rows_includes_collocations_and_discourse_markers():
     analysis = _analysis("english")
     page = analysis["page_analyses"][0]
@@ -199,7 +281,7 @@ def test_extract_english_rows_includes_collocations_and_discourse_markers():
     assert not any(row["type"] == "Kanji" for row in rows)
 
 
-def test_learning_items_are_scoped_to_lesson_and_page_with_source_order():
+def test_v4_concepts_are_global_but_sentences_remain_lesson_scoped():
     analysis = _analysis()
     analysis["page_analyses"].append({
         **analysis["page_analyses"][0],
@@ -207,16 +289,11 @@ def test_learning_items_are_scoped_to_lesson_and_page_with_source_order():
         "source_label": "Trang 2",
     })
 
-    first_lesson = notion_sync.extract_learning_items(analysis, "analysis:first")
-    second_lesson = notion_sync.extract_learning_items(analysis, "analysis:second")
+    first = notion_sync.extract_notion_entities(analysis, "analysis:first")
+    second = notion_sync.extract_notion_entities(analysis, "analysis:second")
 
-    first_rain = [row for row in first_lesson if row["title"] == "雨"]
-    assert {row["page_index"] for row in first_rain} == {1, 2}
-    assert len({row["external_id"] for row in first_rain}) == 2
-    assert {row["source_order"] for row in first_rain} == {1}
-    assert {row["external_id"] for row in first_lesson}.isdisjoint(
-        {row["external_id"] for row in second_lesson}
-    )
+    assert first["kanji"][0]["external_id"] == second["kanji"][0]["external_id"]
+    assert first["sentences"][0]["external_id"] != second["sentences"][0]["external_id"]
 
 
 def test_renderer_preserves_unknown_structured_fields_in_supplemental_section():
@@ -264,7 +341,7 @@ def test_lesson_properties_are_metadata_only_and_report_render_coverage():
     assert "Ngữ pháp" not in properties
     assert properties["Đủ nội dung Notion"]["checkbox"] is True
     assert properties["Số trường chưa hiển thị"]["number"] == 0
-    assert properties["Phiên bản bố cục"]["rich_text"][0]["text"]["content"] == "3.0"
+    assert properties["Phiên bản bố cục"]["rich_text"][0]["text"]["content"] == "4.0"
 
 
 def test_study_item_page_body_keeps_every_source_field():
@@ -385,9 +462,48 @@ def test_schema_upgrade_adds_columns_and_preserves_existing_select_options():
     notion_sync._ensure_data_source_schema(client, "items", notion_sync._item_schema())
 
     properties = client.patch["properties"]
-    assert "Quan trọng" in properties
-    options = properties["Loại"]["select"]["options"]
-    assert {option.get("id") or option.get("name") for option in options} >= {"old", "Từ vựng", "Mẫu câu"}
+    assert "Thiếu chi tiết" in properties
+    assert "Nhóm" in properties
+
+
+def test_bootstrapped_database_is_rediscovered_after_local_cache_reset():
+    class Client:
+        def request(self, method, path, payload=None):
+            if path.startswith("/blocks/hub/children"):
+                return {
+                    "results": [{
+                        "id": "sentence-db", "type": "child_database",
+                        "child_database": {"title": "Câu & bản dịch"},
+                    }],
+                    "has_more": False,
+                }
+            if path == "/databases/sentence-db":
+                return {"id": "sentence-db", "data_sources": [{"id": "sentence-source"}]}
+            raise AssertionError(path)
+
+    assert notion_sync._find_child_database(
+        Client(), "hub", {"Câu & bản dịch"}
+    ) == ("sentence-db", "sentence-source")
+
+
+def test_occurrence_count_is_idempotent_for_the_same_lesson_relation():
+    item = {
+        "external_id": "concept:vocabulary:one", "title": "対応",
+        "type": "Từ vựng", "language": "japanese", "groups": ["Từ trong bài"],
+        "occurrences_in_analysis": 2, "source_json": "[]", "source_checksum": "sum",
+    }
+    existing = {
+        "properties": {
+            "Bài phân tích": {"relation": [{"id": "lesson-one"}]},
+            "Số lần xuất hiện": {"number": 3},
+        }
+    }
+
+    same = notion_sync._entity_properties(item, "vocabulary", "lesson-one", existing, {}, {})
+    another = notion_sync._entity_properties(item, "vocabulary", "lesson-two", existing, {}, {})
+
+    assert same["Số lần xuất hiện"]["number"] == 3
+    assert another["Số lần xuất hiện"]["number"] == 5
 
 
 def test_upsert_lesson_attaches_the_exact_raw_json_archive():
@@ -436,10 +552,10 @@ def test_learning_views_use_dynamic_today_filter():
     names = notion_sync._create_learning_views(client, "database", "source")
 
     assert names == [
-        "Tất cả", "Từ vựng", "Từ khó", "Kanji", "Cụm từ", "Từ nối",
-        "Ngữ pháp", "Mẫu câu", "Câu dài", "Ôn hôm nay", "Theo bài", "Đã nhớ",
+        "Tất cả", "Ôn hôm nay", "Mục mới", "Đang học", "Đã nhớ", "Theo bài",
+        "Từ khó", "Từ vựng Kanji", "Tiếng Nhật", "Tiếng Anh", "Theo cấp độ",
     ]
-    today_filter = client.created[9]["filter"]["and"][0]
+    today_filter = client.created[1]["filter"]["and"][0]
     assert today_filter == {"property": "Ngày ôn tiếp", "date": {"on_or_before": "today"}}
     assert "Đến hạn" not in notion_sync._item_schema()
 
@@ -607,6 +723,110 @@ def test_confirmed_migration_backs_up_before_archive_and_restores_study_state(mo
     )
     assert any(
         call[0] == "PATCH" and call[1] == "/pages/old-item" and (call[2] or {}).get("in_trash")
+        for call in client.calls
+    )
+
+
+def test_v4_migration_backs_up_splits_databases_and_preserves_study_state(monkeypatch):
+    archive = {
+        "sources": _items(),
+        "analysis": _analysis(),
+        "source_hash": "source",
+        "schema_version": "2.0",
+    }
+    lesson = {
+        "id": "old-lesson",
+        "properties": {
+            "External ID": {"rich_text": [{"plain_text": "analysis:old"}]},
+            "Ngày phân tích": {"date": {"start": "2026-08-01T00:00:00+00:00"}},
+            "Bản JSON gốc": {"files": [{"type": "file", "file": {"url": "https://files/archive.json"}}]},
+        },
+    }
+    old_item = {
+        "id": "old-vocab",
+        "properties": {
+            "Tên": {"title": [{"plain_text": "変更"}]},
+            "External ID": {"rich_text": [{"plain_text": "learn:legacy"}]},
+            "Loại": {"select": {"name": "Từ vựng"}},
+            "Ngôn ngữ": {"select": {"name": "Tiếng Nhật"}},
+            "Cách đọc": {"rich_text": [{"plain_text": "へんこう"}]},
+            "Trạng thái": {"select": {"name": "Đang học"}},
+            "Ngày ôn tiếp": {"date": {"start": "2026-08-10"}},
+            "Lần ôn gần nhất": {"date": {"start": "2026-08-08"}},
+            "Số lần ôn": {"number": 4},
+            "Bài phân tích": {"relation": [{"id": "old-lesson"}]},
+        },
+    }
+
+    class Response:
+        status_code = 200
+        content = json.dumps(archive, ensure_ascii=False).encode("utf-8")
+
+    class HTTP:
+        def request(self, method, url, **kwargs):
+            return Response()
+
+    class Client:
+        http = HTTP()
+
+        def __init__(self):
+            self.calls = []
+
+        def request(self, method, path, payload=None):
+            self.calls.append((method, path, payload))
+            if path.endswith("/lessons/query"):
+                return {"results": [lesson], "has_more": False}
+            if path.endswith("/items/query"):
+                return {"results": [old_item], "has_more": False}
+            return {"id": path.rsplit("/", 1)[-1]}
+
+    workspace = {
+        "lessons_database_id": "lesson-db", "lessons_data_source_id": "lessons",
+        "items_database_id": "item-db", "items_data_source_id": "items",
+        "sentences_database_id": "sentence-db", "sentences_data_source_id": "sentences",
+        "kanji_database_id": "kanji-db", "kanji_data_source_id": "kanji",
+        "language_database_id": "language-db", "language_data_source_id": "language",
+    }
+    client = Client()
+    monkeypatch.setattr(notion_migration, "ensure_notion_workspace", lambda *args: workspace)
+    monkeypatch.setattr(
+        notion_migration, "_create_backup_page",
+        lambda *args: client.calls.append(("BACKUP", "backup", None)) or {"id": "backup-page"},
+    )
+    monkeypatch.setattr(notion_migration, "_rename_vocabulary_database", lambda *args: None)
+    monkeypatch.setattr(notion_migration, "_remove_v4_obsolete_columns", lambda *args: None)
+    monkeypatch.setattr(notion_migration, "_append_hub_v4_links", lambda *args: None)
+    monkeypatch.setattr(
+        notion_migration, "_upsert_lesson",
+        lambda *args: client.calls.append(("UPSERT_LESSON", "lesson", None)) or {"id": "new-lesson"},
+    )
+    synced = []
+    monkeypatch.setattr(
+        notion_migration, "_sync_payload_entities",
+        lambda client, workspace, payload, lesson_id: synced.append(payload) or [],
+    )
+    monkeypatch.setattr(
+        notion_migration, "_query_external_id",
+        lambda client, source, external: {"id": f"new-{source}-{external[-6:]}"},
+    )
+    restored = []
+    monkeypatch.setattr(
+        notion_migration, "_restore_study_state",
+        lambda client, page_id, state: restored.append((page_id, state)),
+    )
+    settings = notion_sync.NotionSettings("token", "parent", "lesson-db", "lessons", "item-db", "items")
+
+    result = notion_migration.rebuild_notion_workspace_v4(client, settings, confirm=True)
+
+    assert result["status"] == "complete"
+    assert synced and synced[0]["sentences"] and synced[0]["kanji"]
+    assert synced[0]["vocabulary"] and synced[0]["language_items"]
+    assert next(index for index, call in enumerate(client.calls) if call[0] == "BACKUP") < next(
+        index for index, call in enumerate(client.calls) if call[0] == "UPSERT_LESSON"
+    )
+    assert any(state and state["status"] == "Đang học" and state["review_count"] == 4 for _, state in restored)
+    assert any(
+        call[0] == "PATCH" and call[1] == "/pages/old-vocab" and call[2].get("in_trash")
         for call in client.calls
     )
 

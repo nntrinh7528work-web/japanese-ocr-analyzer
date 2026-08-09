@@ -1,4 +1,4 @@
-"""Backward-compatible entry point for the current Notion v4 migration."""
+"""Read-only preflight or checkpointed Notion layout v4 migration."""
 
 from __future__ import annotations
 
@@ -14,7 +14,9 @@ from modules.notion_sync import NotionClient, get_notion_settings
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Back up and rebuild the connected Notion study databases.")
+    parser = argparse.ArgumentParser(
+        description="Back up and rebuild the connected Notion workspace into five study databases."
+    )
     parser.add_argument(
         "--confirm",
         action="store_true",
@@ -25,9 +27,7 @@ def main() -> None:
     if not settings.configured or not settings.token:
         raise SystemExit("Notion chưa được cấu hình trong môi trường này.")
     result = rebuild_notion_workspace_v4(
-        NotionClient(settings.token),
-        settings,
-        confirm=args.confirm,
+        NotionClient(settings.token), settings, confirm=args.confirm
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

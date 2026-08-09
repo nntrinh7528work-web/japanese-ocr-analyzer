@@ -17,9 +17,15 @@ import requests
 from config import (
     NOTION_ITEMS_DATABASE_ID,
     NOTION_ITEMS_DATA_SOURCE_ID,
+    NOTION_KANJI_DATABASE_ID,
+    NOTION_KANJI_DATA_SOURCE_ID,
+    NOTION_LANGUAGE_DATABASE_ID,
+    NOTION_LANGUAGE_DATA_SOURCE_ID,
     NOTION_LESSONS_DATABASE_ID,
     NOTION_LESSONS_DATA_SOURCE_ID,
     NOTION_PARENT_PAGE_ID,
+    NOTION_SENTENCES_DATABASE_ID,
+    NOTION_SENTENCES_DATA_SOURCE_ID,
     NOTION_TOKEN,
     PUBLIC_APP_URL,
 )
@@ -35,9 +41,9 @@ from modules.notion_renderer import (
 NOTION_API_BASE = "https://api.notion.com/v1"
 NOTION_API_VERSION = "2026-03-11"
 MAX_MARKDOWN_CHARS = 120_000
-RAW_ARCHIVE_SCHEMA_VERSION = "2.0"
-NOTION_SCHEMA_VERSION = 3
-NOTION_VIEWS_VERSION = 3
+RAW_ARCHIVE_SCHEMA_VERSION = "3.0"
+NOTION_SCHEMA_VERSION = 4
+NOTION_VIEWS_VERSION = 4
 DIRECT_UPLOAD_LIMIT = 20 * 1024 * 1024
 MULTIPART_CHUNK_SIZE = 10 * 1024 * 1024
 LEARNING_VIEW_NAMES = [
@@ -72,13 +78,20 @@ class NotionSettings:
     lessons_data_source_id: str | None
     items_database_id: str | None
     items_data_source_id: str | None
+    sentences_database_id: str | None = None
+    sentences_data_source_id: str | None = None
+    kanji_database_id: str | None = None
+    kanji_data_source_id: str | None = None
+    language_database_id: str | None = None
+    language_data_source_id: str | None = None
 
     @property
     def configured(self) -> bool:
-        has_workspace = bool(
-            self.parent_page_id
-            or (self.lessons_data_source_id and self.items_data_source_id)
-        )
+        has_workspace = bool(self.parent_page_id or all((
+            self.lessons_data_source_id, self.items_data_source_id,
+            self.sentences_data_source_id, self.kanji_data_source_id,
+            self.language_data_source_id,
+        )))
         return bool(self.token and has_workspace)
 
 
@@ -92,6 +105,12 @@ def get_notion_settings() -> NotionSettings:
         lessons_data_source_id=NOTION_LESSONS_DATA_SOURCE_ID or local.get("lessons_data_source_id"),
         items_database_id=NOTION_ITEMS_DATABASE_ID or local.get("items_database_id"),
         items_data_source_id=NOTION_ITEMS_DATA_SOURCE_ID or local.get("items_data_source_id"),
+        sentences_database_id=NOTION_SENTENCES_DATABASE_ID or local.get("sentences_database_id"),
+        sentences_data_source_id=NOTION_SENTENCES_DATA_SOURCE_ID or local.get("sentences_data_source_id"),
+        kanji_database_id=NOTION_KANJI_DATABASE_ID or local.get("kanji_database_id"),
+        kanji_data_source_id=NOTION_KANJI_DATA_SOURCE_ID or local.get("kanji_data_source_id"),
+        language_database_id=NOTION_LANGUAGE_DATABASE_ID or local.get("language_database_id"),
+        language_data_source_id=NOTION_LANGUAGE_DATA_SOURCE_ID or local.get("language_data_source_id"),
     )
 
 
@@ -99,11 +118,11 @@ def notion_connection_state() -> dict[str, Any]:
     settings = get_notion_settings()
     if not settings.token:
         return {"configured": False, "label": "Chưa có NOTION_TOKEN"}
-    if not settings.parent_page_id and not (
-        settings.lessons_data_source_id and settings.items_data_source_id
-    ):
+    if not settings.configured:
         return {"configured": False, "label": "Thiếu trang cha hoặc database ID"}
-    if settings.lessons_data_source_id and settings.items_data_source_id:
+    if all((settings.lessons_data_source_id, settings.items_data_source_id,
+            settings.sentences_data_source_id, settings.kanji_data_source_id,
+            settings.language_data_source_id)):
         return {"configured": True, "label": "Đã kết nối", "workspace_ready": True}
     return {"configured": True, "label": "Sẵn sàng tạo bảng", "workspace_ready": False}
 
@@ -322,36 +341,93 @@ def _lesson_schema() -> dict:
 
 
 def _item_schema() -> dict:
+    """Vocabulary database schema (the legacy items database is reused in v4)."""
     return {
         "Tên": {"title": {}},
         "External ID": {"rich_text": {}},
-        "Loại": {"select": _select_options(["Từ vựng", "Từ khó", "Kanji", "Từ nối", "Ngữ pháp", "Mẫu câu", "Câu dài", "Cụm từ"])},
+        "Nhóm": {"multi_select": _select_options(["Từ trong bài", "Từ khó", "Từ vựng Kanji", "Cụm từ"])},
         "Ngôn ngữ": {"select": _select_options(["Tiếng Nhật", "Tiếng Anh"])},
         "Cách đọc": {"rich_text": {}},
         "Nghĩa tiếng Việt": {"rich_text": {}},
         "Ví dụ": {"rich_text": {}},
         "Hiragana ví dụ": {"rich_text": {}},
         "Bản dịch": {"rich_text": {}},
-        "ID câu nguồn": {"rich_text": {}},
-        "Trang": {"number": {"format": "number"}},
-        "Thứ tự nguồn": {"number": {"format": "number"}},
         "Mức độ": {"select": _select_options(["N5", "N4", "N3", "N2", "N1", "A1", "A2", "B1", "B2", "C1", "C2", "Câu khó"])},
         "Trạng thái": {"select": _select_options(["Mới", "Đang học", "Đã nhớ"])},
         "Ngày ôn tiếp": {"date": {}},
         "Lần ôn gần nhất": {"date": {}},
         "Số lần ôn": {"number": {"format": "number"}},
         "Số lần xuất hiện": {"number": {"format": "number"}},
-        "Quan trọng": {"checkbox": {}},
+        "Thiếu chi tiết": {"checkbox": {}},
         "Từ loại": {"rich_text": {}},
         "Từ gốc": {"rich_text": {}},
-        "Công thức / Cấu tạo": {"rich_text": {}},
         "Sắc thái / Chức năng": {"rich_text": {}},
         "So sánh": {"rich_text": {}},
-        "Vai trò / Liên kết": {"rich_text": {}},
-        "Dịch theo cụm": {"rich_text": {}},
-        "Dịch sát": {"rich_text": {}},
+        "Dữ liệu nguồn": {"rich_text": {}},
+        "JSON checksum": {"rich_text": {}},
+    }
+
+
+def _sentence_schema() -> dict:
+    return {
+        "Câu": {"title": {}},
+        "External ID": {"rich_text": {}},
+        "ID câu": {"rich_text": {}},
+        "Ngôn ngữ": {"select": _select_options(["Tiếng Nhật", "Tiếng Anh"])},
+        "Trang": {"number": {"format": "number"}},
+        "Thứ tự câu": {"number": {"format": "number"}},
+        "Nguyên văn": {"rich_text": {}},
+        "Hiragana": {"rich_text": {}},
         "Dịch tự nhiên": {"rich_text": {}},
+        "Câu khó": {"checkbox": {}},
         "Điểm phức tạp": {"number": {"format": "number"}},
+        "Cảnh báo OCR": {"rich_text": {}},
+        "Trạng thái": {"select": _select_options(["Mới", "Đang học", "Đã nhớ"])},
+        "Ngày ôn tiếp": {"date": {}},
+        "Lần ôn gần nhất": {"date": {}},
+        "Số lần ôn": {"number": {"format": "number"}},
+        "Dữ liệu nguồn": {"rich_text": {}},
+        "JSON checksum": {"rich_text": {}},
+    }
+
+
+def _kanji_schema() -> dict:
+    return {
+        "Kanji": {"title": {}},
+        "External ID": {"rich_text": {}},
+        "Âm On": {"rich_text": {}},
+        "Âm Kun": {"rich_text": {}},
+        "Nghĩa tiếng Việt": {"rich_text": {}},
+        "JLPT": {"select": _select_options(["N5", "N4", "N3", "N2", "N1"])},
+        "Vai trò trong bài": {"rich_text": {}},
+        "Ví dụ": {"rich_text": {}},
+        "Số lần xuất hiện": {"number": {"format": "number"}},
+        "Trạng thái": {"select": _select_options(["Mới", "Đang học", "Đã nhớ"])},
+        "Ngày ôn tiếp": {"date": {}},
+        "Lần ôn gần nhất": {"date": {}},
+        "Số lần ôn": {"number": {"format": "number"}},
+        "Dữ liệu nguồn": {"rich_text": {}},
+        "JSON checksum": {"rich_text": {}},
+    }
+
+
+def _language_schema() -> dict:
+    return {
+        "Tên": {"title": {}},
+        "External ID": {"rich_text": {}},
+        "Loại": {"select": _select_options(["Ngữ pháp", "Từ nối", "Mẫu câu"])},
+        "Ngôn ngữ": {"select": _select_options(["Tiếng Nhật", "Tiếng Anh"])},
+        "Cấu trúc": {"rich_text": {}},
+        "Nghĩa / Chức năng": {"rich_text": {}},
+        "Sắc thái": {"rich_text": {}},
+        "So sánh": {"rich_text": {}},
+        "Ví dụ": {"rich_text": {}},
+        "Mức độ": {"select": _select_options(["N5", "N4", "N3", "N2", "N1", "A1", "A2", "B1", "B2", "C1", "C2"])},
+        "Số lần xuất hiện": {"number": {"format": "number"}},
+        "Trạng thái": {"select": _select_options(["Mới", "Đang học", "Đã nhớ"])},
+        "Ngày ôn tiếp": {"date": {}},
+        "Lần ôn gần nhất": {"date": {}},
+        "Số lần ôn": {"number": {"format": "number"}},
         "Dữ liệu nguồn": {"rich_text": {}},
         "JSON checksum": {"rich_text": {}},
     }
@@ -387,6 +463,31 @@ def _database_id_for_source(client: NotionClient, data_source_id: str) -> str:
     return str((source.get("parent") or {}).get("database_id") or "")
 
 
+def _find_child_database(
+    client: NotionClient, parent_page_id: str, titles: set[str]
+) -> tuple[str, str] | None:
+    """Rediscover bootstrapped databases when the app's local SQLite is recreated."""
+    cursor = ""
+    while True:
+        path = f"/blocks/{parent_page_id}/children?page_size=100"
+        if cursor:
+            path += "&start_cursor=" + cursor
+        response = client.request("GET", path)
+        for block in response.get("results") or []:
+            if block.get("type") != "child_database":
+                continue
+            title = str((block.get("child_database") or {}).get("title") or "")
+            if title in titles:
+                database_id = str(block.get("id") or "")
+                database = client.request("GET", f"/databases/{database_id}")
+                return database_id, _database_data_source_id(client, database)
+        if not response.get("has_more"):
+            return None
+        cursor = str(response.get("next_cursor") or "")
+        if not cursor:
+            return None
+
+
 def _ensure_data_source_schema(client: NotionClient, data_source_id: str, desired: dict) -> None:
     """Add missing columns/options without deleting or renaming user data."""
     source = client.request("GET", f"/data_sources/{data_source_id}")
@@ -397,18 +498,19 @@ def _ensure_data_source_schema(client: NotionClient, data_source_id: str, desire
         if not current:
             updates[name] = schema
             continue
-        if "select" not in schema or current.get("type") != "select":
+        option_type = "select" if "select" in schema else "multi_select" if "multi_select" in schema else ""
+        if not option_type or current.get("type") != option_type:
             continue
-        current_options = (current.get("select") or {}).get("options") or []
+        current_options = (current.get(option_type) or {}).get("options") or []
         current_names = {str(option.get("name") or "") for option in current_options}
-        desired_options = (schema.get("select") or {}).get("options") or []
+        desired_options = (schema.get(option_type) or {}).get("options") or []
         missing = [option for option in desired_options if option.get("name") not in current_names]
         if missing:
             preserved = [
                 ({"id": option["id"]} if option.get("id") else {"name": option.get("name")})
                 for option in current_options
             ]
-            updates[name] = {"select": {"options": preserved + missing}}
+            updates[name] = {option_type: {"options": preserved + missing}}
     if updates:
         client.request("PATCH", f"/data_sources/{data_source_id}", {"properties": updates})
 
@@ -419,7 +521,17 @@ def _create_learning_views(
     data_source_id: str,
     existing_names: list[str] | None = None,
 ) -> list[str]:
-    del existing_names  # The API is authoritative; the local cache may be stale.
+    del existing_names
+    return _create_database_views(client, database_id, data_source_id, "vocabulary")
+
+
+def _create_database_views(
+    client: NotionClient,
+    database_id: str,
+    data_source_id: str,
+    kind: str,
+) -> list[str]:
+    """Create compact, mobile-friendly views for one v4 study database."""
     existing_views: dict[str, str] = {}
     listed = client.request("GET", f"/views?database_id={database_id}")
     for entry in listed.get("results") or []:
@@ -435,10 +547,13 @@ def _create_learning_views(
         for name, value in (source.get("properties") or {}).items()
         if value.get("id")
     }
-    visible_names = {
-        "Tên", "Loại", "Cách đọc", "Nghĩa tiếng Việt", "Mức độ", "Trang",
-        "Thứ tự nguồn", "Bài phân tích", "Trạng thái", "Ngày ôn tiếp", "Quan trọng",
+    visible_by_kind = {
+        "vocabulary": {"Tên", "Cách đọc", "Nghĩa tiếng Việt", "Nhóm", "Mức độ", "Trạng thái", "Ngày ôn tiếp"},
+        "sentence": {"Câu", "Trang", "Thứ tự câu", "Dịch tự nhiên", "Câu khó", "Trạng thái", "Ngày ôn tiếp"},
+        "kanji": {"Kanji", "Âm On", "Âm Kun", "Nghĩa tiếng Việt", "JLPT", "Trạng thái", "Ngày ôn tiếp"},
+        "language": {"Tên", "Loại", "Nghĩa / Chức năng", "Mức độ", "Trạng thái", "Ngày ôn tiếp"},
     }
+    visible_names = visible_by_kind[kind]
     configuration = None
     if property_ids:
         configuration = {
@@ -447,40 +562,47 @@ def _create_learning_views(
                 {
                     "property_id": property_id,
                     "visible": name in visible_names,
-                    "wrap": name in {"Tên", "Cách đọc", "Nghĩa tiếng Việt"},
+                    "wrap": name in {"Tên", "Câu", "Cách đọc", "Nghĩa tiếng Việt", "Dịch tự nhiên", "Nghĩa / Chức năng"},
                 }
                 for name, property_id in property_ids.items()
             ],
             "wrap_cells": True,
             "frozen_column_index": 1,
         }
-    source_sorts = [
-        {"property": "Trang", "direction": "ascending"},
-        {"property": "Thứ tự nguồn", "direction": "ascending"},
-    ]
-    views = [
+    source_sorts = ([{"property": "Trang", "direction": "ascending"}, {"property": "Thứ tự câu", "direction": "ascending"}]
+                    if kind == "sentence" else [])
+    common = [
         ("Tất cả", None, source_sorts),
-        ("Từ vựng", {"property": "Loại", "select": {"equals": "Từ vựng"}}, source_sorts),
-        ("Từ khó", {"property": "Quan trọng", "checkbox": {"equals": True}}, source_sorts),
-        ("Kanji", {"property": "Loại", "select": {"equals": "Kanji"}}, source_sorts),
-        ("Cụm từ", {"property": "Loại", "select": {"equals": "Cụm từ"}}, source_sorts),
-        ("Từ nối", {"property": "Loại", "select": {"equals": "Từ nối"}}, source_sorts),
-        ("Ngữ pháp", {"property": "Loại", "select": {"equals": "Ngữ pháp"}}, source_sorts),
-        ("Mẫu câu", {"property": "Loại", "select": {"equals": "Mẫu câu"}}, source_sorts),
-        ("Câu dài", {"property": "Loại", "select": {"equals": "Câu dài"}}, source_sorts),
-        (
-            "Ôn hôm nay",
-            {
-                "and": [
-                    {"property": "Ngày ôn tiếp", "date": {"on_or_before": "today"}},
-                    {"property": "Trạng thái", "select": {"does_not_equal": "Đã nhớ"}},
-                ]
-            },
-            [{"property": "Ngày ôn tiếp", "direction": "ascending"}],
-        ),
+        ("Ôn hôm nay", {"and": [
+            {"property": "Ngày ôn tiếp", "date": {"on_or_before": "today"}},
+            {"property": "Trạng thái", "select": {"does_not_equal": "Đã nhớ"}},
+        ]}, [{"property": "Ngày ôn tiếp", "direction": "ascending"}]),
+        ("Mục mới", {"property": "Trạng thái", "select": {"equals": "Mới"}}, source_sorts),
+        ("Đang học", {"property": "Trạng thái", "select": {"equals": "Đang học"}}, source_sorts),
+        ("Đã nhớ", {"property": "Trạng thái", "select": {"equals": "Đã nhớ"}}, source_sorts),
         ("Theo bài", None, source_sorts),
-        ("Đã nhớ", {"property": "Trạng thái", "select": {"equals": "Đã nhớ"}}, []),
     ]
+    extras = {
+        "vocabulary": [
+            ("Từ khó", {"property": "Nhóm", "multi_select": {"contains": "Từ khó"}}, []),
+            ("Từ vựng Kanji", {"property": "Nhóm", "multi_select": {"contains": "Từ vựng Kanji"}}, []),
+            ("Tiếng Nhật", {"property": "Ngôn ngữ", "select": {"equals": "Tiếng Nhật"}}, []),
+            ("Tiếng Anh", {"property": "Ngôn ngữ", "select": {"equals": "Tiếng Anh"}}, []),
+            ("Theo cấp độ", None, [{"property": "Mức độ", "direction": "ascending"}]),
+        ],
+        "sentence": [
+            ("Câu khó", {"property": "Câu khó", "checkbox": {"equals": True}}, source_sorts),
+            ("Giải mã câu dài", {"property": "Câu khó", "checkbox": {"equals": True}}, source_sorts),
+        ],
+        "kanji": [("Theo JLPT", None, [{"property": "JLPT", "direction": "ascending"}])],
+        "language": [
+            ("Ngữ pháp", {"property": "Loại", "select": {"equals": "Ngữ pháp"}}, []),
+            ("Từ nối", {"property": "Loại", "select": {"equals": "Từ nối"}}, []),
+            ("Mẫu câu", {"property": "Loại", "select": {"equals": "Mẫu câu"}}, []),
+            ("Theo cấp độ", None, [{"property": "Mức độ", "direction": "ascending"}]),
+        ],
+    }
+    views = common + extras[kind]
     created_names: list[str] = []
     for name, view_filter, sorts in views:
         if name in existing_views:
@@ -503,103 +625,93 @@ def _create_learning_views(
                 payload["configuration"] = configuration
             client.request("POST", "/views", payload)
         created_names.append(name)
-    cached = session_store.load_notion_workspace_config()
-    cached["view_names"] = created_names
-    cached["views_version"] = NOTION_VIEWS_VERSION
-    session_store.save_notion_workspace_config(cached)
     return created_names
 
 
 def ensure_notion_workspace(client: NotionClient, settings: NotionSettings | None = None) -> dict:
-    """Return database IDs, bootstrapping both linked tables when needed."""
+    """Return the five v4 databases, creating missing study databases in place."""
     settings = settings or get_notion_settings()
     if not settings.configured:
         raise NotionAPIError("Chưa cấu hình NOTION_TOKEN và NOTION_PARENT_PAGE_ID.", 401, "not_configured")
-
-    lesson_db = settings.lessons_database_id
-    lesson_ds = settings.lessons_data_source_id
-    item_db = settings.items_database_id
-    item_ds = settings.items_data_source_id
     local = session_store.load_notion_workspace_config()
 
-    if lesson_ds and not lesson_db:
-        lesson_db = _database_id_for_source(client, lesson_ds)
-    if item_ds and not item_db:
-        item_db = _database_id_for_source(client, item_ds)
+    resources = {
+        "lessons": [settings.lessons_database_id, settings.lessons_data_source_id, "Bài phân tích", _lesson_schema()],
+        "items": [settings.items_database_id, settings.items_data_source_id, "Từ vựng", _item_schema()],
+        "sentences": [settings.sentences_database_id or local.get("sentences_database_id"), settings.sentences_data_source_id or local.get("sentences_data_source_id"), "Câu & bản dịch", _sentence_schema()],
+        "kanji": [settings.kanji_database_id or local.get("kanji_database_id"), settings.kanji_data_source_id or local.get("kanji_data_source_id"), "Kanji", _kanji_schema()],
+        "language": [settings.language_database_id or local.get("language_database_id"), settings.language_data_source_id or local.get("language_data_source_id"), "Ngữ pháp & liên kết", _language_schema()],
+    }
+    for key, value in resources.items():
+        database_id, data_source_id, title, schema = value
+        if data_source_id and not database_id:
+            database_id = _database_id_for_source(client, str(data_source_id))
+        if database_id and not data_source_id:
+            database = client.request("GET", f"/databases/{database_id}")
+            data_source_id = _database_data_source_id(client, database)
+        if not data_source_id and settings.parent_page_id:
+            aliases = {str(title)} | ({"Mục cần học"} if key == "items" else set())
+            discovered = _find_child_database(client, settings.parent_page_id, aliases)
+            if discovered:
+                database_id, data_source_id = discovered
+        if not data_source_id:
+            if not settings.parent_page_id:
+                raise NotionAPIError(
+                    f"Thiếu NOTION_PARENT_PAGE_ID để tạo bảng {title}.", 400, "missing_parent"
+                )
+            database_id, data_source_id = _create_database(
+                client, settings.parent_page_id, str(title), schema
+            )
+            checkpoint = session_store.load_notion_workspace_config()
+            checkpoint[f"{key}_database_id"] = str(database_id)
+            checkpoint[f"{key}_data_source_id"] = str(data_source_id)
+            session_store.save_notion_workspace_config(checkpoint)
+        resources[key][0] = str(database_id)
+        resources[key][1] = str(data_source_id)
+        _ensure_data_source_schema(client, str(data_source_id), schema)
 
-    if not lesson_ds or not item_ds:
-        if not settings.parent_page_id:
-            raise NotionAPIError("Thiếu NOTION_PARENT_PAGE_ID để tạo hai bảng Notion.", 400, "missing_parent")
-        lesson_db, lesson_ds = _create_database(
-            client, settings.parent_page_id, "Bài phân tích", _lesson_schema()
-        )
-        item_db, item_ds = _create_database(
-            client, settings.parent_page_id, "Mục cần học", _item_schema()
-        )
-        session_store.save_notion_workspace_config(
-            {
-                "lessons_database_id": lesson_db,
-                "lessons_data_source_id": lesson_ds,
-                "items_database_id": item_db,
-                "items_data_source_id": item_ds,
-                "relation_created": False,
-                "view_names": [],
-            }
-        )
-    if int(local.get("schema_version") or 0) < NOTION_SCHEMA_VERSION:
-        _ensure_data_source_schema(client, str(lesson_ds), _lesson_schema())
-        _ensure_data_source_schema(client, str(item_ds), _item_schema())
-        local = session_store.load_notion_workspace_config()
-        local["schema_version"] = NOTION_SCHEMA_VERSION
-        session_store.save_notion_workspace_config(local)
-    item_source = client.request("GET", f"/data_sources/{item_ds}")
-    relation = (item_source.get("properties") or {}).get("Bài phân tích") or {}
-    if relation.get("type") != "relation" and "relation" not in relation:
-        client.request(
-            "PATCH",
-            f"/data_sources/{item_ds}",
-            {
-                "properties": {
-                    "Bài phân tích": {
-                        "relation": {
-                            "data_source_id": lesson_ds,
-                            "dual_property": {"synced_property_name": "Mục cần học"},
-                        }
-                    }
-                }
-            },
-        )
-    local = session_store.load_notion_workspace_config()
-    local["relation_created"] = True
-    session_store.save_notion_workspace_config(local)
+    lesson_ds = str(resources["lessons"][1])
+    item_ds = str(resources["items"][1])
+    sentence_ds = str(resources["sentences"][1])
+    kanji_ds = str(resources["kanji"][1])
+    language_ds = str(resources["language"][1])
 
-    local = session_store.load_notion_workspace_config()
-    cached_view_names = list(local.get("view_names") or [])
-    if (
-        int(local.get("views_version") or 0) >= NOTION_VIEWS_VERSION
-        and set(LEARNING_VIEW_NAMES).issubset(cached_view_names)
-    ):
-        view_names = cached_view_names
-    else:
-        view_names = _create_learning_views(
-            client,
-            str(item_db),
-            str(item_ds),
-            existing_names=cached_view_names,
-        )
+    def ensure_relation(source_id: str, name: str, target_id: str, synced_name: str) -> None:
+        source = client.request("GET", f"/data_sources/{source_id}")
+        relation = (source.get("properties") or {}).get(name) or {}
+        if relation.get("type") == "relation" or "relation" in relation:
+            return
+        client.request("PATCH", f"/data_sources/{source_id}", {"properties": {name: {
+            "relation": {"data_source_id": target_id, "dual_property": {"synced_property_name": synced_name}}
+        }}})
 
-    workspace = {
-        **session_store.load_notion_workspace_config(),
-        "lessons_database_id": lesson_db,
-        "lessons_data_source_id": lesson_ds,
-        "items_database_id": item_db,
-        "items_data_source_id": item_ds,
+    ensure_relation(item_ds, "Bài phân tích", lesson_ds, "Từ vựng")
+    ensure_relation(sentence_ds, "Bài phân tích", lesson_ds, "Câu & bản dịch")
+    ensure_relation(kanji_ds, "Bài phân tích", lesson_ds, "Kanji")
+    ensure_relation(language_ds, "Bài phân tích", lesson_ds, "Ngữ pháp & liên kết")
+    ensure_relation(item_ds, "Câu nguồn", sentence_ds, "Từ vựng")
+    ensure_relation(kanji_ds, "Câu nguồn", sentence_ds, "Kanji")
+    ensure_relation(language_ds, "Câu nguồn", sentence_ds, "Ngữ pháp & liên kết")
+    ensure_relation(item_ds, "Kanji", kanji_ds, "Từ vựng liên quan")
+
+    view_names = dict(local.get("view_names_v4") or {})
+    if int(local.get("views_version") or 0) < NOTION_VIEWS_VERSION:
+        for key, kind in (("items", "vocabulary"), ("sentences", "sentence"), ("kanji", "kanji"), ("language", "language")):
+            view_names[key] = _create_database_views(
+                client, str(resources[key][0]), str(resources[key][1]), kind
+            )
+
+    workspace = {**session_store.load_notion_workspace_config()}
+    for key, value in resources.items():
+        workspace[f"{key}_database_id"] = value[0]
+        workspace[f"{key}_data_source_id"] = value[1]
+    workspace.update({
         "relation_created": True,
-        "view_names": view_names,
-        "views_created": len(view_names) >= 12,
+        "view_names_v4": view_names,
+        "views_created": all(view_names.get(key) for key in ("items", "sentences", "kanji", "language")),
         "schema_version": NOTION_SCHEMA_VERSION,
         "views_version": NOTION_VIEWS_VERSION,
-    }
+    })
     session_store.save_notion_workspace_config(workspace)
     return workspace
 
@@ -813,6 +925,320 @@ def extract_learning_items(
                 )
             ]["difficulty"] = "Câu khó"
     return list(result.values())
+
+
+def _clean_term(value: Any) -> str:
+    text = _plain_preview(value)
+    return re.sub(r"^[~〜～]+|[~〜～]+$", "", text).strip()
+
+
+def _concept_external_id(kind: str, language: str, title: str, reading: str = "") -> str:
+    raw = "|".join((kind, language, _normalize_key(title), _normalize_key(reading)))
+    return f"concept:{kind}:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _split_kanji_vocabulary(value: Any) -> list[str]:
+    """Normalize Gemini's string/list/object Kanji vocabulary cell without inventing data."""
+    values: list[str] = []
+    if isinstance(value, dict):
+        for key in ("word", "vocab", "vocabulary", "term", "name"):
+            if value.get(key):
+                values.extend(_split_kanji_vocabulary(value[key]))
+        if not values:
+            for nested in value.values():
+                values.extend(_split_kanji_vocabulary(nested))
+    elif isinstance(value, (list, tuple, set)):
+        for nested in value:
+            values.extend(_split_kanji_vocabulary(nested))
+    elif value not in (None, ""):
+        text = _plain_preview(value)
+        values.extend(re.split(r"\s*(?:、|,|，|;|；|/|／|\n|\|)\s*", text))
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        cleaned = _clean_term(item).strip("[](){} ")
+        key = _normalize_key(cleaned)
+        if cleaned and cleaned not in {"-", "Không có", "None", "null"} and key not in seen:
+            seen.add(key)
+            result.append(cleaned)
+    return result
+
+
+def _kanji_vocabulary_records(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, dict):
+        title = _first(value, "word", "vocab", "vocabulary", "term", "name")
+        if title and not isinstance(value.get("vocab"), (list, dict)):
+            records = []
+            for split_title in _split_kanji_vocabulary(title):
+                record = dict(value)
+                record["word"] = split_title
+                records.append(record)
+            return records
+        records: list[dict[str, Any]] = []
+        for nested in value.values():
+            records.extend(_kanji_vocabulary_records(nested))
+        return records
+    if isinstance(value, (list, tuple, set)):
+        records = []
+        for nested in value:
+            records.extend(_kanji_vocabulary_records(nested))
+        return records
+    return [{"word": title} for title in _split_kanji_vocabulary(value)]
+
+
+def extract_notion_entities(
+    analysis: dict[str, Any], lesson_external_id: str
+) -> dict[str, list[dict[str, Any]]]:
+    """Map one complete analysis to the five-database v4 model."""
+    from modules.sentence_analyzer import split_sentences
+
+    language = str(analysis.get("analysis_language") or "japanese")
+    pages = analysis.get("page_analyses") or [analysis]
+    sentences: list[dict[str, Any]] = []
+    sentence_by_page: dict[int, list[dict[str, Any]]] = {}
+
+    for page_number, page in enumerate(pages, 1):
+        page_index = int(page.get("page_index", page_number) or page_number)
+        catalog = list(page.get("sentence_catalog") or [])
+        if not catalog:
+            catalog = split_sentences(
+                str(page.get("source_text") or page.get("confirmed_text") or ""), language, page_index
+            )
+        guidance = {str(row.get("sentence_id") or ""): row for row in page.get("translation_guidance") or []}
+        breakdowns = {str(row.get("sentence_id") or ""): row for row in page.get("sentence_breakdowns") or []}
+        page_sentences: list[dict[str, Any]] = []
+        for fallback_ordinal, catalog_row in enumerate(catalog, 1):
+            sentence_id = str(catalog_row.get("sentence_id") or f"p{page_index}-s{fallback_ordinal}")
+            ordinal = int(catalog_row.get("ordinal", fallback_ordinal) or fallback_ordinal)
+            guide = guidance.get(sentence_id) or {}
+            breakdown = breakdowns.get(sentence_id) or {}
+            original = str(catalog_row.get("original") or guide.get("original") or breakdown.get("original") or "").strip()
+            if not original:
+                continue
+            translations = guide.get("translations") if isinstance(guide.get("translations"), dict) else {}
+            deep_translations = breakdown.get("translations") if isinstance(breakdown.get("translations"), dict) else {}
+            natural = str(translations.get("natural") or deep_translations.get("natural") or breakdown.get("simplified_vi") or "")
+            source = {"catalog": catalog_row, "guidance": guide, "sentence_breakdown": breakdown}
+            source_json = json.dumps(source, ensure_ascii=False, sort_keys=True, default=str)
+            raw_id = "|".join((lesson_external_id, str(page_index), sentence_id, original))
+            entity = {
+                "external_id": "sentence:" + hashlib.sha256(raw_id.encode("utf-8")).hexdigest(),
+                "type": "Câu",
+                "language": language,
+                "title": f"Câu {page_index}.{ordinal} · {original[:80]}",
+                "sentence_id": sentence_id,
+                "page_index": page_index,
+                "source_order": ordinal,
+                "original": original,
+                "reading": str(guide.get("reading") or breakdown.get("reading") or ""),
+                "natural_translation": natural,
+                "ocr_warning": str(guide.get("ocr_warning") or ""),
+                "complexity_score": float(catalog_row.get("complexity_score") or breakdown.get("complexity_score") or 0),
+                "is_complex": bool(breakdown or catalog_row.get("analyzed") or catalog_row.get("auto_selected")),
+                "source_json": source_json,
+                "source_checksum": hashlib.sha256(source_json.encode("utf-8")).hexdigest(),
+            }
+            sentences.append(entity)
+            page_sentences.append(entity)
+        sentence_by_page[page_index] = page_sentences
+
+    def matching_sentence_ids(page_index: int, row: dict[str, Any], title: str) -> list[str]:
+        explicit = str(row.get("sentence_id") or "")
+        page_rows = sentence_by_page.get(page_index) or []
+        if explicit:
+            matches = [item["external_id"] for item in page_rows if item["sentence_id"] == explicit]
+            if matches:
+                return matches
+        candidates = [
+            _plain_preview(row.get(key))
+            for key in ("example", "example_text", "example_1", "example_2", "original")
+            if row.get(key)
+        ]
+        term = _clean_term(title)
+        matches: list[str] = []
+        for sentence in page_rows:
+            original = sentence["original"]
+            exact_example = any(value and (value in original or original in value) for value in candidates)
+            if language == "english":
+                term_match = bool(term and re.search(rf"(?<!\w){re.escape(term)}(?!\w)", original, re.I))
+            else:
+                term_match = bool(term and term in original)
+            if exact_example or term_match:
+                matches.append(sentence["external_id"])
+        return matches
+
+    collections: dict[str, dict[str, dict[str, Any]]] = {
+        "vocabulary": {}, "kanji": {}, "language_items": {}
+    }
+
+    def add_concept(kind: str, entity: dict[str, Any], source_row: dict[str, Any]) -> dict[str, Any]:
+        bucket = collections[kind]
+        existing = bucket.get(entity["external_id"])
+        if not existing:
+            entity["source_records"] = [source_row]
+            bucket[entity["external_id"]] = entity
+            return entity
+        for key in (
+            "groups", "sentence_external_ids", "related_kanji_external_ids",
+            "related_vocabulary_external_ids",
+        ):
+            values = list(existing.get(key) or [])
+            for value in entity.get(key) or []:
+                if value not in values:
+                    values.append(value)
+            existing[key] = values
+        existing["occurrences_in_analysis"] = int(existing.get("occurrences_in_analysis") or 1) + 1
+        existing["missing_details"] = bool(existing.get("missing_details") and entity.get("missing_details"))
+        existing["source_records"].append(source_row)
+        for key, value in entity.items():
+            if value not in (None, "", [], 0, 0.0, False) and existing.get(key) in (None, "", [], 0, 0.0, False):
+                existing[key] = value
+        return existing
+
+    vocabulary_source_index: dict[str, dict[str, Any]] = {}
+    for page in pages:
+        indexed_rows = [
+            *(page.get("vocabulary_all") or []),
+            *(page.get("vocabulary_important") or []),
+            *((page.get("phrasal_collocations") or []) if language == "english" else []),
+        ]
+        for row in indexed_rows:
+            title = _clean_term(_first(row, "word", "phrase"))
+            if not title:
+                continue
+            key = _normalize_key(title)
+            existing = vocabulary_source_index.get(key)
+            if not existing or len(json.dumps(row, ensure_ascii=False, default=str)) > len(
+                json.dumps(existing, ensure_ascii=False, default=str)
+            ):
+                vocabulary_source_index[key] = row
+
+    known_vocabulary: dict[str, dict[str, Any]] = {}
+    for page_number, page in enumerate(pages, 1):
+        page_index = int(page.get("page_index", page_number) or page_number)
+        vocab_rows: list[tuple[dict[str, Any], list[str], bool]] = []
+        vocab_rows.extend((row, ["Từ trong bài"], False) for row in page.get("vocabulary_all") or [])
+        vocab_rows.extend((row, ["Từ trong bài", "Từ khó"], False) for row in page.get("vocabulary_important") or [])
+        if language == "english":
+            vocab_rows.extend((row, ["Cụm từ"], False) for row in page.get("phrasal_collocations") or [])
+        for row, groups, missing in vocab_rows:
+            title = _clean_term(_first(row, "word", "phrase"))
+            if not title:
+                continue
+            indexed = vocabulary_source_index.get(_normalize_key(title)) or {}
+            reading = _first(row, "reading", "hiragana") or _first(indexed, "reading", "hiragana")
+            canonical = _clean_term(_first(row, "base_form") or title)
+            external_id = _concept_external_id("vocabulary", language, canonical, reading)
+            entity = {
+                "external_id": external_id, "type": "Từ vựng", "language": language,
+                "title": title, "reading": reading,
+                "meaning_vi": _first(row, "meaning", "meaning_vi", "vn_meaning", "definition"),
+                "example": _first(row, "example", "example_text", "example_1"),
+                "example_reading": _first(row, "example_hiragana", "example_text_hiragana", "example_1_hiragana"),
+                "translation_vi": _first(row, "example_translation", "translation"),
+                "difficulty": _first(row, "jlpt", "cefr", "difficulty", "level"),
+                "part_of_speech": _first(row, "part_of_speech", "type"),
+                "base_form": _first(row, "base_form"),
+                "nuance": _first(row, "nuance", "usage", "note"),
+                "comparison": _first(row, "comparison", "mistake"),
+                "groups": groups,
+                "missing_details": missing,
+                "sentence_external_ids": matching_sentence_ids(page_index, row, title),
+                "related_kanji_external_ids": [],
+                "page_index": page_index,
+                "source_order": int(row.get("num") or 0),
+                "occurrences_in_analysis": 1,
+            }
+            added = add_concept("vocabulary", entity, row)
+            known_vocabulary[_normalize_key(title)] = added
+
+        if language == "japanese":
+            for order, row in enumerate(page.get("kanji_analysis") or [], 1):
+                title = _clean_term(_first(row, "kanji", "phrase"))
+                if not title:
+                    continue
+                kanji_id = _concept_external_id("kanji", language, title)
+                related_vocab_ids: list[str] = []
+                for vocab_record in _kanji_vocabulary_records(row.get("vocab")):
+                    word = _clean_term(_first(vocab_record, "word"))
+                    if not word:
+                        continue
+                    source_detail = vocabulary_source_index.get(_normalize_key(word)) or {}
+                    known = known_vocabulary.get(_normalize_key(word))
+                    reading = (
+                        _first(vocab_record, "reading", "hiragana")
+                        or str((known or {}).get("reading") or "")
+                        or _first(source_detail, "reading", "hiragana")
+                    )
+                    vocab_id = _concept_external_id("vocabulary", language, word, reading)
+                    vocab_entity = {
+                        "external_id": vocab_id, "type": "Từ vựng", "language": language,
+                        "title": word, "reading": reading,
+                        "meaning_vi": _first(vocab_record, "meaning", "meaning_vi", "vn_meaning") or str((known or {}).get("meaning_vi") or "") or _first(source_detail, "meaning", "meaning_vi", "vn_meaning", "definition"),
+                        "example": _first(vocab_record, "example") or _first(row, "example"),
+                        "example_reading": _first(vocab_record, "example_hiragana", "example_reading"),
+                        "translation_vi": _first(vocab_record, "translation", "example_translation"),
+                        "difficulty": _first(vocab_record, "jlpt", "difficulty") or str((known or {}).get("difficulty") or "") or _first(source_detail, "jlpt", "cefr", "difficulty"),
+                        "part_of_speech": _first(vocab_record, "part_of_speech", "type") or str((known or {}).get("part_of_speech") or "") or _first(source_detail, "part_of_speech", "type"),
+                        "base_form": _first(vocab_record, "base_form") or str((known or {}).get("base_form") or "") or _first(source_detail, "base_form"),
+                        "nuance": _first(vocab_record, "nuance", "usage", "note") or str((known or {}).get("nuance") or ""),
+                        "comparison": _first(vocab_record, "comparison"),
+                        "groups": ["Từ vựng Kanji"],
+                        "missing_details": not bool(known or source_detail or reading or _first(vocab_record, "meaning", "meaning_vi", "vn_meaning")),
+                        "sentence_external_ids": matching_sentence_ids(page_index, row, word),
+                        "related_kanji_external_ids": [kanji_id],
+                        "page_index": page_index, "source_order": order,
+                        "occurrences_in_analysis": 1,
+                    }
+                    add_concept("vocabulary", vocab_entity, {"kanji": title, "vocab": vocab_record, "source": row})
+                    related_vocab_ids.append(vocab_id)
+                kanji_entity = {
+                    "external_id": kanji_id, "type": "Kanji", "language": language,
+                    "title": title, "onyomi": _first(row, "onyomi"), "kunyomi": _first(row, "kunyomi"),
+                    "meaning_vi": _first(row, "meaning", "meaning_vi"),
+                    "difficulty": _first(row, "jlpt", "difficulty"),
+                    "nuance": _first(row, "role"), "example": _first(row, "example"),
+                    "sentence_external_ids": matching_sentence_ids(page_index, row, title),
+                    "related_vocabulary_external_ids": related_vocab_ids,
+                    "page_index": page_index, "source_order": order, "occurrences_in_analysis": 1,
+                }
+                add_concept("kanji", kanji_entity, row)
+
+        marker_rows = (page.get("connectors") or []) if language == "japanese" else (page.get("discourse_markers") or page.get("connectors") or [])
+        language_rows = [
+            *(("Từ nối", row, ("phrase", "marker", "word")) for row in marker_rows),
+            *(("Ngữ pháp", row, ("name", "pattern")) for row in page.get("grammar_points") or []),
+            *(("Mẫu câu", row, ("pattern", "name")) for row in page.get("sentence_patterns") or []),
+        ]
+        for order, (item_type, row, title_keys) in enumerate(language_rows, 1):
+            title = _plain_preview(_first(row, *title_keys)).strip()
+            if not title:
+                continue
+            entity = {
+                "external_id": _concept_external_id("language", language, f"{item_type}:{_clean_term(title)}"),
+                "type": item_type, "language": language, "title": title,
+                "meaning_vi": _first(row, "meaning", "meaning_vi", "explanation", "function", "role", "nuance"),
+                "formation": _first(row, "formation", "structure", "rule", "components"),
+                "nuance": _first(row, "nuance", "usage", "role", "function", "register", "explanation"),
+                "comparison": _first(row, "comparison", "note", "mistake"),
+                "example": _first(row, "example", "formation"),
+                "difficulty": _first(row, "jlpt", "cefr", "difficulty", "level"),
+                "sentence_external_ids": matching_sentence_ids(page_index, row, title),
+                "page_index": page_index, "source_order": order, "occurrences_in_analysis": 1,
+            }
+            add_concept("language_items", entity, row)
+
+    for bucket in collections.values():
+        for entity in bucket.values():
+            source_json = json.dumps(entity.pop("source_records", []), ensure_ascii=False, sort_keys=True, default=str)
+            entity["source_json"] = source_json
+            entity["source_checksum"] = hashlib.sha256(source_json.encode("utf-8")).hexdigest()
+    return {
+        "sentences": sentences,
+        "vocabulary": list(collections["vocabulary"].values()),
+        "kanji": list(collections["kanji"].values()),
+        "language_items": list(collections["language_items"].values()),
+    }
 
 
 def _cost_snapshot(
@@ -1058,6 +1484,18 @@ def build_notion_sync_payload(
     external_id = f"analysis:{source_hash}:{analysis_hash[:16]}"
     columns = _analysis_column_snapshot(items, analysis)
     app_url = PUBLIC_APP_URL.rstrip("/") + "/?" + urlencode({"session": session_id})
+    entities = extract_notion_entities(analysis, external_id)
+    columns.update({
+        "sentence_count": len(entities["sentences"]),
+        "vocabulary_count": len(entities["vocabulary"]),
+        "script_count": len(entities["kanji"]) if language == "japanese" else len(
+            [item for item in entities["vocabulary"] if "Cụm từ" in item.get("groups", [])]
+        ),
+        "marker_count": len([item for item in entities["language_items"] if item.get("type") == "Từ nối"]),
+        "grammar_count": len([item for item in entities["language_items"] if item.get("type") == "Ngữ pháp"]),
+        "pattern_count": len([item for item in entities["language_items"] if item.get("type") == "Mẫu câu"]),
+        "long_sentence_count": len([item for item in entities["sentences"] if item.get("is_complex")]),
+    })
     payload = {
         "external_id": external_id,
         "source_hash": source_hash,
@@ -1081,7 +1519,12 @@ def build_notion_sync_payload(
         "raw_json_filename": f"analysis-{analysis_hash[:16]}.json",
         "archive_schema_version": RAW_ARCHIVE_SCHEMA_VERSION,
         "columns": columns,
-        "learning_items": extract_learning_items(analysis, external_id),
+        **entities,
+        # Retained for queue/debug compatibility; v4 routes each collection separately.
+        "learning_items": [
+            *entities["vocabulary"], *entities["kanji"],
+            *entities["language_items"], *entities["sentences"],
+        ],
     }
     return refresh_notion_render(payload, items, analysis)
 
@@ -1272,46 +1715,103 @@ def _safe_difficulty(value: str) -> str | None:
 
 
 def _item_properties(item: dict, lesson_page_id: str, existing: dict | None) -> dict:
-    existing_relations = _property_relations(existing or {}, "Bài phân tích")
-    relation_ids = {row.get("id") for row in existing_relations}
-    relation_added = lesson_page_id not in relation_ids
-    relations = existing_relations + ([{"id": lesson_page_id}] if relation_added else [])
+    return _entity_properties(item, "vocabulary", lesson_page_id, existing, {}, {})
+
+
+def _merged_relations(existing: dict | None, name: str, page_ids: list[str]) -> list[dict]:
+    relations = _property_relations(existing or {}, name)
+    known = {str(row.get("id") or "") for row in relations}
+    for page_id in page_ids:
+        if page_id and page_id not in known:
+            known.add(page_id)
+            relations.append({"id": page_id})
+    return relations[:100]
+
+
+def _entity_properties(
+    item: dict,
+    kind: str,
+    lesson_page_id: str,
+    existing: dict | None,
+    sentence_pages: dict[str, str],
+    kanji_pages: dict[str, str],
+) -> dict:
+    existing_lessons = _property_relations(existing or {}, "Bài phân tích")
+    relation_added = lesson_page_id not in {str(row.get("id") or "") for row in existing_lessons}
+    lesson_relations = _merged_relations(existing, "Bài phân tích", [lesson_page_id])
     occurrence_delta = int(item.get("occurrences_in_analysis") or 1) if relation_added else 0
     occurrence = _property_number(existing or {}, "Số lần xuất hiện") + occurrence_delta
     difficulty = _safe_difficulty(str(item.get("difficulty") or ""))
-    properties = {
-        "Tên": {"title": _text(_plain_preview(item.get("title")), 300)},
+    sentence_ids = [sentence_pages[value] for value in item.get("sentence_external_ids") or [] if value in sentence_pages]
+    common = {
         "External ID": {"rich_text": _text(item.get("external_id"))},
-        "Loại": {"select": {"name": item.get("type")}},
-        "Ngôn ngữ": {"select": {"name": "Tiếng Nhật" if item.get("language") == "japanese" else "Tiếng Anh"}},
-        "Cách đọc": {"rich_text": _text(_plain_preview(item.get("reading")))},
-        "Nghĩa tiếng Việt": {"rich_text": _text(_plain_preview(item.get("meaning_vi")))},
-        "Ví dụ": {"rich_text": _text(_plain_preview(item.get("example")))},
-        "Hiragana ví dụ": {"rich_text": _text(_plain_preview(item.get("example_reading")))},
-        "Bản dịch": {"rich_text": _text(_plain_preview(item.get("translation_vi")))},
-        "ID câu nguồn": {"rich_text": _text(item.get("sentence_id"))},
-        "Trang": {"number": int(item.get("page_index") or 0)},
-        "Thứ tự nguồn": {"number": int(item.get("source_order") or 0)},
-        "Bài phân tích": {"relation": relations[:100]},
-        "Số lần xuất hiện": {"number": occurrence or 1},
-        "Quan trọng": {"checkbox": bool(item.get("important"))},
-        "Từ loại": {"rich_text": _text(_plain_preview(item.get("part_of_speech")))},
-        "Từ gốc": {"rich_text": _text(_plain_preview(item.get("base_form")))},
-        "Công thức / Cấu tạo": {"rich_text": _text(_plain_preview(item.get("formation")))},
-        "Sắc thái / Chức năng": {"rich_text": _text(_plain_preview(item.get("nuance")))},
-        "So sánh": {"rich_text": _text(_plain_preview(item.get("comparison")))},
-        "Vai trò / Liên kết": {"rich_text": _text(_plain_preview(item.get("linked_parts")))},
-        "Dịch theo cụm": {"rich_text": _text(_plain_preview(item.get("chunked_translation")))},
-        "Dịch sát": {"rich_text": _text(_plain_preview(item.get("literal_translation")))},
-        "Dịch tự nhiên": {
-            "rich_text": _text(_plain_preview(item.get("natural_translation") or item.get("translation_vi")))
-        },
-        "Điểm phức tạp": {"number": float(item.get("complexity_score") or 0)},
+        "Bài phân tích": {"relation": lesson_relations},
         "Dữ liệu nguồn": {"rich_text": _text(item.get("source_json"))},
         "JSON checksum": {"rich_text": _text(item.get("source_checksum"))},
     }
-    if difficulty:
-        properties["Mức độ"] = {"select": {"name": difficulty}}
+    if kind == "vocabulary":
+        properties = {**common,
+            "Tên": {"title": _text(_plain_preview(item.get("title")), 300)},
+            "Nhóm": {"multi_select": [{"name": value} for value in item.get("groups") or ["Từ trong bài"]]},
+            "Ngôn ngữ": {"select": {"name": "Tiếng Nhật" if item.get("language") == "japanese" else "Tiếng Anh"}},
+            "Cách đọc": {"rich_text": _text(_plain_preview(item.get("reading")))},
+            "Nghĩa tiếng Việt": {"rich_text": _text(_plain_preview(item.get("meaning_vi")))},
+            "Ví dụ": {"rich_text": _text(_plain_preview(item.get("example")))},
+            "Hiragana ví dụ": {"rich_text": _text(_plain_preview(item.get("example_reading")))},
+            "Bản dịch": {"rich_text": _text(_plain_preview(item.get("translation_vi")))},
+            "Câu nguồn": {"relation": _merged_relations(existing, "Câu nguồn", sentence_ids)},
+            "Kanji": {"relation": _merged_relations(existing, "Kanji", [kanji_pages[value] for value in item.get("related_kanji_external_ids") or [] if value in kanji_pages])},
+            "Số lần xuất hiện": {"number": occurrence or 1},
+            "Thiếu chi tiết": {"checkbox": bool(item.get("missing_details"))},
+            "Từ loại": {"rich_text": _text(_plain_preview(item.get("part_of_speech")))},
+            "Từ gốc": {"rich_text": _text(_plain_preview(item.get("base_form")))},
+            "Sắc thái / Chức năng": {"rich_text": _text(_plain_preview(item.get("nuance")))},
+            "So sánh": {"rich_text": _text(_plain_preview(item.get("comparison")))},
+        }
+        if difficulty:
+            properties["Mức độ"] = {"select": {"name": difficulty}}
+    elif kind == "sentence":
+        properties = {**common,
+            "Câu": {"title": _text(_plain_preview(item.get("title")), 300)},
+            "ID câu": {"rich_text": _text(item.get("sentence_id"))},
+            "Ngôn ngữ": {"select": {"name": "Tiếng Nhật" if item.get("language") == "japanese" else "Tiếng Anh"}},
+            "Trang": {"number": int(item.get("page_index") or 0)},
+            "Thứ tự câu": {"number": int(item.get("source_order") or 0)},
+            "Nguyên văn": {"rich_text": _text(_plain_preview(item.get("original")))},
+            "Hiragana": {"rich_text": _text(_plain_preview(item.get("reading")))},
+            "Dịch tự nhiên": {"rich_text": _text(_plain_preview(item.get("natural_translation")))},
+            "Câu khó": {"checkbox": bool(item.get("is_complex"))},
+            "Điểm phức tạp": {"number": float(item.get("complexity_score") or 0)},
+            "Cảnh báo OCR": {"rich_text": _text(_plain_preview(item.get("ocr_warning")))},
+        }
+    elif kind == "kanji":
+        properties = {**common,
+            "Kanji": {"title": _text(_plain_preview(item.get("title")), 300)},
+            "Âm On": {"rich_text": _text(_plain_preview(item.get("onyomi")))},
+            "Âm Kun": {"rich_text": _text(_plain_preview(item.get("kunyomi")))},
+            "Nghĩa tiếng Việt": {"rich_text": _text(_plain_preview(item.get("meaning_vi")))},
+            "Vai trò trong bài": {"rich_text": _text(_plain_preview(item.get("nuance")))},
+            "Ví dụ": {"rich_text": _text(_plain_preview(item.get("example")))},
+            "Câu nguồn": {"relation": _merged_relations(existing, "Câu nguồn", sentence_ids)},
+            "Số lần xuất hiện": {"number": occurrence or 1},
+        }
+        if difficulty and difficulty.startswith("N"):
+            properties["JLPT"] = {"select": {"name": difficulty}}
+    else:
+        properties = {**common,
+            "Tên": {"title": _text(_plain_preview(item.get("title")), 300)},
+            "Loại": {"select": {"name": item.get("type")}},
+            "Ngôn ngữ": {"select": {"name": "Tiếng Nhật" if item.get("language") == "japanese" else "Tiếng Anh"}},
+            "Cấu trúc": {"rich_text": _text(_plain_preview(item.get("formation")))},
+            "Nghĩa / Chức năng": {"rich_text": _text(_plain_preview(item.get("meaning_vi")))},
+            "Sắc thái": {"rich_text": _text(_plain_preview(item.get("nuance")))},
+            "So sánh": {"rich_text": _text(_plain_preview(item.get("comparison")))},
+            "Ví dụ": {"rich_text": _text(_plain_preview(item.get("example")))},
+            "Câu nguồn": {"relation": _merged_relations(existing, "Câu nguồn", sentence_ids)},
+            "Số lần xuất hiện": {"number": occurrence or 1},
+        }
+        if difficulty:
+            properties["Mức độ"] = {"select": {"name": difficulty}}
     if not existing:
         properties.update(
             {
@@ -1324,8 +1824,22 @@ def _item_properties(item: dict, lesson_page_id: str, existing: dict | None) -> 
 
 
 def _upsert_learning_item(client: NotionClient, data_source_id: str, item: dict, lesson_page_id: str) -> dict:
+    return _upsert_entity(client, data_source_id, item, "vocabulary", lesson_page_id, {}, {})
+
+
+def _upsert_entity(
+    client: NotionClient,
+    data_source_id: str,
+    item: dict,
+    kind: str,
+    lesson_page_id: str,
+    sentence_pages: dict[str, str],
+    kanji_pages: dict[str, str],
+) -> dict:
     existing = _query_external_id(client, data_source_id, item["external_id"])
-    properties = _item_properties(item, lesson_page_id, existing)
+    properties = _entity_properties(
+        item, kind, lesson_page_id, existing, sentence_pages, kanji_pages
+    )
     if existing:
         page = client.request("PATCH", f"/pages/{existing['id']}", {"properties": properties})
     else:
@@ -1346,27 +1860,42 @@ def execute_notion_sync(run: dict, client: NotionClient | None = None) -> dict:
     client = client or NotionClient(settings.token)
     workspace = ensure_notion_workspace(client, settings)
     if workspace.get("lessons_database_id") and workspace.get("items_database_id"):
-        from modules.notion_migration import migrate_notion_workspace_v3_if_needed
+        from modules.notion_migration import migrate_notion_workspace_v4_if_needed
 
-        migrate_notion_workspace_v3_if_needed(client, settings, workspace)
-    payload = run["payload"]
+        migration = migrate_notion_workspace_v4_if_needed(client, settings, workspace)
+        if migration.get("status") == "running":
+            raise NotionAPIError(
+                "Notion đang được nâng cấp lên bố cục v4; job sẽ tự thử lại.",
+                503,
+                "migration_running",
+            )
+    payload = _upgrade_payload_v4(run["payload"])
     lesson = _upsert_lesson(client, workspace["lessons_data_source_id"], payload)
     page_id = str(lesson["id"])
     page_url = str(lesson.get("url") or "")
-    errors: list[dict] = []
-    for index, item in enumerate(payload.get("learning_items") or [], 1):
-        try:
-            _upsert_learning_item(client, workspace["items_data_source_id"], item, page_id)
-        except NotionAPIError as exc:
-            if exc.authorization_error or exc.retryable:
-                raise
-            errors.append({"external_id": item.get("external_id"), "title": item.get("title"), "error": str(exc)})
-        session_store.update_notion_sync_progress(
-            run["run_id"],
-            index,
-            notion_page_id=page_id,
-            notion_page_url=page_url,
-            item_errors=errors,
+    if not workspace.get("sentences_data_source_id"):
+        errors = []
+        for index, item in enumerate(payload.get("learning_items") or [], 1):
+            try:
+                _upsert_learning_item(client, workspace["items_data_source_id"], item, page_id)
+            except NotionAPIError as exc:
+                if exc.authorization_error or exc.retryable:
+                    raise
+                errors.append({"external_id": item.get("external_id"), "title": item.get("title"), "error": str(exc)})
+            session_store.update_notion_sync_progress(
+                run["run_id"], index, notion_page_id=page_id,
+                notion_page_url=page_url, item_errors=errors,
+            )
+    else:
+        errors = _sync_payload_entities(
+            client,
+            workspace,
+            payload,
+            page_id,
+            progress=lambda index, values: session_store.update_notion_sync_progress(
+                run["run_id"], index, notion_page_id=page_id,
+                notion_page_url=page_url, item_errors=values,
+            ),
         )
     if errors:
         client.request(
@@ -1384,6 +1913,69 @@ def execute_notion_sync(run: dict, client: NotionClient | None = None) -> dict:
             },
         )
     return {"page_id": page_id, "page_url": page_url, "item_errors": errors}
+
+
+def _upgrade_payload_v4(payload: dict[str, Any]) -> dict[str, Any]:
+    """Upgrade durable v3 queue payloads after deployment without another Gemini call."""
+    if all(key in payload for key in ("sentences", "vocabulary", "kanji", "language_items")):
+        return payload
+    try:
+        archive = json.loads(str(payload.get("raw_json") or "{}"))
+        analysis = archive.get("analysis")
+        if isinstance(analysis, dict):
+            upgraded = dict(payload)
+            entities = extract_notion_entities(analysis, str(payload.get("external_id") or "analysis"))
+            upgraded.update(entities)
+            upgraded["learning_items"] = [
+                *entities["vocabulary"], *entities["kanji"],
+                *entities["language_items"], *entities["sentences"],
+            ]
+            return upgraded
+    except (TypeError, ValueError, json.JSONDecodeError):
+        pass
+    return payload
+
+
+def _sync_payload_entities(
+    client: NotionClient,
+    workspace: dict[str, Any],
+    payload: dict[str, Any],
+    lesson_page_id: str,
+    progress: Callable[[int, list[dict]], None] | None = None,
+) -> list[dict]:
+    """Upsert v4 entities in dependency order while isolating validation failures."""
+    errors: list[dict] = []
+    sentence_pages: dict[str, str] = {}
+    kanji_pages: dict[str, str] = {}
+    index = 0
+
+    def sync_collection(key: str, kind: str, data_source_key: str) -> dict[str, str]:
+        nonlocal index
+        result: dict[str, str] = {}
+        for item in payload.get(key) or []:
+            index += 1
+            try:
+                page = _upsert_entity(
+                    client, str(workspace[data_source_key]), item, kind,
+                    lesson_page_id, sentence_pages, kanji_pages,
+                )
+                result[str(item.get("external_id") or "")] = str(page.get("id") or "")
+            except NotionAPIError as exc:
+                if exc.authorization_error or exc.retryable:
+                    raise
+                errors.append({
+                    "collection": key, "external_id": item.get("external_id"),
+                    "title": item.get("title"), "error": str(exc),
+                })
+            if progress:
+                progress(index, errors)
+        return result
+
+    sentence_pages.update(sync_collection("sentences", "sentence", "sentences_data_source_id"))
+    kanji_pages.update(sync_collection("kanji", "kanji", "kanji_data_source_id"))
+    sync_collection("vocabulary", "vocabulary", "items_data_source_id")
+    sync_collection("language_items", "language", "language_data_source_id")
+    return errors
 
 
 def enqueue_analysis_sync(

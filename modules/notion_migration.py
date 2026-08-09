@@ -1,4 +1,4 @@
-"""Restartable migration from preview-heavy Notion pages to layout v3."""
+"""Restartable migrations for preview-heavy Notion study workspaces."""
 
 from __future__ import annotations
 
@@ -14,11 +14,14 @@ from modules.notion_sync import (
     NotionClient,
     NotionSettings,
     _text,
+    _query_external_id,
+    _sync_payload_entities,
     _upsert_learning_item,
     _upsert_lesson,
     build_notion_sync_payload,
     ensure_notion_workspace,
     extract_learning_items,
+    extract_notion_entities,
     refresh_notion_render,
 )
 from modules.notion_renderer import NOTION_LAYOUT_VERSION
@@ -410,3 +413,283 @@ def migrate_notion_workspace_v3_if_needed(
         session_store.save_notion_workspace_config(config)
         return {"status": "not_needed"}
     return rebuild_notion_workspace_v3(client, settings, confirm=True)
+
+
+OBSOLETE_VOCABULARY_COLUMNS = (
+    "Loại", "ID câu nguồn", "Trang", "Thứ tự nguồn", "Quan trọng",
+    "Công thức / Cấu tạo", "Vai trò / Liên kết", "Dịch theo cụm",
+    "Dịch sát", "Dịch tự nhiên", "Điểm phức tạp",
+)
+
+
+def _state_category(item_type: str) -> str:
+    if item_type in {"Từ vựng", "Từ khó", "Cụm từ"}:
+        return "vocabulary"
+    if item_type == "Kanji":
+        return "kanji"
+    if item_type in {"Ngữ pháp", "Từ nối", "Mẫu câu"}:
+        return f"language:{item_type}"
+    if item_type in {"Câu", "Câu dài"}:
+        return "sentence"
+    return item_type.lower()
+
+
+def _v4_state_key(language: str, category: str, title: str, reading: str = "") -> str:
+    normalized = "|".join(" ".join(value.lower().split()) for value in (language, category, title, reading))
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _v4_state_key_from_page(page: dict[str, Any]) -> str:
+    item_type = _property_select(page, "Loại") or "Từ vựng"
+    return _v4_state_key(
+        _property_select(page, "Ngôn ngữ"), _state_category(item_type),
+        _property_plain(page, "Tên"), _property_plain(page, "Cách đọc"),
+    )
+
+
+def _v4_state_key_from_entity(kind: str, entity: dict[str, Any]) -> str:
+    language = "Tiếng Nhật" if entity.get("language") == "japanese" else "Tiếng Anh"
+    category = f"language:{entity.get('type')}" if kind == "language" else kind
+    title = str(entity.get("original") or entity.get("title") or "")
+    return _v4_state_key(language, category, title, str(entity.get("reading") or ""))
+
+
+def _merge_study_state(current: dict[str, Any] | None, incoming: dict[str, Any]) -> dict[str, Any]:
+    if not current:
+        return dict(incoming)
+    rank = {"Mới": 0, "Đang học": 1, "Đã nhớ": 2}
+    statuses = [str(current.get("status") or "Mới"), str(incoming.get("status") or "Mới")]
+    next_dates = [value for value in (current.get("next_review"), incoming.get("next_review")) if value]
+    last_dates = [value for value in (current.get("last_review"), incoming.get("last_review")) if value]
+    return {
+        "status": max(statuses, key=lambda value: rank.get(value, 0)),
+        "review_count": max(int(current.get("review_count") or 0), int(incoming.get("review_count") or 0)),
+        "next_review": min(next_dates) if next_dates else "",
+        "last_review": max(last_dates) if last_dates else "",
+    }
+
+
+def _remove_v4_obsolete_columns(client: NotionClient, workspace: dict[str, Any]) -> None:
+    _remove_obsolete_columns(client, str(workspace["lessons_data_source_id"]))
+    source_id = str(workspace["items_data_source_id"])
+    source = client.request("GET", f"/data_sources/{source_id}")
+    existing = source.get("properties") or {}
+    removable = {name: None for name in OBSOLETE_VOCABULARY_COLUMNS if name in existing}
+    if removable:
+        client.request("PATCH", f"/data_sources/{source_id}", {"properties": removable})
+
+
+def _rename_vocabulary_database(client: NotionClient, workspace: dict[str, Any]) -> None:
+    client.request("PATCH", f"/databases/{workspace['items_database_id']}", {"title": _text("Từ vựng")})
+    client.request("PATCH", f"/data_sources/{workspace['items_data_source_id']}", {"name": "Từ vựng"})
+    lesson_source = client.request("GET", f"/data_sources/{workspace['lessons_data_source_id']}")
+    properties = lesson_source.get("properties") or {}
+    if "Mục cần học" in properties and "Từ vựng" not in properties:
+        client.request(
+            "PATCH", f"/data_sources/{workspace['lessons_data_source_id']}",
+            {"properties": {"Mục cần học": {"name": "Từ vựng"}}},
+        )
+
+
+def _append_hub_v4_links(client: NotionClient, parent_page_id: str, workspace: dict[str, Any]) -> None:
+    links = []
+    for key, label in (
+        ("lessons", "Bài phân tích"), ("sentences", "Câu & bản dịch"),
+        ("items", "Từ vựng"), ("kanji", "Kanji"),
+        ("language", "Ngữ pháp & liên kết"),
+    ):
+        database_id = str(workspace.get(f"{key}_database_id") or "").replace("-", "")
+        if database_id:
+            links.append(f"- [{label}](https://www.notion.so/{database_id})")
+    client.request(
+        "PATCH", f"/pages/{parent_page_id}/markdown",
+        {"type": "insert_content", "insert_content": {
+            "content": "\n\n# Không gian học v4\n" + "\n".join(links) +
+                       "\n\nBắt đầu ở view **Ôn hôm nay** trong từng bảng.",
+            "position": {"type": "end"},
+        }},
+    )
+
+
+def rebuild_notion_workspace_v4(
+    client: NotionClient,
+    settings: NotionSettings,
+    *,
+    confirm: bool = False,
+) -> dict[str, Any]:
+    """Back up and rebuild the existing workspace into five v4 databases."""
+    workspace = ensure_notion_workspace(client, settings)
+    lesson_rows = _query_all(client, str(workspace["lessons_data_source_id"]))
+    old_item_rows = _query_all(client, str(workspace["items_data_source_id"]))
+    archives: list[dict[str, Any]] = []
+    unreadable: list[dict[str, str]] = []
+    for page in lesson_rows:
+        try:
+            archive = _download_json(client, _archive_url(page))
+            if not isinstance(archive.get("analysis"), dict) or not isinstance(archive.get("sources"), list):
+                raise ValueError("JSON không có sources/analysis hợp lệ.")
+            archives.append({
+                "page_id": str(page["id"]),
+                "external_id": _property_plain(page, "External ID"),
+                "created_at": _property_date(page, "Ngày phân tích"),
+                "archive": archive,
+            })
+        except (ValueError, KeyError) as exc:
+            unreadable.append({"page_id": str(page.get("id") or ""), "error": str(exc)})
+
+    study_states: dict[str, dict[str, Any]] = {}
+    for page in old_item_rows:
+        key = _v4_state_key_from_page(page)
+        study_states[key] = _merge_study_state(study_states.get(key), _study_state(page))
+    bundle = {
+        "migration": "notion-layout-v4",
+        "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "lessons": archives,
+        "unreadable_lessons": unreadable,
+        "learning_items": [
+            {"page_id": str(page.get("id") or ""), "properties": page.get("properties") or {}}
+            for page in old_item_rows
+        ],
+    }
+    summary = {
+        "lesson_count": len(lesson_rows), "readable_lesson_count": len(archives),
+        "unreadable_lessons": unreadable, "item_count": len(old_item_rows),
+        "would_remove_obsolete_columns": not unreadable,
+    }
+    if not confirm:
+        return {**summary, "status": "dry_run"}
+    if not archives and not unreadable:
+        return {**summary, "status": "not_needed", "rebuilt_lessons": 0, "rebuilt_items": 0}
+
+    config = session_store.load_notion_workspace_config()
+    migration = dict(config.get("migration_v4") or {})
+    backup_page_id = str(migration.get("backup_page_id") or "")
+    if not backup_page_id:
+        parent_id = _resolve_backup_parent(client, settings, workspace)
+        backup = _create_backup_page(client, parent_id, bundle)
+        backup_page_id = str(backup.get("id") or "")
+    config["migration_v4"] = {
+        **migration, "status": "backed_up", "backup_page_id": backup_page_id,
+        "completed_lessons": int(migration.get("completed_lessons") or 0),
+        "total_lessons": len(archives),
+        "lock_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+    }
+    session_store.save_notion_workspace_config(config)
+    _rename_vocabulary_database(client, workspace)
+
+    migration = dict(session_store.load_notion_workspace_config().get("migration_v4") or {})
+    completed_page_ids = set(migration.get("completed_page_ids") or [])
+    rebuilt_lessons = len(completed_page_ids)
+    rebuilt_items = int(migration.get("rebuilt_items") or 0)
+    replacement_vocab_ids: set[str] = set()
+    for archive_entry in archives:
+        archive = archive_entry["archive"]
+        created_at = None
+        if archive_entry.get("created_at"):
+            try:
+                created_at = dt.datetime.fromisoformat(str(archive_entry["created_at"]).replace("Z", "+00:00"))
+            except ValueError:
+                pass
+        payload = build_notion_sync_payload(
+            "migration-v4", list(archive["sources"]), dict(archive["analysis"]), created_at=created_at
+        )
+        if archive_entry.get("external_id"):
+            payload["external_id"] = archive_entry["external_id"]
+            entities = extract_notion_entities(dict(archive["analysis"]), payload["external_id"])
+            payload.update(entities)
+            payload["learning_items"] = [
+                *entities["vocabulary"], *entities["kanji"],
+                *entities["language_items"], *entities["sentences"],
+            ]
+        replacement_vocab_ids.update(
+            str(entity.get("external_id") or "") for entity in payload.get("vocabulary") or []
+        )
+        if archive_entry["page_id"] in completed_page_ids:
+            continue
+        refresh_notion_render(payload, list(archive["sources"]), dict(archive["analysis"]))
+        lesson = _upsert_lesson(client, str(workspace["lessons_data_source_id"]), payload)
+        errors = _sync_payload_entities(client, workspace, payload, str(lesson["id"]))
+        if errors:
+            raise NotionAPIError(f"Migration v4 còn {len(errors)} mục lỗi; dữ liệu cũ chưa bị archive.", 400, "migration_item_error")
+
+        for kind, key, source_key in (
+            ("sentence", "sentences", "sentences_data_source_id"),
+            ("kanji", "kanji", "kanji_data_source_id"),
+            ("vocabulary", "vocabulary", "items_data_source_id"),
+            ("language", "language_items", "language_data_source_id"),
+        ):
+            for entity in payload.get(key) or []:
+                page = _query_external_id(client, str(workspace[source_key]), str(entity["external_id"]))
+                if page:
+                    _restore_study_state(
+                        client, str(page["id"]),
+                        study_states.get(_v4_state_key_from_entity(kind, entity)),
+                    )
+                rebuilt_items += 1
+        rebuilt_lessons += 1
+        completed_page_ids.add(archive_entry["page_id"])
+        config = session_store.load_notion_workspace_config()
+        config["migration_v4"] = {
+            **dict(config.get("migration_v4") or {}),
+            "status": "running", "completed_lessons": rebuilt_lessons,
+            "completed_page_ids": sorted(completed_page_ids),
+            "rebuilt_items": rebuilt_items,
+            "lock_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        }
+        session_store.save_notion_workspace_config(config)
+
+    readable_ids = {entry["page_id"] for entry in archives}
+    for page in old_item_rows:
+        relations = _property_relations(page, "Bài phân tích")
+        external_id = _property_plain(page, "External ID")
+        if relations and relations.issubset(readable_ids) and external_id not in replacement_vocab_ids:
+            client.request("PATCH", f"/pages/{page['id']}", {"in_trash": True})
+    if not unreadable:
+        _remove_v4_obsolete_columns(client, workspace)
+    config = session_store.load_notion_workspace_config()
+    if settings.parent_page_id and not (config.get("migration_v4") or {}).get("hub_links_created"):
+        _append_hub_v4_links(client, settings.parent_page_id, workspace)
+        config = session_store.load_notion_workspace_config()
+        config.setdefault("migration_v4", {})["hub_links_created"] = True
+    final_status = "complete" if not unreadable else "partial"
+    config["schema_version"] = NOTION_SCHEMA_VERSION
+    config["migration_v4"] = {
+        **dict(config.get("migration_v4") or {}), "status": final_status,
+        "completed_lessons": rebuilt_lessons, "rebuilt_items": rebuilt_items,
+        "unreadable_lessons": unreadable,
+    }
+    session_store.save_notion_workspace_config(config)
+    return {
+        **summary, "status": final_status, "backup_page_id": backup_page_id,
+        "rebuilt_lessons": rebuilt_lessons, "rebuilt_items": rebuilt_items,
+    }
+
+
+def migrate_notion_workspace_v4_if_needed(
+    client: NotionClient,
+    settings: NotionSettings,
+    workspace: dict[str, Any],
+) -> dict[str, Any]:
+    config = session_store.load_notion_workspace_config()
+    status = str((config.get("migration_v4") or {}).get("status") or "")
+    if status in {"complete", "partial", "not_needed"}:
+        return {"status": status}
+    if status in {"starting", "backed_up", "running"}:
+        lock_at = str((config.get("migration_v4") or {}).get("lock_at") or "")
+        try:
+            locked = dt.datetime.fromisoformat(lock_at.replace("Z", "+00:00"))
+        except ValueError:
+            locked = dt.datetime.min.replace(tzinfo=dt.timezone.utc)
+        if dt.datetime.now(dt.timezone.utc) - locked < dt.timedelta(minutes=10):
+            return {"status": "running"}
+    rows = _query_all(client, str(workspace["lessons_data_source_id"]))
+    if not rows:
+        config["migration_v4"] = {"status": "not_needed", "checked_at": dt.datetime.now(dt.timezone.utc).isoformat()}
+        session_store.save_notion_workspace_config(config)
+        return {"status": "not_needed"}
+    config["migration_v4"] = {
+        **dict(config.get("migration_v4") or {}),
+        "status": "starting", "lock_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+    }
+    session_store.save_notion_workspace_config(config)
+    return rebuild_notion_workspace_v4(client, settings, confirm=True)
