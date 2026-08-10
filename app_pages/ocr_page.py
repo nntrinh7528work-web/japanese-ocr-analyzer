@@ -49,6 +49,22 @@ def _render_labeled_items(title: str, rows: list[dict], fields: tuple[str, ...])
 
 def _render_deep_details(row: dict, language: str) -> None:
     st.markdown("#### Giải mã câu dài (8 lớp)")
+    detected_language = row.get("detected_language") or language
+    skeleton = row.get("sentence_skeleton") or {}
+    if skeleton:
+        st.markdown("**Khung câu trung tâm**")
+        fields = [
+            ("Mẫu", skeleton.get("pattern")),
+            ("Chủ đề", skeleton.get("topic")),
+            ("Chủ ngữ", skeleton.get("subject")),
+            ("Vị ngữ", skeleton.get("predicate")),
+            ("Tân ngữ/Bổ ngữ", skeleton.get("object_or_complement")),
+            ("Trạng ngữ", skeleton.get("adverbial")),
+            ("Thì/Thể", skeleton.get("tense_aspect")),
+            ("Thái/Thức", skeleton.get("voice_modality")),
+            ("Khẳng định/Phủ định", skeleton.get("polarity")),
+        ]
+        st.markdown(" · ".join(f"**{label}:** {value}" for label, value in fields if value))
     segments = row.get("segments") or []
     if segments:
         st.markdown("**Cụm từ có nhãn vai trò**")
@@ -56,8 +72,11 @@ def _render_deep_details(row: dict, language: str) -> None:
             [
                 {
                     "Cụm": item.get("text", ""),
-                    "Hiragana": item.get("reading", "") if language == "japanese" else "",
+                    "Hiragana": item.get("reading", "") if detected_language == "japanese" else "",
                     "Nhãn/Vai trò": item.get("role", ""),
+                    "Dạng gốc": item.get("base_form", ""),
+                    "Dạng ngữ pháp": item.get("grammar_form", ""),
+                    "Trợ từ/Từ nối": item.get("particle_or_connector", ""),
                     "Nghĩa tiếng Việt": item.get("meaning_vi", ""),
                     "Bổ nghĩa cho": item.get("modifies", ""),
                 }
@@ -74,7 +93,11 @@ def _render_deep_details(row: dict, language: str) -> None:
                 {
                     "Nhãn mệnh đề": item.get("label", ""),
                     "Nội dung": item.get("text", ""),
+                    "Loại": item.get("type", ""),
                     "Vai trò": item.get("role", ""),
+                    "Chủ ngữ": item.get("subject", ""),
+                    "Vị ngữ": item.get("predicate", ""),
+                    "Từ nối": item.get("connector", ""),
                     "Quan hệ với mệnh đề chính": item.get("relation_to_main", ""),
                 }
                 for item in clauses
@@ -84,9 +107,19 @@ def _render_deep_details(row: dict, language: str) -> None:
         )
     if row.get("structure_summary"):
         st.markdown(f"**Cấu trúc câu:** {row['structure_summary']}")
+    _render_labeled_items("Chuỗi ngữ pháp", row.get("grammar_links") or [], ("source", "form", "function_vi", "nuance_vi", "scope"))
+    _render_labeled_items("Từ nối", row.get("connectors") or [], ("source", "function_vi", "relation", "scope"))
     _render_labeled_items("Thành phần lược bỏ", row.get("omitted_elements") or [], ("element", "recovered", "reason"))
     _render_labeled_items("Từ quy chiếu", row.get("references") or [], ("expression", "referent", "reason"))
     _render_labeled_items("Luồng logic", row.get("logic") or [], ("marker", "relation", "scope"))
+    _render_labeled_items("Điểm dễ hiểu sai", row.get("ambiguities") or [], ("source", "alternatives", "explanation_vi", "confidence"))
+    if row.get("translation_steps"):
+        st.markdown("**Cách tháo câu từng bước**")
+        for index, step in enumerate(row["translation_steps"], 1):
+            st.markdown(
+                f"{step.get('order') or index}. `{step.get('source_chunk') or ''}` → "
+                f"{step.get('meaning_vi') or ''}: {step.get('advice_vi') or ''}"
+            )
     st.markdown(f"**Câu viết lại đơn giản:** {row.get('simplified_source') or 'Chưa có'}")
     st.markdown(f"**Nghĩa tiếng Việt:** {row.get('simplified_vi') or 'Chưa có'}")
     questions = row.get("questions") or []
@@ -105,6 +138,11 @@ def _render_deep_details(row: dict, language: str) -> None:
                     f"{question_index}. {question.get('answer') or 'Chưa có đáp án'}\n\n"
                     f"{question.get('explanation') or ''}"
                 )
+    if row.get("quality_status") == "partial":
+        missing = ", ".join(row.get("missing_fields") or []) or "một số trường quan trọng"
+        st.warning(f"Phân tích này chưa đủ chi tiết: {missing}.")
+        if row.get("quality_repair_error"):
+            st.caption("Lượt bổ sung tự động chưa hoàn tất; có thể chạy lại riêng câu này.")
 
 
 def _render_audio_control(text: str, lang: str, slow: bool, label: str, key: str) -> None:
@@ -202,16 +240,18 @@ def _render_translation_guidance(
         value=False,
         key=f"teacher_tts_slow_{page.get('page_index')}",
     )
-    source_lang = "ja" if language == "japanese" else "en"
 
     for sentence in catalog:
         sentence_id = sentence.get("sentence_id")
         row = guidance.get(sentence_id) or {}
         deep = breakdowns.get(sentence_id)
+        sentence_language = sentence.get("detected_language") or row.get("detected_language") or (deep or {}).get("detected_language") or language
+        source_lang = "ja" if sentence_language == "japanese" else "en"
         translations = row.get("translations") or (deep or {}).get("translations") or {}
         original = str(sentence.get("original") or "")
         reading = row.get("reading") or (deep or {}).get("reading") or ""
         labels = [f"Câu {sentence.get('ordinal', '?')}"]
+        labels.append("Tiếng Nhật" if sentence_language == "japanese" else "Tiếng Anh")
         if sentence.get("eligible"):
             labels.append(f"Câu khó · điểm {sentence.get('complexity_score', 0)}")
         if deep:
@@ -224,7 +264,7 @@ def _render_translation_guidance(
             with source_col:
                 st.markdown("**Văn bản OCR đã duyệt**")
                 st.code(original, language=None)
-                if language == "japanese" and reading:
+                if sentence_language == "japanese" and reading:
                     st.caption(f"Hiragana: {reading}")
                 _render_audio_control(
                     original,
@@ -276,10 +316,17 @@ def _render_translation_guidance(
                                 f"{ref.get('summary') or 'Xem bảng đầy đủ bên dưới.'}"
                             )
                     if deep:
-                        _render_deep_details(deep, language)
+                        _render_deep_details(deep, sentence_language)
 
     analyzed_ids = set(breakdowns)
-    remaining = [row for row in catalog if row.get("sentence_id") not in analyzed_ids]
+    partial_ids = {
+        sentence_id for sentence_id, breakdown in breakdowns.items()
+        if breakdown.get("quality_status") == "partial"
+    }
+    remaining = [
+        row for row in catalog
+        if row.get("sentence_id") not in analyzed_ids or row.get("sentence_id") in partial_ids
+    ]
     missing_guidance = [row for row in catalog if row.get("sentence_id") not in guidance]
     if missing_guidance and st.button(
         f"Tạo hướng dẫn cho {len(missing_guidance)} câu còn thiếu",
@@ -303,7 +350,10 @@ def _render_translation_guidance(
         if not remaining:
             st.info("Tất cả câu trong trang đã được phân tích.")
             return
-        options = {f"Câu {row['ordinal']}: {row['original'][:120]}": row for row in remaining}
+        options = {
+            f"Câu {row['ordinal']}{' · cần bổ sung' if row.get('sentence_id') in partial_ids else ''}: {row['original'][:120]}": row
+            for row in remaining
+        }
         selected_label = st.selectbox(
             "Chọn câu chưa xử lý",
             options=list(options),
@@ -325,7 +375,7 @@ def _render_translation_guidance(
                 "model_name": model_name,
                 "reasoning_effort": reasoning_effort,
             }
-            lang = "sentence_ja" if language == "japanese" else "sentence_en"
+            lang = "sentence_ja" if selected.get("detected_language", language) == "japanese" else "sentence_en"
             job_id = create_job(
                 json.dumps(payload, ensure_ascii=False),
                 lang,

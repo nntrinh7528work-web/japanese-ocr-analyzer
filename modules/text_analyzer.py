@@ -17,6 +17,8 @@ from modules.sentence_analyzer import (
     analyze_sentence_batch,
     attach_sentence_data,
     build_sentence_catalog,
+    deep_analysis_batches,
+    merge_usage,
     select_auto_sentences,
 )
 from modules.translation_guidance import (
@@ -967,18 +969,27 @@ def run_page_analyses(
 
         def _deep_work(page_index: int, sentence_rows: list[dict[str, Any]]) -> tuple[int, list[dict[str, Any]], dict[str, int], str | None]:
             _index, source_page = page_lookup[page_index]
+            rows: list[dict[str, Any]] = []
+            usages: list[dict[str, int]] = []
+            errors: list[str] = []
+            for detected_language, batch in deep_analysis_batches(sentence_rows, language):
+                try:
+                    batch_rows, batch_usage = analyze_sentence_batch(
+                        model,
+                        batch,
+                        source_page["text"],
+                        detected_language,
+                        reasoning_effort=reasoning_effort,
+                        origin="auto",
+                    )
+                    rows.extend(batch_rows)
+                    usages.append(batch_usage)
+                except Exception as exc:
+                    errors.append(str(exc))
             try:
-                rows, usage = analyze_sentence_batch(
-                    model,
-                    sentence_rows,
-                    source_page["text"],
-                    language,
-                    reasoning_effort=reasoning_effort,
-                    origin="auto",
-                )
-                return page_index, rows, usage, None
+                return page_index, rows, merge_usage(*usages), "; ".join(errors) or None
             except Exception as exc:
-                return page_index, [], dict(ZERO_USAGE), str(exc)
+                return page_index, rows, merge_usage(*usages), str(exc)
 
         with ThreadPoolExecutor(max_workers=min(max_workers, len(selected))) as executor:
             futures = [

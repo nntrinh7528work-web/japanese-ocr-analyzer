@@ -4,8 +4,11 @@ from types import SimpleNamespace
 from modules.sentence_analyzer import (
     analysis_markdown,
     analyze_sentence_batch,
+    build_sentence_prompt,
+    deep_analysis_batches,
     merge_manual_breakdown,
     normalize_breakdown,
+    score_complexity,
     select_auto_sentences,
     split_sentences,
 )
@@ -81,6 +84,53 @@ def test_japanese_ocr_ascii_period_ends_sentence_but_decimal_does_not():
     ]
 
 
+def test_mixed_page_detects_sentence_language_without_changing_ids():
+    rows = split_sentences(
+        "これはAPIの説明です。The result, which was tested, changed significantly.",
+        "japanese",
+        3,
+    )
+
+    assert [row["sentence_id"] for row in rows] == ["p3-s1", "p3-s2"]
+    assert [row["detected_language"] for row in rows] == ["japanese", "english"]
+    assert all(row["language_source"] == "auto" for row in rows)
+
+
+def test_complexity_does_not_treat_subject_ga_and_simple_and_that_as_clauses():
+    japanese_score, japanese_signals = score_complexity("私が本を読む。", "japanese")
+    english_score, english_signals = score_complexity("That book and that pen are useful.", "english")
+
+    assert japanese_score < 5
+    assert "が nối mệnh đề" not in japanese_signals
+    assert english_score < 5
+    assert not any("mệnh đề/liên từ" in signal for signal in english_signals)
+
+
+def test_deep_batches_keep_languages_separate_and_isolate_very_long_sentences():
+    rows = [
+        {"sentence_id": "p1-s1", "ordinal": 1, "original": "短い日本語の文です。", "detected_language": "japanese", "complexity_score": 7},
+        {"sentence_id": "p1-s2", "ordinal": 2, "original": "word " * 55, "detected_language": "english", "complexity_score": 13},
+        {"sentence_id": "p1-s3", "ordinal": 3, "original": "Another short but complex English sentence.", "detected_language": "english", "complexity_score": 7},
+    ]
+
+    batches = deep_analysis_batches(rows, "japanese")
+
+    assert [(language, [row["sentence_id"] for row in batch]) for language, batch in batches] == [
+        ("japanese", ["p1-s1"]), ("english", ["p1-s2"]), ("english", ["p1-s3"])
+    ]
+
+
+def test_prompt_contains_language_specific_v2_requirements():
+    japanese = build_sentence_prompt([{"sentence_id": "p1-s1", "ordinal": 1, "original": "雨が降るので、行きません。"}], "雨が降るので、行きません。", "japanese")
+    english = build_sentence_prompt([{"sentence_id": "p1-s2", "ordinal": 2, "original": "The book that I bought was expensive."}], "The book that I bought was expensive.", "english")
+
+    assert "hiragana" in japanese.lower()
+    assert "trợ từ" in japanese
+    assert "S-V-O-C-A" in english
+    assert "relative" in english
+    assert "sentence_breakdown_version" not in japanese
+
+
 def test_selection_enforces_page_and_document_caps_with_source_tie_break():
     catalog = {}
     for page_index in range(1, 8):
@@ -130,22 +180,37 @@ def test_normalization_supplies_all_eight_layers_for_partial_json():
 def test_sentence_batch_preserves_requested_order_and_normalizes_missing_row():
     class Model:
         target_model_name = "gemini-test"
+        calls = 0
 
         def generate_content(self, prompt, generation_config):
             assert generation_config["response_mime_type"] == "application/json"
-            assert "Toàn bộ giải thích" in prompt
+            self.calls += 1
+            if self.calls == 1:
+                assert "Toàn bộ giải thích" in prompt
+                payload = {
+                    "sentences": [
+                        {"sentence_id": "p1-s2", "translations": {"natural": "Câu thứ hai."}},
+                    ]
+                }
+            else:
+                assert "chỉ bổ sung các trường thiếu" in prompt.lower()
+                payload = {
+                    "sentences": [
+                        {
+                            "sentence_id": sentence_id,
+                            "segments": [{"text": "sentence", "role": "S", "meaning_vi": "câu"}],
+                            "structure_summary": "S + V",
+                            "sentence_skeleton": {"pattern": "S + V", "predicate": "is"},
+                            "grammar_links": [{"source": "is", "form": "be", "function_vi": "động từ nối"}],
+                            "translations": {"literal": "Câu.", "natural": "Đây là câu."},
+                            "translation_steps": [{"order": "1", "source_chunk": "sentence", "meaning_vi": "câu", "advice_vi": "dịch"}],
+                            "questions": [{"question": "Gì?", "answer": "Câu", "explanation": ""}],
+                        }
+                        for sentence_id in ("p1-s1", "p1-s2")
+                    ]
+                }
             return SimpleNamespace(
-                text=json.dumps(
-                    {
-                        "sentences": [
-                            {
-                                "sentence_id": "p1-s2",
-                                "translations": {"natural": "Câu thứ hai."},
-                            }
-                        ]
-                    },
-                    ensure_ascii=False,
-                ),
+                text=json.dumps(payload, ensure_ascii=False),
                 usage_metadata=SimpleNamespace(
                     prompt_token_count=11,
                     candidates_token_count=7,
@@ -160,9 +225,32 @@ def test_sentence_batch_preserves_requested_order_and_normalizes_missing_row():
     rows, usage = analyze_sentence_batch(Model(), requested, "Context", "english")
 
     assert [row["sentence_id"] for row in rows] == ["p1-s1", "p1-s2"]
-    assert rows[0]["translations"]["natural"] == ""
-    assert rows[1]["translations"]["natural"] == "Câu thứ hai."
-    assert usage == {"input_tokens": 11, "output_tokens": 9, "candidate_tokens": 7, "thinking_tokens": 2}
+    assert all(row["quality_status"] == "complete" for row in rows)
+    assert rows[1]["translations"]["natural"] == "Đây là câu."
+    assert rows[0]["analysis_usage_detail"]["primary"]["input_tokens"] == 11
+    assert rows[0]["analysis_usage_detail"]["repair"]["input_tokens"] == 11
+    assert usage == {"input_tokens": 22, "output_tokens": 18, "candidate_tokens": 14, "thinking_tokens": 4}
+
+
+def test_failed_repair_keeps_the_primary_partial_breakdown():
+    class Model:
+        def generate_content(self, prompt, generation_config):
+            if "chỉ bổ sung các trường thiếu" in prompt.lower():
+                raise RuntimeError("temporary repair outage")
+            return SimpleNamespace(
+                text=json.dumps({"sentences": [{"sentence_id": "p1-s1", "translations": {"natural": "Bản dịch."}}]}),
+                usage_metadata=SimpleNamespace(prompt_token_count=3, candidates_token_count=2, thoughts_token_count=0),
+            )
+
+    rows, usage = analyze_sentence_batch(
+        Model(), [{"sentence_id": "p1-s1", "ordinal": 1, "original": "A difficult sentence."}], "Context", "english"
+    )
+
+    assert rows[0]["quality_status"] == "partial"
+    assert rows[0]["quality_repair_error"] == "temporary repair outage"
+    assert rows[0]["translations"]["natural"] == "Bản dịch."
+    assert rows[0]["analysis_usage_detail"]["repair"]["input_tokens"] == 0
+    assert usage["input_tokens"] == 3
 
 
 def test_manual_merge_is_idempotent_and_updates_only_target_page():

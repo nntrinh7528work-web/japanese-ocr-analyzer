@@ -1054,7 +1054,7 @@ def extract_notion_entities(
             entity = {
                 "external_id": "sentence:" + hashlib.sha256(raw_id.encode("utf-8")).hexdigest(),
                 "type": "Câu",
-                "language": language,
+                "language": str(catalog_row.get("detected_language") or breakdown.get("detected_language") or guide.get("detected_language") or language),
                 "title": f"Câu {page_index}.{ordinal} · {original[:80]}",
                 "sentence_id": sentence_id,
                 "page_index": page_index,

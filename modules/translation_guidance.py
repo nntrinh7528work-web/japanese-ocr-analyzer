@@ -19,6 +19,10 @@ def _language(value: str | None) -> str:
     return "japanese" if value == "japanese" else "english"
 
 
+def _sentence_language(sentence: dict[str, Any], fallback: str) -> str:
+    return _language(sentence.get("detected_language") or fallback)
+
+
 def guidance_batches(
     catalog: list[dict[str, Any]],
     max_sentences: int = MAX_BATCH_SENTENCES,
@@ -65,13 +69,17 @@ def normalize_guidance(
     language: str,
 ) -> dict[str, Any]:
     """Normalize partial Gemini JSON while preserving the exact OCR sentence."""
+    lang = _sentence_language(requested, language)
     translations = raw.get("translations") if isinstance(raw.get("translations"), dict) else {}
     key_points = _object_list(raw.get("key_points"), ("label", "source", "explanation_vi"))[:3]
     return {
         "sentence_id": requested["sentence_id"],
         "ordinal": int(requested.get("ordinal", 0) or 0),
         "original": _string(requested.get("original")),
-        "reading": _string(raw.get("reading")) if _language(language) == "japanese" else "",
+        "detected_language": lang,
+        "language_confidence": _string(requested.get("language_confidence")),
+        "language_source": _string(requested.get("language_source")),
+        "reading": _string(raw.get("reading")) if lang == "japanese" else "",
         "translations": {
             "chunked": _string(translations.get("chunked") or raw.get("chunked_translation")),
             "literal": _string(translations.get("literal") or raw.get("literal_translation")),
@@ -87,15 +95,17 @@ def normalize_guidance(
     }
 
 
-def _page_context(text: str, sentences: list[dict[str, Any]], max_chars: int = 6000) -> str:
+def _page_context(text: str, sentences: list[dict[str, Any]], max_chars: int = 2200) -> str:
     source = str(text or "")
     if len(source) <= max_chars:
         return source
-    positions = [source.find(str(row.get("original") or "")) for row in sentences]
-    valid = [position for position in positions if position >= 0]
-    center = min(valid) if valid else 0
-    start = max(0, center - max_chars // 3)
-    return source[start : start + max_chars]
+    contexts = []
+    for row in sentences:
+        original = str(row.get("original") or "")
+        position = source.find(original)
+        if position >= 0:
+            contexts.append(source[max(0, position - 450) : min(len(source), position + len(original) + 450)])
+    return "\n---\n".join(contexts)[:max_chars]
 
 
 def build_guidance_prompt(
@@ -177,6 +187,20 @@ def analyze_guidance_batch(
     requested = list(sentences)
     if not requested:
         return [], dict(ZERO_USAGE)
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for sentence in requested:
+        grouped.setdefault(_sentence_language(sentence, language), []).append(sentence)
+    if len(grouped) > 1:
+        rows: list[dict[str, Any]] = []
+        usages: list[dict[str, int]] = []
+        for detected_language, subset in grouped.items():
+            subset_rows, subset_usage = analyze_guidance_batch(
+                model, subset, page_text, detected_language, reasoning_effort=reasoning_effort
+            )
+            rows.extend(subset_rows)
+            usages.append(subset_usage)
+        return sorted(rows, key=lambda row: int(row.get("ordinal", 0) or 0)), merge_usage(*usages)
+    language = next(iter(grouped), _language(language))
     prompt = build_guidance_prompt(requested, page_text, language)
     config: dict[str, Any] = {
         "temperature": 0.1,
@@ -295,7 +319,8 @@ def add_related_analysis(
 ) -> list[dict[str, Any]]:
     output = copy.deepcopy(rows)
     for row in output:
-        row["related_analysis"] = related_analysis_for_sentence(row.get("original", ""), page, language)
+        row_language = _sentence_language(row, language)
+        row["related_analysis"] = related_analysis_for_sentence(row.get("original", ""), page, row_language)
     return output
 
 
@@ -478,16 +503,40 @@ def guidance_markdown(page: dict[str, Any]) -> str:
 def _deep_markdown_lines(row: dict[str, Any]) -> list[str]:
     """Render a breakdown inline without repeating the sentence heading."""
     lines = ["", "#### Giải mã câu dài"]
+    skeleton = row.get("sentence_skeleton") or {}
+    if any(skeleton.values()):
+        lines.append("**Khung câu trung tâm:**")
+        for label, key in (
+            ("Mẫu", "pattern"), ("Chủ đề", "topic"), ("Chủ ngữ", "subject"),
+            ("Vị ngữ", "predicate"), ("Tân ngữ/Bổ ngữ", "object_or_complement"),
+            ("Thì/Thể", "tense_aspect"), ("Thái/Thức", "voice_modality"),
+        ):
+            if skeleton.get(key):
+                lines.append(f"- **{label}:** {skeleton[key]}")
     if row.get("segments"):
         lines.append("**Cụm từ và vai trò:**")
         for item in row["segments"]:
-            lines.append(f"- `{item.get('text', '')}` [{item.get('role', '')}]: {item.get('meaning_vi', '')}")
+            detail = "; ".join(
+                value for value in (
+                    item.get("base_form") and f"dạng gốc: {item['base_form']}",
+                    item.get("grammar_form") and f"ngữ pháp: {item['grammar_form']}",
+                    item.get("particle_or_connector") and f"trợ từ/từ nối: {item['particle_or_connector']}",
+                ) if value
+            )
+            lines.append(f"- `{item.get('text', '')}` [{item.get('role', '')}]: {item.get('meaning_vi', '')}{'; ' + detail if detail else ''}")
     if row.get("clauses"):
         lines.append("**Mệnh đề:**")
         for item in row["clauses"]:
             lines.append(f"- {item.get('label', '')}: {item.get('text', '')} - {item.get('relation_to_main', '')}")
     if row.get("structure_summary"):
         lines.append(f"**Cấu trúc:** {row['structure_summary']}")
+    for title, key, formatter in (
+        ("Chuỗi ngữ pháp", "grammar_links", lambda item: f"{item.get('source', '')} [{item.get('form', '')}]: {item.get('function_vi', '')}; {item.get('nuance_vi', '')}"),
+        ("Từ nối", "connectors", lambda item: f"{item.get('source', '')}: {item.get('function_vi', '')}; {item.get('relation', '')}"),
+    ):
+        if row.get(key):
+            lines.append(f"**{title}:**")
+            lines.extend(f"- {formatter(item)}" for item in row[key])
     for title, key, formatter in (
         ("Thành phần lược bỏ", "omitted_elements", lambda item: f"{item.get('element', '')} → {item.get('recovered', '')}: {item.get('reason', '')}"),
         ("Từ quy chiếu", "references", lambda item: f"{item.get('expression', '')} → {item.get('referent', '')}: {item.get('reason', '')}"),
@@ -500,6 +549,15 @@ def _deep_markdown_lines(row: dict[str, Any]) -> list[str]:
         lines.append(f"**Câu viết lại đơn giản:** {row['simplified_source']}")
     if row.get("simplified_vi"):
         lines.append(f"**Nghĩa tiếng Việt:** {row['simplified_vi']}")
+    if row.get("translation_steps"):
+        lines.append("**Cách tháo câu từng bước:**")
+        for index, item in enumerate(row["translation_steps"], 1):
+            lines.append(f"{item.get('order') or index}. `{item.get('source_chunk', '')}` → {item.get('meaning_vi', '')}: {item.get('advice_vi', '')}")
+    if row.get("ambiguities"):
+        lines.append("**Điểm dễ hiểu sai:**")
+        lines.extend(f"- `{item.get('source', '')}`: {item.get('alternatives', '')} - {item.get('explanation_vi', '')}" for item in row["ambiguities"])
+    if row.get("quality_status") == "partial":
+        lines.append(f"**Cần bổ sung:** {', '.join(row.get('missing_fields') or [])}")
     if row.get("questions"):
         lines.append("**Câu hỏi kiểm tra hiểu:**")
         for question in row["questions"]:

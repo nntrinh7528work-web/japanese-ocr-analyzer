@@ -24,21 +24,55 @@ _EN_ABBREVIATIONS = {
 }
 
 _JA_CLAUSE_PATTERNS = (
-    r"(?:ので|のに|ながら|けれども|けれど|が|ため(?:に)?|ところ|ものの|にもかかわらず)",
+    r"(?:ので|のに|ながら|けれども|けれど|ため(?:に)?|ところ|ものの|にもかかわらず|一方(?:で)?|の(?:で|に))",
     r"(?:なら|たら|れば|と)(?:、|\s)",
     r"(?:しかし|そして|それで|そのため|一方で|つまり|したがって|ところが|また|なお)",
     r"(?:こと|もの|という|よう)(?:を|が|は|に|で|だ|です|になる)",
+    r"(?:させる|させられる|られる|れる|ことができる|得る|うる|てしまう|ておく|ている)",
+    r"(?:たり|し)(?:、|て|たり)",
 )
+_JA_CONJUNCTIVE_GA_RE = re.compile(r"(?:[ぁ-んァ-ン一-龯々])(?:だ|です|だった|ました|ない|た|る|れる|られる|ている|たい)?が(?:、|\s)")
 _EN_CLAUSE_RE = re.compile(
     r"\b(?:although|though|even though|because|since|while|whereas|if|unless|when|whenever|"
-    r"before|after|until|once|so that|in order that|which|who|whom|whose|that|where|however|"
-    r"therefore|moreover|nevertheless|yet|but|and|or|nor)\b",
+    r"before|after|until|once|so that|in order that|which|who|whom|whose|where|however|"
+    r"therefore|moreover|nevertheless|yet|but|nor)\b",
     re.IGNORECASE,
 )
+_EN_NOUN_CLAUSE_RE = re.compile(
+    r"\b(?:think|know|say|believe|show|suggest|argue|find|report|claim|mean|ensure|prove)\s+that\b",
+    re.IGNORECASE,
+)
+_EN_RELATIVE_THAT_RE = re.compile(
+    r"\b(?:the|a|an|this|these|those|my|your|his|her|our|their)\s+[A-Za-z][\w'-]*\s+that\s+(?:I|you|he|she|we|they|[A-Za-z][\w'-]*)\b",
+    re.IGNORECASE,
+)
+_EN_COMPLEX_RE = re.compile(
+    r"\b(?:to\s+\w+|\w+ing\b|\w+ed\b|has been|have been|had been|will have|"
+    r"must|should|could|would|might|there is|there are|it is|what\s+\w+|not only|either\s+.+?\s+or)\b",
+    re.IGNORECASE,
+)
+_JA_CHAR_RE = re.compile(r"[ぁ-んァ-ン一-龯々〆ヶ]")
+_LATIN_WORD_RE = re.compile(r"[A-Za-z]+")
+BREAKDOWN_VERSION = "2.0"
 
 
 def _language(value: str | None) -> str:
     return "japanese" if value == "japanese" else "english"
+
+
+def detect_sentence_language(sentence: str, fallback_language: str = "english") -> tuple[str, str, str]:
+    """Detect Japanese/English locally without sending source text to another API."""
+    source = str(sentence or "")
+    japanese_chars = len(_JA_CHAR_RE.findall(source))
+    latin_chars = sum(len(word) for word in _LATIN_WORD_RE.findall(source))
+    if japanese_chars:
+        # A Japanese sentence often includes English product names or acronyms.
+        # Kana/Kanji are the reliable signal for the grammar prompt to use.
+        confidence = "high" if japanese_chars >= max(2, latin_chars // 4) else "medium"
+        return "japanese", confidence, "auto"
+    if latin_chars:
+        return "english", "high" if latin_chars >= 3 else "medium", "auto"
+    return _language(fallback_language), "low", "sidebar_fallback"
 
 
 def merge_usage(*values: dict[str, Any] | None) -> dict[str, int]:
@@ -95,7 +129,6 @@ def split_sentences(text: str, language: str, page_index: int) -> list[dict[str,
     source = re.sub(r"[ \t]+", " ", source).strip()
     if not source:
         return []
-    lang = _language(language)
     sentences: list[str] = []
     buffer: list[str] = []
     stack: list[str] = []
@@ -111,13 +144,11 @@ def split_sentences(text: str, language: str, page_index: int) -> list[dict[str,
 
         boundary = False
         if not stack:
-            if lang == "japanese" and char in "。！？":
+            # Mixed OCR pages need punctuation from both writing systems.  A full
+            # stop still goes through the abbreviation/decimal guard.
+            if char in "。！？?!":
                 boundary = True
-            elif lang == "japanese" and char in ".．":
-                boundary = _is_english_period_boundary(source, index)
-            elif lang == "english" and char in "?!":
-                boundary = True
-            elif lang == "english" and char == ".":
+            elif char in ".．":
                 boundary = _is_english_period_boundary(source, index)
 
         if boundary:
@@ -132,15 +163,19 @@ def split_sentences(text: str, language: str, page_index: int) -> list[dict[str,
 
     catalog = []
     for ordinal, original in enumerate(sentences, 1):
-        score, signals = score_complexity(original, lang)
+        detected_language, confidence, source_kind = detect_sentence_language(original, language)
+        score, signals = score_complexity(original, detected_language)
         catalog.append(
             {
                 "sentence_id": f"p{int(page_index)}-s{ordinal}",
                 "ordinal": ordinal,
                 "original": original,
+                "detected_language": detected_language,
+                "language_confidence": confidence,
+                "language_source": source_kind,
                 "complexity_score": score,
                 "complexity_signals": signals,
-                "eligible": is_complex_sentence(original, lang, score),
+                "eligible": is_complex_sentence(original, detected_language, score),
                 "selected_auto": False,
                 "analyzed": False,
                 "analysis_origin": None,
@@ -159,41 +194,58 @@ def score_complexity(sentence: str, language: str) -> tuple[int, list[str]]:
         comma_count = sentence.count("、")
         comma_points = min(3, comma_count)
         markers = sum(len(re.findall(pattern, sentence)) for pattern in _JA_CLAUSE_PATTERNS)
+        conjunctive_ga = len(_JA_CONJUNCTIVE_GA_RE.findall(sentence))
+        markers += conjunctive_ga
         clause_points = min(6, markers * 2)
         noun_modifier = bool(re.search(r"(?:た|ている|ない|る|れる|られる|という)[^、。]{1,18}(?:こと|もの|人|時|場合|点|方法|理由)", sentence))
         condition = bool(re.search(r"(?:なら|たら|れば|ても|としても|にもかかわらず|ものの)", sentence))
         nested = any(opener in sentence for opener in _JA_OPEN) or sentence.count("（") > 0
-        score = length_points + comma_points + clause_points + int(noun_modifier) * 2 + int(condition) * 2 + int(nested) * 2
+        predicate_chain = bool(re.search(r"(?:て|で|ながら|つつ|たり|し)[ぁ-んァ-ン一-龯]{1,10}(?:て|た|る|ない|ます|です)", sentence))
+        score = length_points + comma_points + clause_points + int(noun_modifier) * 2 + int(condition) * 2 + int(nested) * 2 + int(predicate_chain) * 2
         if len(compact) >= 35:
             signals.append(f"dài {len(compact)} ký tự")
         if comma_count:
             signals.append(f"{comma_count} dấu phẩy")
         if markers:
             signals.append(f"{markers} dấu hiệu mệnh đề/từ nối")
+        if conjunctive_ga:
+            signals.append("が nối mệnh đề")
         if noun_modifier:
             signals.append("bổ nghĩa danh từ")
         if condition:
             signals.append("điều kiện/nhượng bộ")
         if nested:
             signals.append("cấu trúc lồng")
+        if predicate_chain:
+            signals.append("chuỗi vị ngữ/dạng liên kết")
         return score, signals
 
     words = re.findall(r"\b[\w'-]+\b", sentence)
     punctuation = len(re.findall(r"[,;:]", sentence))
-    markers = len(_EN_CLAUSE_RE.findall(sentence))
+    markers = (
+        len(_EN_CLAUSE_RE.findall(sentence))
+        + len(_EN_NOUN_CLAUSE_RE.findall(sentence))
+        + len(_EN_RELATIVE_THAT_RE.findall(sentence))
+    )
+    coordination = len(re.findall(r"\b(?:and|or)\b", sentence, re.I)) if re.search(r",\s*(?:and|or)\b|\b(?:not only|either)\b", sentence, re.I) else 0
     participle = bool(re.search(r"(?:^|[,;]\s+)(?:having|being|using|given|considering|despite)\b|\b\w+ing\s*,", sentence, re.I))
     parenthetical = bool(re.search(r"\([^)]{3,}\)|—[^—]+—", sentence))
-    score = min(4, len(words) // 12) + min(3, punctuation) + min(6, markers * 2) + int(participle) * 2 + int(parenthetical) * 2
+    complex_forms = bool(_EN_COMPLEX_RE.search(sentence))
+    score = min(4, len(words) // 12) + min(3, punctuation) + min(6, markers * 2) + min(2, coordination) + int(participle) * 2 + int(parenthetical) * 2 + int(complex_forms)
     if len(words) >= 20:
         signals.append(f"dài {len(words)} từ")
     if punctuation:
         signals.append(f"{punctuation} dấu ngắt")
     if markers:
         signals.append(f"{markers} mệnh đề/liên từ")
+    if coordination:
+        signals.append("liên kết song song")
     if participle:
         signals.append("cụm phân từ")
     if parenthetical:
         signals.append("phần chen giữa")
+    if complex_forms:
+        signals.append("dạng động từ/cấu trúc phức")
     return score, signals
 
 
@@ -201,10 +253,15 @@ def is_complex_sentence(sentence: str, language: str, score: int | None = None) 
     lang = _language(language)
     value = score if score is not None else score_complexity(sentence, lang)[0]
     if lang == "japanese":
-        marker_count = sum(len(re.findall(pattern, sentence)) for pattern in _JA_CLAUSE_PATTERNS)
+        marker_count = sum(len(re.findall(pattern, sentence)) for pattern in _JA_CLAUSE_PATTERNS) + len(_JA_CONJUNCTIVE_GA_RE.findall(sentence))
         return value >= 5 and (len(re.sub(r"\s", "", sentence)) >= 35 or marker_count >= 2)
     words = re.findall(r"\b[\w'-]+\b", sentence)
-    return value >= 5 and (len(words) >= 20 or len(_EN_CLAUSE_RE.findall(sentence)) >= 2)
+    marker_count = (
+        len(_EN_CLAUSE_RE.findall(sentence))
+        + len(_EN_NOUN_CLAUSE_RE.findall(sentence))
+        + len(_EN_RELATIVE_THAT_RE.findall(sentence))
+    )
+    return value >= 5 and (len(words) >= 20 or marker_count >= 2 or bool(_EN_COMPLEX_RE.search(sentence)))
 
 
 def build_sentence_catalog(pages: list[dict[str, Any]], language: str) -> dict[int, list[dict[str, Any]]]:
@@ -212,6 +269,43 @@ def build_sentence_catalog(pages: list[dict[str, Any]], language: str) -> dict[i
         int(page["page_index"]): split_sentences(page.get("text", ""), language, int(page["page_index"]))
         for page in pages
     }
+
+
+def deep_analysis_batches(sentences: list[dict[str, Any]], fallback_language: str) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Group source-ordered sentences by detected language and output budget."""
+    grouped: list[tuple[str, list[dict[str, Any]]]] = []
+    current_language = ""
+    current: list[dict[str, Any]] = []
+    current_size = 0
+
+    def flush() -> None:
+        nonlocal current, current_size
+        if current:
+            grouped.append((current_language, current))
+        current, current_size = [], 0
+
+    for sentence in sorted(sentences, key=lambda row: int(row.get("ordinal", 0) or 0)):
+        language = _language(sentence.get("detected_language") or fallback_language)
+        text = str(sentence.get("original") or "")
+        size = len(re.sub(r"\s", "", text)) if language == "japanese" else len(re.findall(r"\b[\w'-]+\b", text))
+        singleton = (
+            int(sentence.get("complexity_score", 0) or 0) >= 12
+            or (language == "japanese" and size >= 100)
+            or (language == "english" and size >= 50)
+        )
+        limit = 240 if language == "japanese" else 120
+        if singleton:
+            flush()
+            grouped.append((language, [sentence]))
+            continue
+        if current and (language != current_language or len(current) >= 3 or current_size + size > limit):
+            flush()
+        if not current:
+            current_language = language
+        current.append(sentence)
+        current_size += size
+    flush()
+    return grouped
 
 
 def select_auto_sentences(
@@ -263,17 +357,42 @@ def _object_list(value: Any, fields: tuple[str, ...]) -> list[dict[str, str]]:
 
 
 def normalize_breakdown(raw: dict[str, Any], requested: dict[str, Any], language: str, origin: str) -> dict[str, Any]:
-    """Normalize incomplete model output into the stable eight-layer schema."""
+    """Normalize model output into the backward-compatible V2 breakdown schema."""
+    lang = _language(requested.get("detected_language") or language)
     translations = raw.get("translations") if isinstance(raw.get("translations"), dict) else {}
-    questions = _object_list(raw.get("questions"), ("question", "answer", "explanation"))
+    skeleton = raw.get("sentence_skeleton") if isinstance(raw.get("sentence_skeleton"), dict) else {}
+    questions = _object_list(raw.get("questions"), ("question", "answer", "explanation", "evidence"))
     result = {
+        "sentence_breakdown_version": BREAKDOWN_VERSION,
         "sentence_id": requested["sentence_id"],
         "ordinal": int(requested.get("ordinal", 0) or 0),
         "original": requested.get("original", ""),
-        "reading": _string(raw.get("reading")) if _language(language) == "japanese" else "",
-        "segments": _object_list(raw.get("segments"), ("text", "reading", "role", "meaning_vi", "modifies")),
-        "clauses": _object_list(raw.get("clauses"), ("label", "text", "role", "relation_to_main")),
+        "detected_language": lang,
+        "language_confidence": requested.get("language_confidence", ""),
+        "language_source": requested.get("language_source", ""),
+        "reading": _string(raw.get("reading")) if lang == "japanese" else "",
+        "segments": _object_list(
+            raw.get("segments"),
+            ("text", "reading", "role", "meaning_vi", "modifies", "base_form", "part_of_speech", "grammar_form", "particle_or_connector", "function_vi"),
+        ),
+        "clauses": _object_list(
+            raw.get("clauses"),
+            ("label", "text", "type", "role", "subject", "predicate", "object_or_complement", "connector", "relation_to_main"),
+        ),
         "structure_summary": _string(raw.get("structure_summary")),
+        "sentence_skeleton": {
+            "pattern": _string(skeleton.get("pattern")),
+            "topic": _string(skeleton.get("topic")),
+            "subject": _string(skeleton.get("subject")),
+            "predicate": _string(skeleton.get("predicate")),
+            "object_or_complement": _string(skeleton.get("object_or_complement")),
+            "adverbial": _string(skeleton.get("adverbial")),
+            "tense_aspect": _string(skeleton.get("tense_aspect")),
+            "voice_modality": _string(skeleton.get("voice_modality")),
+            "polarity": _string(skeleton.get("polarity")),
+        },
+        "grammar_links": _object_list(raw.get("grammar_links"), ("source", "form", "function_vi", "nuance_vi", "scope")),
+        "connectors": _object_list(raw.get("connectors"), ("source", "function_vi", "relation", "scope")),
         "translations": {
             "chunked": _string(translations.get("chunked") or raw.get("chunked_translation")),
             "literal": _string(translations.get("literal") or raw.get("literal_translation")),
@@ -281,13 +400,19 @@ def normalize_breakdown(raw: dict[str, Any], requested: dict[str, Any], language
         },
         "omitted_elements": _object_list(raw.get("omitted_elements"), ("element", "recovered", "reason")),
         "references": _object_list(raw.get("references"), ("expression", "referent", "reason")),
-        "logic": _object_list(raw.get("logic"), ("marker", "relation", "scope")),
+        "logic": _object_list(raw.get("logic"), ("marker", "relation", "scope", "evidence")),
+        "translation_steps": _object_list(raw.get("translation_steps"), ("order", "source_chunk", "meaning_vi", "advice_vi")),
+        "ambiguities": _object_list(raw.get("ambiguities"), ("source", "alternatives", "explanation_vi", "confidence")),
         "simplified_source": _string(raw.get("simplified_source")),
         "simplified_vi": _string(raw.get("simplified_vi")),
         "questions": questions,
         "analysis_origin": origin,
         "complexity_score": int(requested.get("complexity_score", 0) or 0),
     }
+    missing = assess_breakdown_quality(result, lang)
+    result["missing_fields"] = missing
+    result["quality_score"] = max(0, 100 - len(missing) * 12)
+    result["quality_status"] = "complete" if not missing else "partial"
     return result
 
 
@@ -298,29 +423,34 @@ def build_sentence_prompt(sentences: list[dict[str, Any]], page_text: str, langu
         for item in sentences
     ]
     language_note = (
-        "Với tiếng Nhật, reading phải là hiragana của toàn câu và mỗi segment có reading."
+        """TIẾNG NHẬT: reading là hiragana toàn câu; cụm có Kanji phải có reading. Nêu dạng từ điển, từ loại, trợ từ và chức năng, dạng chia/thể/phủ định/kính ngữ, chủ đề-chủ ngữ lược bỏ, vị ngữ chính, mệnh đề bổ nghĩa danh từ, danh từ hóa, trích dẫn và quan hệ giữa các vế."""
         if lang == "japanese"
-        else "Với tiếng Anh, dùng segments/clauses để chỉ rõ S, V, O, C, modifiers và ranh giới mệnh đề."
+        else """TIẾNG ANH: chỉ rõ S-V-O-C-A, động từ trung tâm, tense/aspect/modal/voice/polarity; phân biệt finite/non-finite, relative/noun/adverbial/reduced clause, participle, infinitive/gerund, phrasal verb, coordination, parallelism, inversion, dummy it/there và antecedent của đại từ."""
     )
     return f"""Bạn là giáo viên {('tiếng Nhật' if lang == 'japanese' else 'tiếng Anh')} chuyên giúp người Việt đọc câu dài.
-Phân tích đúng các câu được yêu cầu theo ngữ cảnh. Toàn bộ giải thích và bản dịch đích phải bằng tiếng Việt.
+Phân tích đúng các câu được yêu cầu theo ngữ cảnh. Toàn bộ giải thích và bản dịch đích phải bằng tiếng Việt. Giữ nguyên tuyệt đối original; không sửa OCR. Mọi cụm text phải là đoạn trích nguyên văn, theo đúng thứ tự; nêu rõ khi một nhận định chỉ là suy luận.
 {language_note}
 
 Trả về DUY NHẤT một JSON object hợp lệ, không Markdown, dạng:
 {{"sentences":[{{
-  "sentence_id":"p1-s1", "reading":"", 
-  "segments":[{{"text":"", "reading":"", "role":"S/V/O/C/bổ ngữ/từ nối...", "meaning_vi":"", "modifies":""}}],
-  "clauses":[{{"label":"Mệnh đề chính/phụ...", "text":"", "role":"", "relation_to_main":""}}],
+  "sentence_id":"p1-s1", "reading":"",
+  "segments":[{{"text":"cụm nguyên văn", "reading":"hiragana hoặc rỗng", "role":"vai trò", "meaning_vi":"nghĩa trong câu", "modifies":"bổ nghĩa cho", "base_form":"dạng gốc", "part_of_speech":"từ loại", "grammar_form":"dạng chia/cấu trúc", "particle_or_connector":"trợ từ/từ nối", "function_vi":"chức năng"}}],
+  "clauses":[{{"label":"Mệnh đề 1", "text":"nguyên văn", "type":"chính/phụ/quan hệ/rút gọn...", "role":"vai trò", "subject":"chủ ngữ hiện/ẩn", "predicate":"vị ngữ", "object_or_complement":"bổ ngữ", "connector":"từ nối", "relation_to_main":"quan hệ"}}],
   "structure_summary":"cấu trúc và quan hệ S-V-O-C/mệnh đề",
+  "sentence_skeleton":{{"pattern":"khung câu", "topic":"chủ đề", "subject":"chủ ngữ", "predicate":"vị ngữ trung tâm", "object_or_complement":"tân ngữ/bổ ngữ", "adverbial":"trạng ngữ", "tense_aspect":"thì/thể", "voice_modality":"thái/thức", "polarity":"khẳng định/phủ định"}},
+  "grammar_links":[{{"source":"đoạn nguyên văn", "form":"cấu trúc", "function_vi":"chức năng", "nuance_vi":"sắc thái", "scope":"phạm vi"}}],
+  "connectors":[{{"source":"từ nối", "function_vi":"chức năng", "relation":"quan hệ logic", "scope":"nối phần nào"}}],
   "translations":{{"chunked":"dịch sát theo từng cụm có dấu phân cách", "literal":"dịch sát toàn câu", "natural":"dịch tự nhiên"}},
   "omitted_elements":[{{"element":"", "recovered":"", "reason":""}}],
   "references":[{{"expression":"", "referent":"", "reason":""}}],
-  "logic":[{{"marker":"", "relation":"nguyên nhân/đối lập/điều kiện...", "scope":"hai phần được nối"}}],
+  "logic":[{{"marker":"", "relation":"nguyên nhân/đối lập/điều kiện...", "scope":"hai phần được nối", "evidence":"căn cứ trong câu"}}],
+  "translation_steps":[{{"order":"1", "source_chunk":"cụm cần xử lý", "meaning_vi":"nghĩa", "advice_vi":"thứ tự ghép khi dịch"}}],
+  "ambiguities":[{{"source":"đoạn có thể hiểu nhiều cách", "alternatives":"các cách hiểu", "explanation_vi":"lý do", "confidence":"cao/trung bình/thấp"}}],
   "simplified_source":"viết lại đơn giản nhưng giữ nghĩa", "simplified_vi":"bản dịch tiếng Việt của câu đơn giản",
-  "questions":[{{"question":"câu hỏi kiểm tra hiểu", "answer":"đáp án", "explanation":"giải thích"}}]
+  "questions":[{{"question":"câu hỏi kiểm tra hiểu", "answer":"đáp án", "explanation":"giải thích", "evidence":"chi tiết chứng minh"}}]
 }}]}}
 
-Không bỏ qua trường nào; dùng [] hoặc "" nếu thực sự không áp dụng. Phân tích đủ 8 lớp, không chỉ dịch.
+Không bỏ qua trường nào; dùng [] hoặc "" chỉ khi thực sự không áp dụng. Có ít nhất một sentence_skeleton, một grammar_links, một translation_steps và một questions. Phân tích đủ 8 lớp, không chỉ dịch.
 
 CÂU CẦN PHÂN TÍCH:
 {json.dumps(requested, ensure_ascii=False, indent=2)}
@@ -330,15 +460,93 @@ NGỮ CẢNH TRANG:
 """
 
 
-def _context_for_sentences(page_text: str, sentences: list[dict[str, Any]], max_chars: int = 6000) -> str:
+def _context_for_sentences(page_text: str, sentences: list[dict[str, Any]], max_chars: int = 2200) -> str:
     text = str(page_text or "")
     if len(text) <= max_chars:
         return text
-    positions = [text.find(str(sentence.get("original") or "")) for sentence in sentences]
-    valid = [position for position in positions if position >= 0]
-    center = min(valid) if valid else 0
-    start = max(0, center - max_chars // 3)
-    return text[start : start + max_chars]
+    contexts = []
+    for sentence in sentences:
+        original = str(sentence.get("original") or "")
+        position = text.find(original)
+        if position < 0:
+            continue
+        start = max(0, position - 450)
+        end = min(len(text), position + len(original) + 450)
+        contexts.append(text[start:end])
+    return "\n---\n".join(contexts)[:max_chars]
+
+
+def _breakdown_response_schema() -> dict[str, Any]:
+    """Small portable schema; prompt carries the detailed semantic contract."""
+    return {
+        "type": "object",
+        "properties": {
+            "sentences": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"sentence_id": {"type": "string"}},
+                    "required": ["sentence_id"],
+                },
+            }
+        },
+        "required": ["sentences"],
+    }
+
+
+def assess_breakdown_quality(row: dict[str, Any], language: str) -> list[str]:
+    """Return user-visible missing fields without discarding useful partial output."""
+    missing = []
+    translations = row.get("translations") or {}
+    for key, label in (("literal", "dịch sát"), ("natural", "dịch tự nhiên")):
+        if not str(translations.get(key) or "").strip():
+            missing.append(label)
+    if not row.get("segments"):
+        missing.append("cụm từ")
+    if not str(row.get("structure_summary") or "").strip():
+        missing.append("tóm tắt cấu trúc")
+    skeleton = row.get("sentence_skeleton") or {}
+    if not str(skeleton.get("pattern") or "").strip() or not str(skeleton.get("predicate") or "").strip():
+        missing.append("khung câu/vị ngữ trung tâm")
+    if not row.get("grammar_links"):
+        missing.append("chuỗi ngữ pháp")
+    if not row.get("translation_steps"):
+        missing.append("cách tháo câu")
+    if not row.get("questions"):
+        missing.append("câu hỏi hiểu bài")
+    if _language(language) == "japanese" and not str(row.get("reading") or "").strip():
+        missing.append("hiragana toàn câu")
+    source = str(row.get("original") or "")
+    cursor = 0
+    for segment in row.get("segments") or []:
+        segment_text = str(segment.get("text") or "")
+        index = source.find(segment_text, cursor) if segment_text else -1
+        if index < 0:
+            missing.append("cụm từ không khớp OCR")
+            break
+        cursor = index + len(segment_text)
+    return missing
+
+
+def _repair_prompt(rows: list[dict[str, Any]], language: str) -> str:
+    requested = [
+        {"sentence_id": row["sentence_id"], "original": row["original"], "missing_fields": row.get("missing_fields", [])}
+        for row in rows if row.get("missing_fields")
+    ]
+    return f"""Bạn đang hoàn thiện phân tích câu dài {'tiếng Nhật' if _language(language) == 'japanese' else 'tiếng Anh'} cho người Việt.
+Chỉ bổ sung các trường thiếu dưới đây. Giữ nguyên sentence_id và original; trả về JSON object {{\"sentences\":[...]}} không Markdown. Mọi nội dung giải thích dùng tiếng Việt. Cụm text phải trích đúng OCR.
+{json.dumps(requested, ensure_ascii=False, indent=2)}"""
+
+
+def _merge_raw_breakdown(primary: dict[str, Any], repair: dict[str, Any]) -> dict[str, Any]:
+    """Merge a sparse repair without deleting useful fields from the first answer."""
+    result = copy.deepcopy(primary or {})
+    for key, value in (repair or {}).items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = {**result[key], **value}
+        elif value not in (None, "", [], {}):
+            result[key] = value
+    return result
 
 
 def _parse_json_response(text: str) -> dict[str, Any]:
@@ -365,30 +573,27 @@ def analyze_sentence_batch(
     reasoning_effort: str = "standard",
     origin: str = "auto",
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    """Analyze up to three sentences in one Gemini request."""
+    """Analyze one language-homogeneous batch and repair important omissions once."""
     requested = list(sentences[:3])
     if not requested:
         return [], dict(ZERO_USAGE)
+    detected = {_language(row.get("detected_language") or language) for row in requested}
+    if len(detected) != 1:
+        raise ValueError("Một batch giải mã câu dài chỉ được chứa một ngôn ngữ.")
+    language = detected.pop()
     prompt = build_sentence_prompt(requested, page_text, language)
     config: dict[str, Any] = {
         "temperature": 0.1,
-        "max_output_tokens": 12288,
+        "max_output_tokens": 16384 if len(requested) == 1 else 12288,
         "response_mime_type": "application/json",
+        "response_json_schema": _breakdown_response_schema(),
     }
     if reasoning_effort == "deep":
         config["thinking_config"] = {"thinking_budget": 4096}
     last_error: Exception | None = None
     for attempt in range(3):
         try:
-            try:
-                response = model.generate_content(prompt, generation_config=config)
-            except Exception:
-                if "thinking_config" not in config:
-                    raise
-                response = model.generate_content(
-                    prompt,
-                    generation_config={key: value for key, value in config.items() if key != "thinking_config"},
-                )
+            response = _generate_structured(model, prompt, config)
             payload = _parse_json_response(getattr(response, "text", ""))
             rows = payload.get("sentences")
             if not isinstance(rows, list):
@@ -398,12 +603,64 @@ def analyze_sentence_batch(
                 normalize_breakdown(by_id.get(item["sentence_id"], {}), item, language, origin)
                 for item in requested
             ]
-            return normalized, response_usage(response)
+            primary_usage = response_usage(response)
+            repair_usage = dict(ZERO_USAGE)
+            usage = primary_usage
+            missing = [row for row in normalized if row.get("missing_fields")]
+            if missing:
+                try:
+                    repair_response = _generate_structured(
+                        model,
+                        _repair_prompt(missing, language),
+                        {**config, "max_output_tokens": 8192},
+                    )
+                    repair_rows = _parse_json_response(getattr(repair_response, "text", "")).get("sentences")
+                    if isinstance(repair_rows, list):
+                        repair_by_id = {str(row.get("sentence_id")): row for row in repair_rows if isinstance(row, dict)}
+                        normalized = [
+                            normalize_breakdown(
+                                _merge_raw_breakdown(
+                                    by_id.get(item["sentence_id"], {}) or {},
+                                    repair_by_id.get(item["sentence_id"], {}) or {},
+                                ),
+                                item,
+                                language,
+                                origin,
+                            )
+                            for item in requested
+                        ]
+                    repair_usage = response_usage(repair_response)
+                    usage = merge_usage(primary_usage, repair_usage)
+                except Exception as repair_error:
+                    for row in missing:
+                        row["quality_repair_error"] = str(repair_error)
+            for row in normalized:
+                row["analysis_usage_detail"] = {
+                    "primary": merge_usage(primary_usage),
+                    "repair": merge_usage(repair_usage),
+                }
+            return normalized, usage
         except Exception as exc:
             last_error = exc
             if attempt < 2:
                 time.sleep(0.2 * (attempt + 1))
     raise RuntimeError(f"Giải mã câu dài thất bại sau 3 lần thử: {last_error}") from last_error
+
+
+def _generate_structured(model: Any, prompt: str, config: dict[str, Any]) -> Any:
+    """Use JSON schema when supported, then fall back safely for older models."""
+    candidates = [config]
+    without_schema = {key: value for key, value in config.items() if key != "response_json_schema"}
+    candidates.append(without_schema)
+    if "thinking_config" in without_schema:
+        candidates.append({key: value for key, value in without_schema.items() if key != "thinking_config"})
+    last_error: Exception | None = None
+    for candidate in candidates:
+        try:
+            return model.generate_content(prompt, generation_config=candidate)
+        except Exception as exc:
+            last_error = exc
+    raise last_error or RuntimeError("Không thể gọi model phân tích câu dài.")
 
 
 def analyze_manual_sentence(
@@ -416,8 +673,9 @@ def analyze_manual_sentence(
     from modules.text_analyzer import _init_model
 
     model = _init_model(model_name) if model_name else _init_model()
+    sentence_language = _language(sentence.get("detected_language") or language)
     rows, usage = analyze_sentence_batch(
-        model, [sentence], page_text, language, reasoning_effort=reasoning_effort, origin="manual"
+        model, [sentence], page_text, sentence_language, reasoning_effort=reasoning_effort, origin="manual"
     )
     return {
         "job_kind": "sentence_deep_dive",
@@ -527,15 +785,39 @@ def sentence_breakdowns_markdown(page: dict[str, Any]) -> str:
             f"### Câu {row.get('ordinal', '?')} - {origin}",
             f"**Nguyên văn:** {row.get('original', '')}",
         ])
+        if row.get("detected_language"):
+            lines.append(f"**Ngôn ngữ:** {'Tiếng Nhật' if row['detected_language'] == 'japanese' else 'Tiếng Anh'}")
+        if row.get("quality_status") == "partial":
+            lines.append(f"**Cần bổ sung:** {', '.join(row.get('missing_fields') or [])}")
         if row.get("reading"):
             lines.append(f"**Hiragana:** {row['reading']}")
+        skeleton = row.get("sentence_skeleton") or {}
+        if any(skeleton.values()):
+            lines.extend(["", "**Khung câu trung tâm:**"])
+            for label, key in (
+                ("Mẫu", "pattern"), ("Chủ đề", "topic"), ("Chủ ngữ", "subject"),
+                ("Vị ngữ", "predicate"), ("Tân ngữ/Bổ ngữ", "object_or_complement"),
+                ("Trạng ngữ", "adverbial"), ("Thì/Thể", "tense_aspect"),
+                ("Thái/Thức", "voice_modality"), ("Khẳng định/Phủ định", "polarity"),
+            ):
+                if skeleton.get(key):
+                    lines.append(f"- **{label}:** {skeleton[key]}")
         segments = row.get("segments") or []
         if segments:
             lines.extend(["", "**Cụm từ và vai trò:**"])
             for segment in segments:
                 reading = f" ({segment.get('reading')})" if segment.get("reading") else ""
                 modifies = f"; bổ nghĩa: {segment.get('modifies')}" if segment.get("modifies") else ""
-                lines.append(f"- `{segment.get('text', '')}`{reading} [{segment.get('role', '')}]: {segment.get('meaning_vi', '')}{modifies}")
+                details = "; ".join(
+                    value for value in (
+                        segment.get("base_form") and f"dạng gốc: {segment['base_form']}",
+                        segment.get("grammar_form") and f"ngữ pháp: {segment['grammar_form']}",
+                        segment.get("particle_or_connector") and f"trợ từ/từ nối: {segment['particle_or_connector']}",
+                        segment.get("function_vi") and f"chức năng: {segment['function_vi']}",
+                    ) if value
+                )
+                suffix = f"; {details}" if details else ""
+                lines.append(f"- `{segment.get('text', '')}`{reading} [{segment.get('role', '')}]: {segment.get('meaning_vi', '')}{modifies}{suffix}")
         clauses = row.get("clauses") or []
         if clauses:
             lines.extend(["", "**Mệnh đề:**"])
@@ -543,6 +825,13 @@ def sentence_breakdowns_markdown(page: dict[str, Any]) -> str:
                 lines.append(f"- {clause.get('label', '')}: {clause.get('text', '')} - {clause.get('role', '')}; {clause.get('relation_to_main', '')}")
         if row.get("structure_summary"):
             lines.extend(["", f"**Cấu trúc:** {row['structure_summary']}"])
+        for title, key, formatter in (
+            ("Chuỗi ngữ pháp", "grammar_links", lambda x: f"{x.get('source', '')} [{x.get('form', '')}]: {x.get('function_vi', '')}; {x.get('nuance_vi', '')}; phạm vi: {x.get('scope', '')}"),
+            ("Từ nối", "connectors", lambda x: f"{x.get('source', '')}: {x.get('function_vi', '')}; {x.get('relation', '')}; phạm vi: {x.get('scope', '')}"),
+        ):
+            if row.get(key):
+                lines.extend(["", f"**{title}:**"])
+                lines.extend(f"- {formatter(item)}" for item in row[key])
         translations = row.get("translations") or {}
         lines.extend([
             "",
@@ -558,6 +847,16 @@ def sentence_breakdowns_markdown(page: dict[str, Any]) -> str:
             if row.get(key):
                 lines.extend(["", f"**{title}:**"])
                 lines.extend(f"- {formatter(item)}" for item in row[key])
+        if row.get("translation_steps"):
+            lines.extend(["", "**Cách tháo câu từng bước:**"])
+            for index, step in enumerate(row["translation_steps"], 1):
+                lines.append(f"{step.get('order') or index}. `{step.get('source_chunk', '')}` → {step.get('meaning_vi', '')}: {step.get('advice_vi', '')}")
+        if row.get("ambiguities"):
+            lines.extend(["", "**Điểm dễ hiểu sai:**"])
+            lines.extend(
+                f"- `{item.get('source', '')}`: {item.get('alternatives', '')} - {item.get('explanation_vi', '')} ({item.get('confidence', '')})"
+                for item in row["ambiguities"]
+            )
         lines.extend([
             "",
             f"**Câu viết lại đơn giản:** {row.get('simplified_source', '')}",

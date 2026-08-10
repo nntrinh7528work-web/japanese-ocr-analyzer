@@ -199,12 +199,22 @@ def test_app_renders_sentence_card_hiragana_and_hidden_answers():
         "original": item["edited_text"],
         "reading": "あめがふっているので、でかけません。",
         "analysis_origin": "auto",
+        "sentence_breakdown_version": "2.0",
+        "detected_language": "japanese",
+        "quality_status": "complete",
+        "quality_score": 100,
+        "missing_fields": [],
         "complexity_score": 7,
-        "segments": [{"text": "雨が", "reading": "あめが", "role": "S", "meaning_vi": "trời mưa"}],
+        "segments": [{"text": "雨が", "reading": "あめが", "role": "S", "meaning_vi": "trời mưa", "base_form": "雨", "grammar_form": "chủ ngữ", "particle_or_connector": "が"}],
         "clauses": [{"label": "Mệnh đề phụ", "text": "雨が降っているので", "role": "nguyên nhân"}],
         "structure_summary": "Mệnh đề nguyên nhân + mệnh đề chính",
+        "sentence_skeleton": {"pattern": "Mệnh đề lý do + mệnh đề chính", "predicate": "出かけません", "subject": "(tôi)"},
+        "grammar_links": [{"source": "ので", "form": "từ nối", "function_vi": "nêu lý do", "nuance_vi": "trung tính"}],
+        "connectors": [{"source": "ので", "function_vi": "nối nguyên nhân", "relation": "lý do-kết quả"}],
         "translations": {"chunked": "Vì trời mưa / không đi ra ngoài", "literal": "Vì trời đang mưa, không ra ngoài.", "natural": "Vì trời mưa nên tôi không ra ngoài."},
         "omitted_elements": [], "references": [], "logic": [],
+        "translation_steps": [{"order": "1", "source_chunk": "雨が降っている", "meaning_vi": "trời đang mưa", "advice_vi": "đọc vế lý do trước"}],
+        "ambiguities": [{"source": "主語", "alternatives": "người nói", "explanation_vi": "chủ ngữ lược bỏ", "confidence": "cao"}],
         "simplified_source": "雨です。出かけません。", "simplified_vi": "Trời mưa. Tôi không ra ngoài.",
         "questions": [{"question": "Vì sao người nói không ra ngoài?", "answer": "Vì trời mưa.", "explanation": "ので nêu lý do."}],
     }
@@ -214,7 +224,7 @@ def test_app_renders_sentence_card_hiragana_and_hidden_answers():
         "analysis_language": "japanese", "vocabulary_all": [], "vocabulary_important": [],
         "kanji_analysis": [], "connectors": [], "grammar_points": [], "sentence_patterns": [],
         "full_markdown": "# Báo cáo", "usage": {},
-        "sentence_catalog": [{"sentence_id": "p1-s1", "ordinal": 1, "original": item["edited_text"], "analyzed": True, "eligible": True, "complexity_score": 7}],
+        "sentence_catalog": [{"sentence_id": "p1-s1", "ordinal": 1, "original": item["edited_text"], "detected_language": "japanese", "analyzed": True, "eligible": True, "complexity_score": 7}],
         "sentence_breakdowns": [breakdown], "sentence_analysis_usage": {"input_tokens": 2, "output_tokens": 3},
         "translation_guidance": [
             {
@@ -259,6 +269,8 @@ def test_app_renders_sentence_card_hiragana_and_hidden_answers():
     markdown_values = [item.value for item in app.markdown]
     assert any("Từ nối nguyên nhân" in value for value in markdown_values)
     assert any("Mệnh đề nguyên nhân" in value for value in markdown_values)
+    assert any("Khung câu trung tâm" in value for value in markdown_values)
+    assert any("Chuỗi ngữ pháp" in value for value in markdown_values)
     assert any("あめがふっているので" in item.value for item in app.caption)
 
 
