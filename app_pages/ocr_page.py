@@ -574,11 +574,6 @@ def render_ocr_tab(
 
     reasoning_effort = config.get("reasoning_effort", "standard")
     analysis_mode = config.get("analysis_mode", "full_analysis")
-    analyze_button_label = (
-        "🧠 Phân tích toàn bộ từ vựng, Kanji và ngữ pháp"
-        if analysis_mode == "full_analysis"
-        else "🧩 Dịch và giải thích từng câu"
-    )
 
     if not analysis_text:
         st.warning("Chưa có văn bản OCR. Hãy OCR ít nhất một ảnh trước khi phân tích.")
@@ -663,76 +658,69 @@ def render_ocr_tab(
             except Exception as exc:
                 st.error(f"❌ Lỗi tự động phân tích tiếp tục: {exc}")
 
-        if analysis_language == "japanese":
-            if st.button(
-                analyze_button_label,
-                type="primary",
-                use_container_width=True,
-                disabled=not all_pages_ready,
-            ):
-                clear_analysis_fn()
-                detected_lang = "pdf_ja"
-                input_data = {
-                    "pages": pages_to_analyze,
-                    "model_name": text_model_choice,
-                    "reasoning_effort": reasoning_effort,
-                    "auto_sentence_deep_dive": config.get("auto_sentence_deep_dive", True),
-                    "auto_translation_guidance": config.get("auto_translation_guidance", True),
-                    "analysis_mode": analysis_mode,
-                }
-                input_text = json.dumps(input_data)
-                job_id = create_job(
-                    input_text,
-                    detected_lang,
-                    session_id=st.session_state.session_id,
-                    source_hash=items_source_hash(items),
-                )
-                subprocess.Popen(
-                    [_sys.executable, worker_path, job_id],
-                    stdout=subprocess.DEVNULL,
-                    stderr=open(project_dir + "/worker_error.log", "a"),
-                    cwd=project_dir,
-                )
-                st.session_state.current_job_id = job_id
-                st.query_params["job_id"] = job_id
-                st.success(f"Đã bắt đầu phân tích! Job ID: {job_id}")
-                st.info("Bạn có thể đóng tab này — kết quả sẽ được lưu lại. Mở lại link có job_id để xem kết quả.")
-                st.rerun()
-        else:
-            if st.button(
-                analyze_button_label,
-                type="primary",
-                use_container_width=True,
-                disabled=not all_pages_ready,
-            ):
-                clear_analysis_fn()
-                detected_lang = "pdf_en"
-                input_data = {
-                    "pages": pages_to_analyze,
-                    "model_name": text_model_choice,
-                    "reasoning_effort": reasoning_effort,
-                    "auto_sentence_deep_dive": config.get("auto_sentence_deep_dive", True),
-                    "auto_translation_guidance": config.get("auto_translation_guidance", True),
-                    "analysis_mode": analysis_mode,
-                }
-                input_text = json.dumps(input_data)
-                job_id = create_job(
-                    input_text,
-                    detected_lang,
-                    session_id=st.session_state.session_id,
-                    source_hash=items_source_hash(items),
-                )
-                subprocess.Popen(
-                    [_sys.executable, worker_path, job_id],
-                    stdout=subprocess.DEVNULL,
-                    stderr=open(project_dir + "/worker_error.log", "a"),
-                    cwd=project_dir,
-                )
-                st.session_state.current_job_id = job_id
-                st.query_params["job_id"] = job_id
-                st.success(f"Đã bắt đầu phân tích! Job ID: {job_id}")
-                st.info("Bạn có thể đóng tab này — kết quả sẽ được lưu lại. Mở lại link có job_id để xem kết quả.")
-                st.rerun()
+        def _launch_analysis(selected_mode: str) -> None:
+            st.session_state.analysis_mode = selected_mode
+            st.session_state.auto_translation_guidance = selected_mode == "sentence_guidance"
+            saved_settings = session_store.load_settings(st.session_state.session_id)
+            saved_settings.update({
+                "analysis_mode": selected_mode,
+                "auto_translation_guidance": selected_mode == "sentence_guidance",
+            })
+            session_store.save_settings(st.session_state.session_id, saved_settings)
+            clear_analysis_fn()
+            input_data = {
+                "pages": pages_to_analyze,
+                "model_name": text_model_choice,
+                "reasoning_effort": reasoning_effort,
+                "auto_sentence_deep_dive": (
+                    config.get("auto_sentence_deep_dive", False)
+                    if selected_mode == "sentence_guidance"
+                    else False
+                ),
+                "auto_translation_guidance": selected_mode == "sentence_guidance",
+                "analysis_mode": selected_mode,
+            }
+            job_id = create_job(
+                json.dumps(input_data),
+                "pdf_ja" if analysis_language == "japanese" else "pdf_en",
+                session_id=st.session_state.session_id,
+                source_hash=items_source_hash(items),
+            )
+            subprocess.Popen(
+                [_sys.executable, worker_path, job_id],
+                stdout=subprocess.DEVNULL,
+                stderr=open(project_dir + "/worker_error.log", "a"),
+                cwd=project_dir,
+            )
+            st.session_state.current_job_id = job_id
+            st.query_params["job_id"] = job_id
+            st.success(f"Đã bắt đầu phân tích! Job ID: {job_id}")
+            st.info("Bạn có thể đóng tab này; kết quả sẽ được lưu lại theo đúng loại phân tích đã chọn.")
+            st.rerun()
+
+        st.markdown("**Chọn một loại phân tích:**")
+        full_col, sentence_col = st.columns(2)
+        full_clicked = full_col.button(
+            "📚 Phân tích toàn bộ từ vựng, Kanji và ngữ pháp",
+            type="primary",
+            use_container_width=True,
+            disabled=not all_pages_ready,
+            help="Chỉ tạo các bảng học; không gọi lượt hướng dẫn từng câu.",
+        )
+        sentence_clicked = sentence_col.button(
+            "🧩 Dịch và phân tích từng câu/đoạn dài",
+            use_container_width=True,
+            disabled=not all_pages_ready,
+            help="Phân tích nguyên câu đến dấu kết thúc; không gọi lượt tạo bảng từ vựng/Kanji/ngữ pháp.",
+        )
+        st.caption(
+            "Hai nút gọi hai pipeline riêng. Nút câu/đoạn sẽ dùng thêm 8 lớp câu dài "
+            "chỉ khi tùy chọn trong sidebar đang bật."
+        )
+        if full_clicked:
+            _launch_analysis("full_analysis")
+        if sentence_clicked:
+            _launch_analysis("sentence_guidance")
 
     # ── Analysis Report Display ──
     if st.session_state.analysis:
