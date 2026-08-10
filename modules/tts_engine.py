@@ -158,8 +158,15 @@ def generate_full_dialogue_audio(
     lang: str = "ja",
     slow: bool = False,
 ) -> Optional[bytes]:
-    """Generate and concatenate audio bytes for all turns in a dialogue to make a single MP3 file."""
+    """Generate one valid MP3 for the full dialogue, with short turn pauses.
+
+    MP3 files cannot safely be joined with ``b"".join``: browsers, especially on
+    mobile, may stop at the first stream.  Decode and re-export the segments when
+    ffmpeg is present; a single-voice Edge/gTTS fallback still gives every user a
+    playable full-dialogue control.
+    """
     audios = []
+    full_text = []
     for turn in dialogue:
         text = turn.get("text", "")
         if text.strip():
@@ -167,8 +174,27 @@ def generate_full_dialogue_audio(
             audio = text_to_speech(text, lang=lang, slow=slow, speaker=speaker)
             if audio:
                 audios.append(audio)
+            full_text.append(text.strip())
     if audios:
-        return b"".join(audios)
+        try:
+            from pydub import AudioSegment
+
+            merged = AudioSegment.empty()
+            pause = AudioSegment.silent(duration=350)
+            for audio in audios:
+                merged += AudioSegment.from_file(io.BytesIO(audio), format="mp3") + pause
+            output = io.BytesIO()
+            merged.export(output, format="mp3", bitrate="128k")
+            data = output.getvalue()
+            if data:
+                return data
+        except Exception as exc:
+            logger.warning("Could not merge dialogue MP3 segments: %s", exc)
+            _LAST_TTS_ERROR.set("Không ghép được hai giọng; đang dùng bản đọc một giọng để bảo đảm audio phát được.")
+            fallback = text_to_speech(" ".join(full_text), lang=lang, slow=slow, speaker="default")
+            if fallback:
+                return fallback
+            return None
     return None
 
 

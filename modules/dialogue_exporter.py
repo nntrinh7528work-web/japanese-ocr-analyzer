@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import copy
 from typing import Any
 
 from docx import Document
@@ -27,11 +28,28 @@ def export_dialogue_to_text(result: dict[str, Any]) -> str:
     for turn in result.get("dialogue", []):
         lines.append(f"[{turn['speaker']}]: {turn['text']}")
         if turn.get("text_hira"):
-            lines.append(f"     Phiên âm: {turn['text_hira']}")
+            lines.append(f"     Cách đọc: {turn['text_hira']}")
         if turn.get("text_vi"):
             lines.append(f"     Dịch Việt: {turn['text_vi']}")
         if turn.get("highlights"):
             lines.append(f"     Từ mục tiêu: {', '.join(turn['highlights'])}")
+        if turn.get("speech_intent"):
+            lines.append(f"     Mục đích nói: {turn['speech_intent']}")
+        if turn.get("alternative_expression"):
+            lines.append(f"     Cách nói khác: {turn['alternative_expression']}")
+        lines.append("")
+
+    if result.get("learning_targets"):
+        lines.append("=" * 50)
+        lines.append("MỤC TIÊU HỌC:")
+        for row in result["learning_targets"]:
+            if not isinstance(row, dict):
+                continue
+            lines.append(f"- [{row.get('type', 'vocabulary')}] {row.get('term', '')}")
+            if row.get("realized_form"):
+                lines.append(f"  Dạng dùng: {row['realized_form']}")
+            if row.get("explanation_vi"):
+                lines.append(f"  Giải thích: {row['explanation_vi']}")
         lines.append("")
 
     if result.get("summary"):
@@ -48,20 +66,10 @@ def export_dialogue_to_text(result: dict[str, Any]) -> str:
 
 
 def export_dialogue_to_json(result: dict[str, Any]) -> str:
-    """Export dialogue structure as formatted JSON."""
-    clean_dict = {
-        "topic": result.get("topic"),
-        "language": result.get("language"),
-        "level": result.get("level"),
-        "situation": result.get("situation"),
-        "politeness_level": result.get("politeness_level"),
-        "scenario_description": result.get("scenario_description", ""),
-        "dialogue": result.get("dialogue", []),
-        "coverage_check": result.get("coverage_check", {}),
-        "summary": result.get("summary"),
-        "notes": result.get("notes"),
-    }
-    return json.dumps(clean_dict, ensure_ascii=False, indent=2)
+    """Export the complete portable learning record, excluding only raw model text."""
+    clean_dict = copy.deepcopy(result)
+    clean_dict.pop("raw_text", None)
+    return json.dumps(clean_dict, ensure_ascii=False, indent=2, default=str)
 
 
 def _shade_cell(cell: Any, color_hex: str) -> None:
@@ -114,7 +122,8 @@ def export_dialogue_to_docx(result: dict[str, Any]) -> bytes:
     table.style = "Table Grid"
 
     hdr_cells = table.rows[0].cells
-    headers = ["Người nói", "Câu tiếng Nhật / Phiên âm", "Bản dịch tiếng Việt"]
+    is_english = "english" in str(result.get("language", "")).lower() or "tiếng anh" in str(result.get("language", "")).lower()
+    headers = ["Người nói", "Câu tiếng Anh" if is_english else "Câu tiếng Nhật / Cách đọc", "Bản dịch tiếng Việt"]
     widths = [Inches(1.0), Inches(3.2), Inches(2.6)]
 
     for idx, (hdr_text, w) in enumerate(zip(headers, widths)):
@@ -139,7 +148,12 @@ def export_dialogue_to_docx(result: dict[str, Any]) -> bytes:
         # Speaker
         spk_p = row_cells[0].paragraphs[0]
         spk_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        spk_run = spk_p.add_run(f"Nhân vật {turn['speaker']}")
+        role_names = {
+            str(row.get("id", "")).upper(): str(row.get("name", "")).strip()
+            for row in result.get("roles", []) if isinstance(row, dict)
+        }
+        speaker_name = role_names.get(str(turn.get("speaker", "")).upper()) or f"Nhân vật {turn.get('speaker', '')}"
+        spk_run = spk_p.add_run(speaker_name)
         spk_run.bold = True
         spk_run.font.size = Pt(10)
         spk_run.font.color.rgb = RGBColor(0, 102, 153) if turn["speaker"] == "A" else RGBColor(153, 51, 0)
@@ -165,6 +179,21 @@ def export_dialogue_to_docx(result: dict[str, Any]) -> bytes:
     doc.add_paragraph().paragraph_format.space_after = Pt(12)
 
     # Summary Section
+    if result.get("learning_targets"):
+        h2 = doc.add_heading("Mục tiêu học", level=2)
+        h2.style.font.name = "Arial"
+        h2.style.font.color.rgb = RGBColor(0, 51, 102)
+        for target in result["learning_targets"]:
+            if not isinstance(target, dict):
+                continue
+            p = doc.add_paragraph(style="List Bullet")
+            p.add_run(f"[{target.get('type', 'vocabulary')}] {target.get('term', '')}").bold = True
+            detail = " · ".join(
+                value for value in (target.get("realized_form"), target.get("explanation_vi")) if value
+            )
+            if detail:
+                p.add_run("\n" + detail)
+
     if result.get("summary"):
         h2 = doc.add_heading("📚 Tóm tắt Từ vựng & Ngữ pháp", level=2)
         h2.style.font.name = "Arial"

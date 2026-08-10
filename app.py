@@ -343,4 +343,10 @@ with tab_ocr:
     )
 
 with tab_dialogue:
-    render_dialogue_tab(session_id=st.session_state.session_id)
+    render_dialogue_tab(
+        session_id=st.session_state.session_id,
+        model_name=config.get("text_model_choice"),
+        reasoning_effort=config.get("reasoning_effort", "standard"),
+        billing_tier=config.get("billing_tier", "free"),
+        usd_to_jpy=float(config.get("usd_to_jpy", 155.0)),
+    )

@@ -138,6 +138,18 @@ class TestGenerateDialogueAudio(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertIsNone(result[0])
 
+    @patch("modules.tts_engine.text_to_speech")
+    def test_full_dialogue_falls_back_to_one_valid_stream(self, mock_tts):
+        """Never return a raw concatenation when MP3 merging is unavailable."""
+        from modules.tts_engine import generate_full_dialogue_audio
+
+        mock_tts.side_effect = [b"first-not-an-mp3", b"second-not-an-mp3", b"single-valid-stream"]
+        result = generate_full_dialogue_audio(
+            [{"speaker": "A", "text": "One"}, {"speaker": "B", "text": "Two"}], lang="en"
+        )
+        self.assertEqual(result, b"single-valid-stream")
+        self.assertNotEqual(result, b"first-not-an-mp3second-not-an-mp3")
+
 
 class TestGetAudioCacheKey(unittest.TestCase):
     """Tests for get_audio_cache_key function."""

@@ -5,12 +5,18 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 DB_PATH = Path(__file__).resolve().parents[1] / "data" / "dialogue_history.db"
 _LOCK = threading.Lock()
+STUDY_TIMEZONE = ZoneInfo("Asia/Tokyo")
+
+
+def _now() -> datetime:
+    return datetime.now(STUDY_TIMEZONE)
 
 
 def _get_connection() -> sqlite3.Connection:
@@ -55,6 +61,9 @@ def _get_connection() -> sqlite3.Connection:
             )
             """
         )
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(sm2_cards_v2)").fetchall()}
+        if "card_type" not in existing:
+            conn.execute("ALTER TABLE sm2_cards_v2 ADD COLUMN card_type TEXT NOT NULL DEFAULT 'vocabulary'")
     return conn
 
 
@@ -65,7 +74,7 @@ def save_dialogue_session(
 ) -> int:
     """Save practice session and add new vocab items to SM-2 card table."""
     conn = _get_connection()
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = _now().isoformat()
 
     try:
         with _LOCK, conn:
@@ -92,27 +101,37 @@ def save_dialogue_session(
             )
             history_id = cursor.lastrowid
 
-            # Extract words from dialogue coverage check or summary.
-            words = list(result.get("coverage_check", {}).keys())
-            today_str = datetime.now(timezone.utc).date().isoformat()
-
-            for w in words:
-                if not w:
+            targets = result.get("learning_targets")
+            if not isinstance(targets, list):
+                targets = [
+                    {"term": word, "type": "vocabulary", "explanation_vi": ""}
+                    for word in result.get("coverage_check", {}).keys()
+                ]
+            today_str = _now().date().isoformat()
+            for target in targets:
+                if not isinstance(target, dict):
                     continue
+                term = str(target.get("term", "")).strip()
+                card_type = str(target.get("type", "vocabulary")).strip() or "vocabulary"
+                if not term:
+                    continue
+                word = term if card_type == "vocabulary" else f"[{card_type}] {term}"
+                meaning = str(target.get("explanation_vi", "")).strip() or f"Mục tiêu trong bài '{result.get('topic')}'"
                 conn.execute(
                     """
                     INSERT OR IGNORE INTO sm2_cards_v2
                     (session_id, word, reading, meaning, easiness_factor, interval,
-                     repetitions, next_review_date, last_reviewed)
-                    VALUES (?, ?, ?, ?, 2.5, 0, 0, ?, ?)
+                     repetitions, next_review_date, last_reviewed, card_type)
+                    VALUES (?, ?, ?, ?, 2.5, 0, 0, ?, ?, ?)
                     """,
                     (
                         session_id,
-                        w,
+                        word,
                         "",
-                        f"Từ vựng/ngữ pháp trong bài '{result.get('topic')}'",
+                        meaning,
                         today_str,
                         now_iso,
+                        card_type,
                     ),
                 )
         return int(history_id)
@@ -157,14 +176,14 @@ def get_practice_history(limit: int = 20, session_id: str = "default") -> list[d
 def get_due_sm2_cards(session_id: str = "default") -> list[dict[str, Any]]:
     """Fetch SM-2 cards that are due for review today or overdue."""
     conn = _get_connection()
-    today_str = datetime.now(timezone.utc).date().isoformat()
+    today_str = _now().date().isoformat()
 
     try:
         with _LOCK:
             cursor = conn.execute(
                 """
                 SELECT id, word, reading, meaning, easiness_factor, interval,
-                       repetitions, next_review_date
+                       repetitions, next_review_date, card_type
                 FROM sm2_cards_v2
                 WHERE session_id = ? AND next_review_date <= ?
                 ORDER BY next_review_date ASC
@@ -185,6 +204,7 @@ def get_due_sm2_cards(session_id: str = "default") -> list[dict[str, Any]]:
             "interval": r[5],
             "repetitions": r[6],
             "next_review_date": r[7],
+            "card_type": r[8],
         }
         for r in rows
     ]
@@ -235,8 +255,8 @@ def update_sm2_card(card_id: int, quality_rating: int, session_id: str = "defaul
             if ef < 1.3:
                 ef = 1.3
 
-            next_date = (datetime.now(timezone.utc).date() + timedelta(days=interval)).isoformat()
-            now_iso = datetime.now(timezone.utc).isoformat()
+            next_date = (_now().date() + timedelta(days=interval)).isoformat()
+            now_iso = _now().isoformat()
 
             conn.execute(
                 """
@@ -265,23 +285,21 @@ def get_streak_days(session_id: str = "default") -> int:
     try:
         with _LOCK:
             cursor = conn.execute(
-                "SELECT DISTINCT date(created_at) FROM practice_sessions_v2 "
-                "WHERE session_id = ? ORDER BY date(created_at) DESC",
+                "SELECT DISTINCT created_at FROM practice_sessions_v2 WHERE session_id = ? ORDER BY created_at DESC",
                 (session_id,),
             )
-            dates = [r[0] for r in cursor.fetchall()]
+            dates = [datetime.fromisoformat(r[0]).astimezone(STUDY_TIMEZONE).date() for r in cursor.fetchall()]
     finally:
         conn.close()
 
     if not dates:
         return 0
 
-    today = datetime.now(timezone.utc).date()
+    today = _now().date()
     streak = 0
     check_date = today
 
-    for d_str in dates:
-        d = datetime.strptime(d_str, "%Y-%m-%d").date()
+    for d in dates:
         if d == check_date:
             streak += 1
             check_date -= timedelta(days=1)
