@@ -187,6 +187,17 @@ def render_dialogue_tab(
             registers = ["Lịch sự (です/ます)", "Thân mật (タメ口)", "Trang trọng", "Kính ngữ theo vai (尊敬語 / 謙譲語)"] if dlg_language == "Tiếng Nhật" else ["Thân mật (Casual)", "Lịch sự (Polite)", "Trang trọng (Formal)"]
             dlg_register = st.selectbox("Phong cách", registers, key="dlg_politeness")
 
+        # Apply values requested by buttons on the previous rerun before these
+        # widgets are instantiated. Streamlit rejects changing a widget's key
+        # after that widget has already been created in the current run.
+        pending_topic = st.session_state.pop("dialogue_pending_topic", "")
+        if pending_topic:
+            st.session_state["dlg_topic_input"] = pending_topic
+        pending_targets = st.session_state.pop("dialogue_pending_targets", None)
+        if isinstance(pending_targets, dict):
+            st.session_state["dlg_vocab_input"] = str(pending_targets.get("vocab", ""))
+            st.session_state["dlg_grammar_input"] = str(pending_targets.get("grammar", ""))
+
         topic = st.text_input("Chủ đề", key="dlg_topic_input", placeholder="Ví dụ: đổi món vì dị ứng hải sản")
         role_a, role_b = st.columns(2)
         with role_a:
@@ -209,7 +220,7 @@ def render_dialogue_tab(
         if st.session_state.get("suggested_topics"):
             for row in st.session_state.suggested_topics:
                 if st.button(row["topic"], key=f"topic_{row['topic']}"):
-                    st.session_state["dlg_topic_input"] = row["topic"]
+                    st.session_state["dialogue_pending_topic"] = row["topic"]
                     st.rerun()
         suggestions = st.session_state.get("suggested_vocab_grammar") or {}
         if suggestions:
@@ -217,8 +228,10 @@ def render_dialogue_tab(
             st.write("Từ vựng: " + "; ".join(suggestions.get("vocab", [])))
             st.write("Cấu trúc: " + "; ".join(suggestions.get("grammar", [])))
             if st.button("Đưa gợi ý vào mục tiêu học", key="apply_suggestions"):
-                st.session_state["dlg_vocab_input"] = "\n".join(item.split(" : ", 1)[0] for item in suggestions.get("vocab", []))
-                st.session_state["dlg_grammar_input"] = "\n".join(item.split(" : ", 1)[0] for item in suggestions.get("grammar", []))
+                st.session_state["dialogue_pending_targets"] = {
+                    "vocab": "\n".join(item.split(" : ", 1)[0] for item in suggestions.get("vocab", [])),
+                    "grammar": "\n".join(item.split(" : ", 1)[0] for item in suggestions.get("grammar", [])),
+                }
                 st.rerun()
 
         if generate_clicked:
