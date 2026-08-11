@@ -78,6 +78,16 @@ preflight đọc dữ liệu, không thay đổi Notion.
 - Chỉnh sửa, xóa và sắp xếp thứ tự từng ảnh.
 - Gộp văn bản theo thứ tự ảnh để phân tích chung và xuất Word.
 - Tác vụ phân tích lưu kết quả từng trang để có thể tiếp tục sau lỗi tạm thời.
+
+## YouTube và video
+
+- Nhập link YouTube công khai hoặc tải file MP4, MOV, WEBM, MPEG, AVI tối đa 100 MB.
+- App ưu tiên caption miễn phí; chỉ dùng Gemini đọc video sau khi người dùng xác nhận chi phí.
+- Video dài hơn 60 phút phải chọn một khoảng tối đa 60 phút.
+- Sau khi có transcript, app hiển thị dự toán và mức chi phí tối đa trước khi phân tích segment.
+- Transcript gốc chỉ nằm trong JSON; giao diện, Word, Markdown và Notion dùng transcript sạch.
+- Mỗi segment có timestamp, bản dịch, hội thoại, từ vựng, Kanji/cụm từ, từ nối, ngữ pháp và mẫu câu.
+- Tối đa một câu khó mỗi segment và 15 câu toàn video được giải mã sâu; hình ảnh chỉ được phân tích khi bấm nút riêng.
 - Kết quả được sắp theo thứ tự trang và đánh lại STT tự động; mục từ nối phân
   biệt liên từ, trợ từ nối, cụm diễn ngôn, quan hệ logic và sắc thái sử dụng.
 

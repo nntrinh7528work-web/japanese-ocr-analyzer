@@ -26,6 +26,7 @@ from components.helpers import (
 )
 from app_pages.ocr_page import render_ocr_tab
 from app_pages.dialogue_page import render_dialogue_tab
+from app_pages.video_page import render_video_tab
 
 text_analyzer = importlib.reload(text_analyzer)
 
@@ -225,9 +226,14 @@ if job_id_from_url:
         if job_changed:
             _persist_analysis()
         if job_status == "done":
-            st.success("Phân tích đã hoàn tất!")
+            if job.get("job_kind") == "video_ingest":
+                st.success("Đã hoàn tất bước lấy transcript. Hãy kiểm tra dự toán trước khi phân tích.")
+            else:
+                st.success("Phân tích đã hoàn tất!")
         elif job_status == "running":
-            st.warning("⏳ Đang phân tích trong nền, vui lòng tải lại trang sau vài giây...")
+            stage = str(job.get("stage") or "")
+            video_label = "Đang xử lý video" if job.get("job_kind", "").startswith("video_") else "Đang phân tích"
+            st.warning(f"{video_label} trong nền ({stage or 'đang chạy'}), vui lòng tải lại sau vài giây...")
             st.button("🔄 Tải lại")
         elif job_status == "failed":
             st.error(f"Phân tích thất bại: {job['error']}")
@@ -371,18 +377,19 @@ inject_custom_css(dark_mode=config.get("dark_mode", False))
 
 def _document_label(document: dict) -> str:
     language = {"japanese": "JP", "english": "EN", "unknown": "?"}.get(document.get("language"), "?")
-    return f"[{language}] {document.get('title') or 'Bài mới'} · {document.get('image_count', 0)} ảnh · {document.get('version_count', 0)} phiên bản"
+    source_label = "1 video" if document.get("document_type") == "video" else f"{document.get('image_count', 0)} ảnh"
+    return f"[{language}] {document.get('title') or 'Bài mới'} · {source_label} · {document.get('version_count', 0)} phiên bản"
 
 
 def render_document_library() -> None:
     """Small, mobile-friendly document switcher above the OCR workspace."""
     docs = session_store.list_documents(st.session_state.session_id)
-    filters = {"Tất cả": None, "Tiếng Nhật": "japanese", "Tiếng Anh": "english", "Đang xử lý": "running", "Đã phân tích": "analyzed"}
+    filters = {"Tất cả": None, "Video": "video", "Tiếng Nhật": "japanese", "Tiếng Anh": "english", "Đang xử lý": "running", "Đã phân tích": "analyzed"}
     filter_label = st.selectbox("Lọc thư viện bài", list(filters), key="document_library_filter")
     wanted = filters[filter_label]
     visible = [
         doc for doc in docs
-        if wanted is None or doc.get("language") == wanted or doc.get("status") == wanted
+        if wanted is None or doc.get("document_type") == wanted or doc.get("language") == wanted or doc.get("status") == wanted
     ]
     with st.expander("📚 Thư viện bài", expanded=True):
         left, right = st.columns([4, 1])
@@ -483,6 +490,7 @@ if notion_state["configured"] and migration_status not in {"complete", "partial"
 # A completed analysis is displayed immediately; Notion runs separately.
 if (
     st.session_state.analysis
+    and active_document.get("document_type", "image") == "image"
     and active_document.get("active_version_id") == st.session_state.selected_version_id
     and active_document.get("source_hash") == items_source_hash(st.session_state.image_items)
     and config.get("auto_notion_sync")
@@ -507,25 +515,42 @@ if notion_state["configured"] and migration_status in {"complete", "partial", "n
         _dispatch_notion_run(due_run["run_id"])
 
 # ── Main Content Tabs ──
-tab_ocr, tab_dialogue = st.tabs(["📷 Phân tích từ Ảnh / PDF", "💬 Luyện Hội Thoại"])
+tab_ocr, tab_video, tab_dialogue = st.tabs(["📷 Phân tích từ Ảnh / PDF", "YouTube / Video", "💬 Luyện Hội Thoại"])
 
 with tab_ocr:
-    render_ocr_tab(
+    if active_document.get("document_type") == "video":
+        st.info("Bài đang mở là video. Hãy tạo hoặc mở một bài ảnh/PDF trong Thư viện để tránh trộn hai nguồn.")
+        if st.button("Tạo bài ảnh/PDF mới", use_container_width=True):
+            document = session_store.create_document(st.session_state.session_id, "Bài ảnh/PDF mới")
+            st.session_state.active_document_id = document["document_id"]
+            st.session_state.loaded_document_id = None
+            st.query_params["document"] = document["document_id"]
+            st.rerun()
+    else:
+        render_ocr_tab(
+            config=config,
+            active_document=active_document,
+            selected_version=session_store.get_analysis_version(st.session_state.selected_version_id) if st.session_state.selected_version_id else None,
+            add_sources_fn=add_sources,
+            remove_image_fn=remove_image,
+            move_image_to_new_document_fn=move_image_to_new_document,
+            clear_analysis_fn=clear_analysis,
+            analysis_pages_fn=analysis_pages,
+            run_item_ocr_fn=run_item_ocr,
+            persist_items_fn=_persist_items,
+            persist_analysis_fn=_persist_analysis,
+            create_analysis_version_fn=create_analysis_version_for_active,
+            text_analyzer_module=text_analyzer,
+            worker_path=_WORKER_PATH,
+            notion_worker_path=_NOTION_WORKER_PATH,
+            project_dir=_PROJECT_DIR,
+        )
+
+with tab_video:
+    render_video_tab(
         config=config,
         active_document=active_document,
-        selected_version=session_store.get_analysis_version(st.session_state.selected_version_id) if st.session_state.selected_version_id else None,
-        add_sources_fn=add_sources,
-        remove_image_fn=remove_image,
-        move_image_to_new_document_fn=move_image_to_new_document,
-        clear_analysis_fn=clear_analysis,
-        analysis_pages_fn=analysis_pages,
-        run_item_ocr_fn=run_item_ocr,
-        persist_items_fn=_persist_items,
-        persist_analysis_fn=_persist_analysis,
-        create_analysis_version_fn=create_analysis_version_for_active,
-        text_analyzer_module=text_analyzer,
         worker_path=_WORKER_PATH,
-        notion_worker_path=_NOTION_WORKER_PATH,
         project_dir=_PROJECT_DIR,
     )
 

@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS documents (
     document_id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
     title TEXT NOT NULL,
+    document_type TEXT NOT NULL DEFAULT 'image',
     language TEXT NOT NULL DEFAULT 'unknown',
     language_source TEXT NOT NULL DEFAULT 'auto',
     status TEXT NOT NULL DEFAULT 'draft',
@@ -150,6 +151,57 @@ CREATE TABLE IF NOT EXISTS analysis_versions (
 
 CREATE INDEX IF NOT EXISTS idx_analysis_versions_document
 ON analysis_versions(document_id, version_number DESC);
+
+CREATE TABLE IF NOT EXISTS video_sources (
+    source_id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL UNIQUE,
+    source_kind TEXT NOT NULL,
+    source_url TEXT,
+    video_id TEXT,
+    file_name TEXT,
+    mime_type TEXT,
+    local_path TEXT,
+    duration_seconds REAL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    raw_transcript_json TEXT NOT NULL DEFAULT '[]',
+    clean_transcript_json TEXT NOT NULL DEFAULT '[]',
+    warnings_json TEXT NOT NULL DEFAULT '[]',
+    transcript_provider TEXT,
+    transcript_hash TEXT,
+    ingest_usage_json TEXT NOT NULL DEFAULT '{}',
+    cost_estimate_json TEXT NOT NULL DEFAULT '{}',
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (document_id) REFERENCES documents(document_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_sources_status
+ON video_sources(status, updated_at);
+
+CREATE TABLE IF NOT EXISTS video_segments (
+    segment_id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL,
+    start_seconds REAL NOT NULL,
+    end_seconds REAL NOT NULL,
+    title TEXT NOT NULL,
+    language TEXT NOT NULL DEFAULT 'unknown',
+    original_text TEXT NOT NULL DEFAULT '',
+    clean_text TEXT NOT NULL DEFAULT '',
+    speakers_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'pending',
+    analysis_json TEXT,
+    usage_json TEXT NOT NULL DEFAULT '{}',
+    error TEXT,
+    updated_at TEXT NOT NULL,
+    UNIQUE(source_id, ordinal),
+    FOREIGN KEY (source_id) REFERENCES video_sources(source_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_segments_source_order
+ON video_segments(source_id, ordinal);
 """
 
 
@@ -179,6 +231,14 @@ def _get_connection() -> sqlite3.Connection:
             if "source_snapshot_json" not in version_columns:
                 conn.execute(
                     "ALTER TABLE analysis_versions ADD COLUMN source_snapshot_json TEXT NOT NULL DEFAULT '[]'"
+                )
+                conn.commit()
+            document_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(documents)").fetchall()
+            }
+            if "document_type" not in document_columns:
+                conn.execute(
+                    "ALTER TABLE documents ADD COLUMN document_type TEXT NOT NULL DEFAULT 'image'"
                 )
                 conn.commit()
             return conn
@@ -447,20 +507,22 @@ def create_document(
     title: str = "Bài mới",
     language: str = "unknown",
     language_source: str = "auto",
+    document_type: str = "image",
 ) -> dict:
     """Create one independent OCR document inside an existing session."""
     document_id = str(uuid.uuid4())
     now = _utcnow_iso()
     title = str(title or "Bài mới").strip()[:120] or "Bài mới"
     language = language if language in {"japanese", "english", "unknown"} else "unknown"
+    document_type = document_type if document_type in {"image", "video"} else "image"
     with _lock:
         conn = _get_connection()
         conn.row_factory = sqlite3.Row
         try:
             conn.execute(
-                "INSERT INTO documents (document_id, session_id, title, language, language_source, "
-                "status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'draft', ?, ?)",
-                (document_id, session_id, title, language, language_source, now, now),
+                "INSERT INTO documents (document_id, session_id, title, document_type, language, language_source, "
+                "status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?)",
+                (document_id, session_id, title, document_type, language, language_source, now, now),
             )
             conn.execute("UPDATE sessions SET updated_at=? WHERE session_id=?", (now, session_id))
             conn.commit()
@@ -477,10 +539,12 @@ def list_documents(session_id: str) -> list[dict]:
         conn.row_factory = sqlite3.Row
         try:
             rows = conn.execute(
-                "SELECT d.*, COUNT(i.id) AS image_count, COUNT(v.version_id) AS version_count "
+                "SELECT d.*, COUNT(DISTINCT i.id) AS image_count, COUNT(DISTINCT v.version_id) AS version_count, "
+                "COUNT(DISTINCT vs.source_id) AS video_count "
                 "FROM documents d "
                 "LEFT JOIN document_image_items i ON i.document_id=d.document_id "
                 "LEFT JOIN analysis_versions v ON v.document_id=d.document_id "
+                "LEFT JOIN video_sources vs ON vs.document_id=d.document_id "
                 "WHERE d.session_id=? GROUP BY d.document_id ORDER BY d.updated_at DESC",
                 (session_id,),
             ).fetchall()
@@ -521,6 +585,20 @@ def update_document_language(document_id: str, language: str, source: str = "man
             conn.execute(
                 "UPDATE documents SET language=?, language_source=?, updated_at=? WHERE document_id=?",
                 (language, source, _utcnow_iso(), document_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def update_document_source_hash(document_id: str, source_hash: str, status: str = "needs_analysis") -> None:
+    """Update a non-image document source without going through image item persistence."""
+    with _lock:
+        conn = _get_connection()
+        try:
+            conn.execute(
+                "UPDATE documents SET source_hash=?, status=?, updated_at=? WHERE document_id=?",
+                (source_hash, status, _utcnow_iso(), document_id),
             )
             conn.commit()
         finally:
@@ -624,6 +702,194 @@ def move_document_item_to_new_document(
         update_document_language(document["document_id"], detected, "moved_item")
     save_document_items(source_document_id, [item for item in items if item.get("id") != item_id])
     return document
+
+
+def create_video_source(
+    document_id: str,
+    source_kind: str,
+    *,
+    source_url: str | None = None,
+    video_id: str | None = None,
+    file_name: str | None = None,
+    mime_type: str | None = None,
+    local_path: str | None = None,
+    duration_seconds: float | None = None,
+    metadata: dict | None = None,
+    status: str = "pending",
+) -> dict:
+    """Create the single video source owned by a video document."""
+    source_id = str(uuid.uuid4())
+    now = _utcnow_iso()
+    with _lock:
+        conn = _get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute(
+                "INSERT INTO video_sources (source_id, document_id, source_kind, source_url, video_id, "
+                "file_name, mime_type, local_path, duration_seconds, status, metadata_json, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    source_id, document_id, source_kind, source_url, video_id, file_name, mime_type,
+                    local_path, duration_seconds, status,
+                    json.dumps(metadata or {}, ensure_ascii=False), now, now,
+                ),
+            )
+            conn.execute(
+                "UPDATE documents SET document_type='video', status=?, updated_at=? WHERE document_id=?",
+                (status, now, document_id),
+            )
+            conn.commit()
+            return _decode_video_source(
+                conn.execute("SELECT * FROM video_sources WHERE source_id=?", (source_id,)).fetchone()
+            ) or {}
+        finally:
+            conn.close()
+
+
+def _decode_video_source(row: sqlite3.Row | None) -> dict | None:
+    if row is None:
+        return None
+    data = dict(row)
+    for column, key, fallback in (
+        ("metadata_json", "metadata", {}),
+        ("raw_transcript_json", "raw_transcript", []),
+        ("clean_transcript_json", "clean_transcript", []),
+        ("warnings_json", "transcript_warnings", []),
+        ("ingest_usage_json", "ingest_usage", {}),
+        ("cost_estimate_json", "cost_estimate", {}),
+    ):
+        data[key] = json.loads(data.pop(column) or json.dumps(fallback))
+    return data
+
+
+def get_video_source(source_id: str) -> dict | None:
+    with _lock:
+        conn = _get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            return _decode_video_source(
+                conn.execute("SELECT * FROM video_sources WHERE source_id=?", (source_id,)).fetchone()
+            )
+        finally:
+            conn.close()
+
+
+def get_document_video_source(document_id: str) -> dict | None:
+    with _lock:
+        conn = _get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            return _decode_video_source(
+                conn.execute("SELECT * FROM video_sources WHERE document_id=?", (document_id,)).fetchone()
+            )
+        finally:
+            conn.close()
+
+
+def update_video_source(source_id: str, **changes) -> None:
+    """Update whitelisted video state fields and their structured JSON values."""
+    mapping = {
+        "status": "status", "duration_seconds": "duration_seconds", "transcript_provider": "transcript_provider",
+        "transcript_hash": "transcript_hash", "error": "error", "local_path": "local_path",
+        "metadata": "metadata_json", "raw_transcript": "raw_transcript_json",
+        "clean_transcript": "clean_transcript_json", "transcript_warnings": "warnings_json",
+        "ingest_usage": "ingest_usage_json", "cost_estimate": "cost_estimate_json",
+    }
+    fields, values = [], []
+    for key, value in changes.items():
+        column = mapping.get(key)
+        if not column:
+            continue
+        if column.endswith("_json"):
+            value = json.dumps(value, ensure_ascii=False)
+        fields.append(f"{column}=?")
+        values.append(value)
+    if not fields:
+        return
+    now = _utcnow_iso()
+    fields.append("updated_at=?")
+    values.extend((now, source_id))
+    with _lock:
+        conn = _get_connection()
+        try:
+            conn.execute(f"UPDATE video_sources SET {', '.join(fields)} WHERE source_id=?", values)
+            row = conn.execute("SELECT document_id, status FROM video_sources WHERE source_id=?", (source_id,)).fetchone()
+            if row:
+                conn.execute("UPDATE documents SET status=?, updated_at=? WHERE document_id=?", (row[1], now, row[0]))
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def replace_video_segments(source_id: str, segments: list[dict]) -> None:
+    """Replace the chapter index after transcript cleanup, preserving source order."""
+    now = _utcnow_iso()
+    with _lock:
+        conn = _get_connection()
+        try:
+            conn.execute("DELETE FROM video_segments WHERE source_id=?", (source_id,))
+            for ordinal, segment in enumerate(segments, 1):
+                conn.execute(
+                    "INSERT INTO video_segments (segment_id, source_id, ordinal, start_seconds, end_seconds, title, "
+                    "language, original_text, clean_text, speakers_json, status, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        str(segment.get("segment_id") or uuid.uuid4()), source_id, ordinal,
+                        float(segment.get("start_seconds", 0) or 0), float(segment.get("end_seconds", 0) or 0),
+                        str(segment.get("title") or f"Đoạn {ordinal}"), str(segment.get("language") or "unknown"),
+                        str(segment.get("original_text") or ""), str(segment.get("clean_text") or ""),
+                        json.dumps(segment.get("speakers") or [], ensure_ascii=False),
+                        str(segment.get("status") or "pending"), now,
+                    ),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def _decode_video_segment(row: sqlite3.Row) -> dict:
+    data = dict(row)
+    data["speakers"] = json.loads(data.pop("speakers_json") or "[]")
+    data["analysis"] = json.loads(data.pop("analysis_json") or "null")
+    data["usage"] = json.loads(data.pop("usage_json") or "{}")
+    return data
+
+
+def list_video_segments(source_id: str) -> list[dict]:
+    with _lock:
+        conn = _get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            return [
+                _decode_video_segment(row) for row in conn.execute(
+                    "SELECT * FROM video_segments WHERE source_id=? ORDER BY ordinal", (source_id,)
+                ).fetchall()
+            ]
+        finally:
+            conn.close()
+
+
+def update_video_segment(
+    segment_id: str, *, analysis: dict | None = None, usage: dict | None = None,
+    status: str | None = None, error: str | None = None, clean_text: str | None = None,
+) -> None:
+    fields, values = ["updated_at=?"], [_utcnow_iso()]
+    for column, value in (("analysis_json", analysis), ("usage_json", usage)):
+        if value is not None:
+            fields.append(f"{column}=?")
+            values.append(json.dumps(value, ensure_ascii=False))
+    for column, value in (("status", status), ("error", error), ("clean_text", clean_text)):
+        if value is not None:
+            fields.append(f"{column}=?")
+            values.append(value)
+    values.append(segment_id)
+    with _lock:
+        conn = _get_connection()
+        try:
+            conn.execute(f"UPDATE video_segments SET {', '.join(fields)} WHERE segment_id=?", values)
+            conn.commit()
+        finally:
+            conn.close()
 
 
 def create_analysis_version(
@@ -748,6 +1014,11 @@ def get_document_workspace(document_id: str) -> dict | None:
     if not document:
         return None
     document["items"] = load_document_items(document_id)
+    document["video_source"] = get_document_video_source(document_id)
+    document["video_segments"] = (
+        list_video_segments(document["video_source"]["source_id"])
+        if document["video_source"] else []
+    )
     document["versions"] = list_analysis_versions(document_id)
     active_id = document.get("active_version_id")
     active = get_analysis_version(active_id) if active_id else None
@@ -801,14 +1072,27 @@ def cleanup_old_sessions(max_age_hours: int = 24) -> int:
     with _lock:
         conn = _get_connection()
         try:
+            local_paths = [
+                str(row[0]) for row in conn.execute(
+                    "SELECT vs.local_path FROM video_sources vs JOIN documents d ON d.document_id=vs.document_id "
+                    "JOIN sessions s ON s.session_id=d.session_id WHERE s.updated_at < ? AND vs.local_path IS NOT NULL",
+                    (cutoff,),
+                ).fetchall() if row[0]
+            ]
             cursor = conn.execute(
                 "DELETE FROM sessions WHERE updated_at < ?",
                 (cutoff,),
             )
             conn.commit()
-            return cursor.rowcount
+            deleted = cursor.rowcount
         finally:
             conn.close()
+    for local_path in local_paths:
+        try:
+            pathlib.Path(local_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+    return deleted
 
 
 def update_session_timestamp(session_id: str) -> None:

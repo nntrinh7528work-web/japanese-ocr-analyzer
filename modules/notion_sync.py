@@ -1086,10 +1086,11 @@ def extract_notion_entities(
         ]
         term = _clean_term(title)
         matches: list[str] = []
+        match_language = str((page_rows[0] if page_rows else {}).get("language") or language)
         for sentence in page_rows:
             original = sentence["original"]
             exact_example = any(value and (value in original or original in value) for value in candidates)
-            if language == "english":
+            if match_language == "english":
                 term_match = bool(term and re.search(rf"(?<!\w){re.escape(term)}(?!\w)", original, re.I))
             else:
                 term_match = bool(term and term in original)
@@ -1127,10 +1128,11 @@ def extract_notion_entities(
 
     vocabulary_source_index: dict[str, dict[str, Any]] = {}
     for page in pages:
+        page_language = str(page.get("language") or language)
         indexed_rows = [
             *(page.get("vocabulary_all") or []),
             *(page.get("vocabulary_important") or []),
-            *((page.get("phrasal_collocations") or []) if language == "english" else []),
+            *((page.get("phrasal_collocations") or []) if page_language == "english" else []),
         ]
         for row in indexed_rows:
             title = _clean_term(_first(row, "word", "phrase"))
@@ -1146,10 +1148,11 @@ def extract_notion_entities(
     known_vocabulary: dict[str, dict[str, Any]] = {}
     for page_number, page in enumerate(pages, 1):
         page_index = int(page.get("page_index", page_number) or page_number)
+        page_language = str(page.get("language") or language)
         vocab_rows: list[tuple[dict[str, Any], list[str], bool]] = []
         vocab_rows.extend((row, ["Từ trong bài"], False) for row in page.get("vocabulary_all") or [])
         vocab_rows.extend((row, ["Từ trong bài", "Từ khó"], False) for row in page.get("vocabulary_important") or [])
-        if language == "english":
+        if page_language == "english":
             vocab_rows.extend((row, ["Cụm từ"], False) for row in page.get("phrasal_collocations") or [])
         for row, groups, missing in vocab_rows:
             title = _clean_term(_first(row, "word", "phrase"))
@@ -1158,9 +1161,9 @@ def extract_notion_entities(
             indexed = vocabulary_source_index.get(_normalize_key(title)) or {}
             reading = _first(row, "reading", "hiragana") or _first(indexed, "reading", "hiragana")
             canonical = _clean_term(_first(row, "base_form") or title)
-            external_id = _concept_external_id("vocabulary", language, canonical, reading)
+            external_id = _concept_external_id("vocabulary", page_language, canonical, reading)
             entity = {
-                "external_id": external_id, "type": "Từ vựng", "language": language,
+                "external_id": external_id, "type": "Từ vựng", "language": page_language,
                 "title": title, "reading": reading,
                 "meaning_vi": _first(row, "meaning", "meaning_vi", "vn_meaning", "definition"),
                 "example": _first(row, "example", "example_text", "example_1"),
@@ -1182,12 +1185,12 @@ def extract_notion_entities(
             added = add_concept("vocabulary", entity, row)
             known_vocabulary[_normalize_key(title)] = added
 
-        if language == "japanese":
+        if page_language == "japanese":
             for order, row in enumerate(page.get("kanji_analysis") or [], 1):
                 title = _clean_term(_first(row, "kanji", "phrase"))
                 if not title:
                     continue
-                kanji_id = _concept_external_id("kanji", language, title)
+                kanji_id = _concept_external_id("kanji", page_language, title)
                 related_vocab_ids: list[str] = []
                 for vocab_record in _kanji_vocabulary_records(row.get("vocab")):
                     word = _clean_term(_first(vocab_record, "word"))
@@ -1200,9 +1203,9 @@ def extract_notion_entities(
                         or str((known or {}).get("reading") or "")
                         or _first(source_detail, "reading", "hiragana")
                     )
-                    vocab_id = _concept_external_id("vocabulary", language, word, reading)
+                    vocab_id = _concept_external_id("vocabulary", page_language, word, reading)
                     vocab_entity = {
-                        "external_id": vocab_id, "type": "Từ vựng", "language": language,
+                        "external_id": vocab_id, "type": "Từ vựng", "language": page_language,
                         "title": word, "reading": reading,
                         "meaning_vi": _first(vocab_record, "meaning", "meaning_vi", "vn_meaning") or str((known or {}).get("meaning_vi") or "") or _first(source_detail, "meaning", "meaning_vi", "vn_meaning", "definition"),
                         "example": _first(vocab_record, "example") or _first(row, "example"),
@@ -1223,7 +1226,7 @@ def extract_notion_entities(
                     add_concept("vocabulary", vocab_entity, {"kanji": title, "vocab": vocab_record, "source": row})
                     related_vocab_ids.append(vocab_id)
                 kanji_entity = {
-                    "external_id": kanji_id, "type": "Kanji", "language": language,
+                    "external_id": kanji_id, "type": "Kanji", "language": page_language,
                     "title": title, "onyomi": _first(row, "onyomi"), "kunyomi": _first(row, "kunyomi"),
                     "meaning_vi": _first(row, "meaning", "meaning_vi"),
                     "difficulty": _first(row, "jlpt", "difficulty"),
@@ -1234,9 +1237,9 @@ def extract_notion_entities(
                 }
                 add_concept("kanji", kanji_entity, row)
 
-        marker_rows = (page.get("connectors") or []) if language == "japanese" else (page.get("discourse_markers") or page.get("connectors") or [])
+        marker_rows = (page.get("connectors") or []) if page_language == "japanese" else (page.get("discourse_markers") or page.get("connectors") or [])
         language_rows = [
-            *(("Từ nối", row, ("phrase", "marker", "word")) for row in marker_rows),
+            *(("Từ nối", row, ("phrase", "marker", "connector", "word")) for row in marker_rows),
             *(("Ngữ pháp", row, ("name", "pattern")) for row in page.get("grammar_points") or []),
             *(("Mẫu câu", row, ("pattern", "name")) for row in page.get("sentence_patterns") or []),
         ]
@@ -1245,8 +1248,8 @@ def extract_notion_entities(
             if not title:
                 continue
             entity = {
-                "external_id": _concept_external_id("language", language, f"{item_type}:{_clean_term(title)}"),
-                "type": item_type, "language": language, "title": title,
+                "external_id": _concept_external_id("language", page_language, f"{item_type}:{_clean_term(title)}"),
+                "type": item_type, "language": page_language, "title": title,
                 "meaning_vi": _first(row, "meaning", "meaning_vi", "explanation", "function", "role", "nuance"),
                 "formation": _first(row, "formation", "structure", "rule", "components"),
                 "nuance": _first(row, "nuance", "usage", "role", "function", "register", "explanation"),
@@ -1300,14 +1303,21 @@ def _cost_snapshot(
         analysis.get("sentence_analysis_model") or model,
         billing_tier,
     )
+    video = estimate_run_costs(
+        analysis.get("video_analysis_runs"),
+        {},
+        model,
+        billing_tier,
+    ) if analysis.get("analysis_type") == "video" else sum_costs([])
     ocr = sum_costs(ocr_costs)
-    total = sum_costs([ocr, main, guidance, sentence])
+    total = sum_costs([ocr, main, guidance, sentence, video])
     total["total_cost_jpy"] = float(total["total_cost_usd"]) * float(usd_to_jpy)
     breakdown = {
         "ocr": ocr,
         "analysis": main,
         "guidance": guidance,
         "sentence": sentence,
+        "video": video,
     }
     for value in breakdown.values():
         value["total_cost_jpy"] = float(value.get("total_cost_usd", 0)) * float(usd_to_jpy)
@@ -1525,7 +1535,7 @@ def build_notion_sync_payload(
     columns.update({
         "sentence_count": len(entities["sentences"]),
         "vocabulary_count": len(entities["vocabulary"]),
-        "script_count": len(entities["kanji"]) if language == "japanese" else len(
+        "script_count": len(entities["kanji"]) + len(
             [item for item in entities["vocabulary"] if "Cụm từ" in item.get("groups", [])]
         ),
         "marker_count": len([item for item in entities["language_items"] if item.get("type") == "Từ nối"]),

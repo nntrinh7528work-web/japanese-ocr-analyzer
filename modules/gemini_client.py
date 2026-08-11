@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 
@@ -44,6 +45,33 @@ class GeminiModel:
             contents=contents,
             config=config,
         )
+
+    def count_tokens(self, contents: Any) -> int:
+        result = self._client.models.count_tokens(model=self.model_name, contents=contents)
+        return int(getattr(result, "total_tokens", 0) or 0)
+
+    def create_interaction(self, inputs: list[dict[str, Any]], **kwargs: Any) -> Any:
+        return self._client.interactions.create(model=self.model_name, input=inputs, **kwargs)
+
+    def upload_file(self, path: str, mime_type: str | None = None) -> Any:
+        config = {"mime_type": mime_type} if mime_type else None
+        return self._client.files.upload(file=path, config=config)
+
+    def wait_for_file(self, name: str, timeout_seconds: int = 300) -> Any:
+        """Wait until File API media is ready before using it in a request."""
+        deadline = time.time() + timeout_seconds
+        while time.time() < deadline:
+            current = self._client.files.get(name=name)
+            state = str(getattr(getattr(current, "state", None), "name", None) or getattr(current, "state", ""))
+            if state.upper().endswith("ACTIVE"):
+                return current
+            if state.upper().endswith("FAILED"):
+                raise RuntimeError("Gemini không thể xử lý file video đã tải lên.")
+            time.sleep(2)
+        raise TimeoutError("Gemini xử lý file video quá thời gian chờ.")
+
+    def delete_file(self, name: str) -> None:
+        self._client.files.delete(name=name)
 
 
 def create_gemini_model(model_name: str, api_key: str | None) -> GeminiModel:

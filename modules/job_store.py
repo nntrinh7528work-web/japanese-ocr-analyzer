@@ -26,6 +26,10 @@ def init_db():
             source_hash TEXT,
             document_id TEXT,
             version_id TEXT,
+            job_kind TEXT,
+            source_id TEXT,
+            stage TEXT,
+            checkpoint_json TEXT,
             created_at REAL,
             updated_at REAL
         )
@@ -41,6 +45,9 @@ def init_db():
         conn.execute("ALTER TABLE jobs ADD COLUMN document_id TEXT")
     if "version_id" not in columns:
         conn.execute("ALTER TABLE jobs ADD COLUMN version_id TEXT")
+    for column in ("job_kind", "source_id", "stage", "checkpoint_json"):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} TEXT")
     conn.commit()
     conn.close()
 
@@ -52,15 +59,22 @@ def create_job(
     source_hash: str | None = None,
     document_id: str | None = None,
     version_id: str | None = None,
+    job_kind: str | None = None,
+    source_id: str | None = None,
+    stage: str | None = None,
+    checkpoint: dict | None = None,
 ) -> str:
     init_db()
     job_id = str(uuid.uuid4())
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.execute(
         "INSERT INTO jobs (job_id, status, input_text, lang, session_id, partial_result, "
-        "source_hash, document_id, version_id, created_at, updated_at) "
-        "VALUES (?, 'pending', ?, ?, ?, '[]', ?, ?, ?, ?, ?)",
-        (job_id, input_text, lang, session_id, source_hash, document_id, version_id, time.time(), time.time()),
+        "source_hash, document_id, version_id, job_kind, source_id, stage, checkpoint_json, created_at, updated_at) "
+        "VALUES (?, 'pending', ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            job_id, input_text, lang, session_id, source_hash, document_id, version_id,
+            job_kind, source_id, stage, json.dumps(checkpoint or {}), time.time(), time.time(),
+        ),
     )
     conn.commit()
     conn.close()
@@ -73,17 +87,21 @@ def update_job(
     result: dict | None = None,
     error: str | None = None,
     partial_result: list[dict] | None = None,
+    stage: str | None = None,
+    checkpoint: dict | None = None,
 ):
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.execute(
         "UPDATE jobs SET status=?, "
         "result=COALESCE(?, result), error=?, partial_result=COALESCE(?, partial_result), "
-        "updated_at=? WHERE job_id=?",
+        "stage=COALESCE(?, stage), checkpoint_json=COALESCE(?, checkpoint_json), updated_at=? WHERE job_id=?",
         (
             status,
             json.dumps(result) if result is not None else None,
             error,
             json.dumps(partial_result) if partial_result is not None else None,
+            stage,
+            json.dumps(checkpoint) if checkpoint is not None else None,
             time.time(),
             job_id,
         ),
@@ -103,6 +121,7 @@ def get_job(job_id: str) -> dict[str, Any] | None:
     if data["result"]:
         data["result"] = json.loads(data["result"])
     data["partial_result"] = json.loads(data.get("partial_result") or "[]")
+    data["checkpoint"] = json.loads(data.pop("checkpoint_json") or "{}")
     return data
 
 

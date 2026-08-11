@@ -410,6 +410,7 @@ def render_notion_lesson_markdown(
     for fallback_index, page in enumerate(pages, 1):
         page_path = f"page_analyses[{fallback_index - 1}]"
         page_index = int(page.get("page_index", fallback_index) or fallback_index)
+        page_language = str(page.get("language") or language)
         page_label = page.get("source_label") or page.get("page_name") or f"Trang {page_index}"
         coverage.mark(page.get("page_index"), f"{page_path}.page_index")
         coverage.mark(page.get("source_label"), f"{page_path}.source_label")
@@ -438,7 +439,7 @@ def render_notion_lesson_markdown(
         vocabulary = list(page.get("vocabulary_all") or [])
         category_sections.extend(_render_collection(
             "Từ vựng", vocabulary,
-            [("num", "STT"), ("word", "Từ"), ("reading", "Cách đọc"), ("type" if language == "japanese" else "part_of_speech", "Từ loại"), ("meaning", "Nghĩa"), ("jlpt" if language == "japanese" else "cefr", "Mức độ")],
+            [("num", "STT"), ("word", "Từ"), ("reading", "Cách đọc"), ("type" if page_language == "japanese" else "part_of_speech", "Từ loại"), ("meaning", "Nghĩa"), ("jlpt" if page_language == "japanese" else "cefr", "Mức độ")],
             f"{page_path}.vocabulary_all", coverage, title_keys=("word", "phrase"),
         ))
         important = list(page.get("vocabulary_important") or [])
@@ -447,29 +448,29 @@ def render_notion_lesson_markdown(
             [("word", "Từ"), ("reading", "Cách đọc"), ("meaning", "Nghĩa"), ("example", "Ví dụ"), ("example_hiragana", "Hiragana ví dụ")],
             f"{page_path}.vocabulary_important", coverage, title_keys=("word", "phrase"),
         ))
-        script_key = "kanji_analysis" if language == "japanese" else "phrasal_collocations"
+        script_key = "kanji_analysis" if page_language == "japanese" else "phrasal_collocations"
         script_rows = list(page.get(script_key) or [])
         script_columns = (
             [("kanji", "Kanji"), ("onyomi", "Onyomi"), ("kunyomi", "Kunyomi"), ("meaning", "Nghĩa"), ("jlpt", "JLPT")]
-            if language == "japanese"
+            if page_language == "japanese"
             else [("phrase", "Cụm từ"), ("type", "Loại"), ("meaning", "Nghĩa"), ("example", "Ví dụ"), ("note", "Ghi chú")]
         )
         category_sections.extend(_render_collection(
-            "Kanji" if language == "japanese" else "Cụm từ và collocation",
+            "Kanji" if page_language == "japanese" else "Cụm từ và collocation",
             script_rows, script_columns, f"{page_path}.{script_key}", coverage,
             title_keys=("kanji", "phrase", "word"),
         ))
-        marker_key = "connectors" if language == "japanese" else "discourse_markers"
+        marker_key = "connectors" if page_language == "japanese" else "discourse_markers"
         markers = list(page.get(marker_key) or [])
         category_sections.extend(_render_collection(
-            "Từ nối" if language == "japanese" else "Discourse markers", markers,
-            [("phrase", "Từ / Cụm"), ("reading", "Cách đọc"), ("type", "Loại"), ("meaning", "Nghĩa"), ("function", "Chức năng"), ("example", "Ví dụ")],
-            f"{page_path}.{marker_key}", coverage, title_keys=("phrase", "marker", "word"),
+            "Từ nối" if page_language == "japanese" else "Discourse markers", markers,
+            [("phrase", "Từ / Cụm"), ("connector", "Từ nối"), ("marker", "Marker"), ("reading", "Cách đọc"), ("meaning", "Nghĩa"), ("function", "Chức năng")],
+            f"{page_path}.{marker_key}", coverage, title_keys=("phrase", "marker", "connector", "word"),
         ))
         grammar = list(page.get("grammar_points") or [])
         category_sections.extend(_render_collection(
             "Ngữ pháp", grammar,
-            [("name", "Ngữ pháp"), ("structure", "Cấu trúc"), ("meaning", "Nghĩa"), ("jlpt" if language == "japanese" else "cefr", "Mức độ")],
+            [("name", "Ngữ pháp"), ("pattern", "Mẫu"), ("formation", "Cấu trúc"), ("meaning", "Nghĩa"), ("jlpt" if page_language == "japanese" else "cefr", "Mức độ")],
             f"{page_path}.grammar_points", coverage, title_keys=("name", "pattern"),
         ))
         patterns = list(page.get("sentence_patterns") or [])

@@ -51,6 +51,40 @@ class TestCreateAndCheckSession:
         assert session_store.session_exists("lang01")
 
 
+class TestVideoDocuments:
+    def test_video_source_segments_and_analysis_version_round_trip(self) -> None:
+        session_store.create_session("video01")
+        document = session_store.create_document(
+            "video01", "Video lesson", document_type="video", language="unknown"
+        )
+        source = session_store.create_video_source(
+            document["document_id"], "youtube",
+            source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            video_id="dQw4w9WgXcQ", status="pending",
+        )
+        session_store.update_video_source(
+            source["source_id"], raw_transcript=[{"start": 0, "end": 2, "text": "Hello"}],
+            clean_transcript=[{"start": 0, "end": 2, "text": "Hello"}],
+            transcript_hash="hash", transcript_provider="youtube_caption",
+            status="awaiting_cost_confirmation",
+        )
+        session_store.replace_video_segments(source["source_id"], [{
+            "segment_id": "seg-1", "start_seconds": 0, "end_seconds": 2,
+            "title": "Intro", "language": "english", "original_text": "Hello", "clean_text": "Hello",
+        }])
+        session_store.update_video_segment(
+            "seg-1", analysis={"summary": "Mở đầu"}, usage={"input_tokens": 10}, status="done"
+        )
+
+        workspace = session_store.get_document_workspace(document["document_id"])
+        assert workspace is not None
+        assert workspace["document_type"] == "video"
+        assert workspace["video_source"]["transcript_hash"] == "hash"
+        assert workspace["video_segments"][0]["analysis"]["summary"] == "Mở đầu"
+        listed = session_store.list_documents("video01")
+        assert listed[0]["video_count"] == 1
+
+
 class TestImageItems:
     """Tests for ``save_image_items`` and ``load_image_items``."""
 

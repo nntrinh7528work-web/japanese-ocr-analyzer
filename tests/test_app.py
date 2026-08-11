@@ -18,7 +18,10 @@ def test_app_starts_without_upload():
     # Branded header is rendered via st.markdown, not st.title
     assert any("Japanese / English OCR Analyzer" in m.value for m in app.markdown)
     assert any("một hoặc nhiều ảnh/PDF" in item.value for item in app.info)
-    assert len(app.tabs) == 4
+    tab_labels = {tab.label for tab in app.tabs}
+    assert "📷 Phân tích từ Ảnh / PDF" in tab_labels
+    assert "YouTube / Video" in tab_labels
+    assert "💬 Luyện Hội Thoại" in tab_labels
 
 
 def test_app_can_switch_dark_mode_without_error():
