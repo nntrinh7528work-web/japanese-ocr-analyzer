@@ -188,6 +188,51 @@ def _parse_json(text: str) -> dict:
     return parsed
 
 
+def _as_mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _as_record_list(value: Any, text_key: str = "text") -> list[dict[str, Any]]:
+    """Accept imperfect model lists without letting one string crash the whole video."""
+    if value is None or value == "":
+        return []
+    values = value if isinstance(value, list) else [value]
+    records: list[dict[str, Any]] = []
+    for item in values:
+        if isinstance(item, dict):
+            records.append(dict(item))
+        elif item is not None:
+            records.append({text_key: str(item)})
+    return records
+
+
+def _as_text_list(value: Any) -> list[str]:
+    if value is None or value == "":
+        return []
+    values = value if isinstance(value, list) else [value]
+    return [str(item) for item in values if item is not None and str(item).strip()]
+
+
+def normalize_video_segment_result(value: Any) -> dict[str, Any]:
+    """Normalize lenient Gemini JSON before persistence and before rendering old results."""
+    result = _as_mapping(value)
+    result["title"] = str(result.get("title") or "").strip()
+    result["summary"] = str(result.get("summary") or "").strip()
+    result["natural_translation"] = str(result.get("natural_translation") or "").strip()
+    result["key_points"] = _as_text_list(result.get("key_points"))
+    result["dialogue_turns"] = _as_record_list(result.get("dialogue_turns"), "text")
+    for key in (
+        "vocabulary_all", "kanji_analysis", "connectors", "discourse_markers",
+        "grammar_points", "sentence_patterns",
+    ):
+        result[key] = _as_record_list(result.get(key), "value")
+    if not isinstance(result.get("sentence_breakdown"), dict):
+        result.pop("sentence_breakdown", None)
+    if not isinstance(result.get("visual_context_detail"), dict):
+        result.pop("visual_context_detail", None)
+    return result
+
+
 def transcribe_with_gemini(source: dict) -> tuple[list[dict], dict]:
     """Fallback transcript for a public URL or uploaded File API video."""
     model = create_gemini_model(GEMINI_MODEL_VIDEO, GEMINI_API_KEY)
@@ -419,7 +464,7 @@ Không bỏ sót segment và không trộn nội dung giữa các segment.
     by_id = {str(row.get("segment_id")): row for row in returned if isinstance(row, dict)}
     results = []
     for segment in segments:
-        result = dict(by_id.get(str(segment.get("segment_id"))) or {})
+        result = normalize_video_segment_result(by_id.get(str(segment.get("segment_id"))) or {})
         if not result:
             raise ValueError(f"Gemini bỏ sót segment {segment.get('segment_id')}.")
         result.update({
@@ -460,7 +505,7 @@ def video_analysis_markdown(source: dict, segments: list[dict]) -> str:
             f"{segment.get('title') or 'Đoạn'}"
         )
     for segment in segments:
-        analysis = segment.get("analysis") or {}
+        analysis = normalize_video_segment_result(segment.get("analysis"))
         lines.extend([
             "", f"## {format_timestamp(segment.get('start_seconds', 0))} · {analysis.get('title') or segment.get('title')}", "",
             str(segment.get("clean_text") or ""), "",
@@ -481,13 +526,13 @@ def video_analysis_markdown(source: dict, segments: list[dict]) -> str:
             rows = analysis.get(key) or []
             if rows:
                 lines.extend(["", f"### {label}"])
-                for row in rows:
+                for row in _as_record_list(rows, "value"):
                     lines.append("- " + " | ".join(str(value) for value in row.values() if value not in (None, "", [])))
         for label, key in (("Từ nối", "connectors"), ("Discourse markers", "discourse_markers"), ("Mẫu câu", "sentence_patterns")):
             rows = analysis.get(key) or []
             if rows:
                 lines.extend(["", f"### {label}"])
-                for row in rows:
+                for row in _as_record_list(rows, "value"):
                     lines.append("- " + " | ".join(str(value) for value in row.values() if value not in (None, "", [])))
         breakdown = analysis.get("sentence_breakdown") or {}
         if breakdown:
@@ -495,13 +540,16 @@ def video_analysis_markdown(source: dict, segments: list[dict]) -> str:
         visual = analysis.get("visual_context_detail") or {}
         if visual:
             lines.extend(["", "### Bối cảnh hình ảnh", "", str(visual.get("summary") or "")])
-            for cue in visual.get("visual_cues") or []:
+            for cue in _as_record_list(visual.get("visual_cues"), "description"):
                 lines.append("- " + " | ".join(str(value) for value in cue.values() if value not in (None, "", [])))
     return "\n".join(lines).strip()
 
 
 def build_video_analysis(source: dict, segments: list[dict]) -> dict:
-    completed = [segment for segment in segments if segment.get("analysis")]
+    completed = [
+        {**segment, "analysis": normalize_video_segment_result(segment.get("analysis"))}
+        for segment in segments if _as_mapping(segment.get("analysis"))
+    ]
     usage_runs = []
     ingest_usage = source.get("ingest_usage") or {}
     if ingest_usage and sum(int(ingest_usage.get(key, 0) or 0) for key in ("input_tokens", "output_tokens")):
@@ -539,7 +587,7 @@ def build_video_analysis(source: dict, segments: list[dict]) -> dict:
             })
     page_analyses = []
     for fallback_index, segment in enumerate(completed, 1):
-        row = dict(segment.get("analysis") or {})
+        row = normalize_video_segment_result(segment.get("analysis"))
         catalog = split_sentences(
             str(segment.get("clean_text") or ""), str(segment.get("language") or "english"), fallback_index
         )

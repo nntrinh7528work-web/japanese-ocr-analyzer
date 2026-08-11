@@ -19,6 +19,7 @@ from modules.video_analyzer import (
     build_segments,
     clean_transcript,
     format_timestamp,
+    normalize_video_segment_result,
     parse_youtube_url,
     probe_video_duration,
     transcript_hash,
@@ -224,7 +225,7 @@ def _render_cost_confirmation(
 def _render_segment(
     segment: dict, source: dict, worker_path: str, project_dir: str, editable: bool = True,
 ) -> None:
-    analysis = segment.get("analysis") or {}
+    analysis = normalize_video_segment_result(segment.get("analysis"))
     status = {"done": "Đã xong", "failed": "Lỗi", "running": "Đang xử lý"}.get(segment.get("status"), "Chờ")
     label = (
         f"{format_timestamp(segment.get('start_seconds', 0))} - {format_timestamp(segment.get('end_seconds', 0))} "

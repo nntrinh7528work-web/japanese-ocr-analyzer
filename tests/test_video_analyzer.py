@@ -121,6 +121,24 @@ def test_video_analysis_exposes_pages_for_notion_without_raw_transcript():
     assert "RAW" not in analysis["full_markdown"]
 
 
+def test_video_analysis_normalizes_string_rows_from_model_without_crashing():
+    source = {"source_id": "source", "clean_transcript": [{"text": "Hello", "end": 2}]}
+    segments = [{
+        "segment_id": "one", "ordinal": 1, "start_seconds": 0, "end_seconds": 2,
+        "title": "Intro", "language": "english", "clean_text": "Hello.",
+        "analysis": {
+            "summary": "Mở đầu", "dialogue_turns": ["Hello"],
+            "vocabulary_all": ["hello"], "key_points": "Lời chào",
+        },
+        "usage": {},
+    }]
+    analysis = build_video_analysis(source, segments)
+    page = analysis["page_analyses"][0]
+    assert page["dialogue_turns"][0]["text"] == "Hello"
+    assert page["vocabulary_all"][0]["value"] == "hello"
+    assert "Hello" in analysis["full_markdown"]
+
+
 def test_mixed_video_routes_japanese_and_english_entities_independently():
     analysis = {
         "analysis_language": "mixed",
