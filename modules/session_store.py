@@ -9,6 +9,7 @@ import pathlib
 import secrets
 import sqlite3
 import threading
+import time
 import uuid
 
 _DB_PATH: str = str(
@@ -161,15 +162,33 @@ def _get_connection() -> sqlite3.Connection:
     db_path = pathlib.Path(_DB_PATH)
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(str(db_path))
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA foreign_keys=ON;")
-    conn.executescript(_CREATE_TABLES_SQL)
-    version_columns = {row[1] for row in conn.execute("PRAGMA table_info(analysis_versions)").fetchall()}
-    if "source_snapshot_json" not in version_columns:
-        conn.execute("ALTER TABLE analysis_versions ADD COLUMN source_snapshot_json TEXT NOT NULL DEFAULT '[]'")
-        conn.commit()
-    return conn
+    # Streamlit and the detached workers are separate processes.  A schema
+    # check can briefly contend with a Notion/job write, so do not let a normal
+    # SQLite lock turn into a user-visible startup failure.
+    last_error: sqlite3.OperationalError | None = None
+    for attempt in range(3):
+        conn = sqlite3.connect(str(db_path), timeout=30)
+        try:
+            conn.execute("PRAGMA busy_timeout=30000;")
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("PRAGMA foreign_keys=ON;")
+            conn.executescript(_CREATE_TABLES_SQL)
+            version_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(analysis_versions)").fetchall()
+            }
+            if "source_snapshot_json" not in version_columns:
+                conn.execute(
+                    "ALTER TABLE analysis_versions ADD COLUMN source_snapshot_json TEXT NOT NULL DEFAULT '[]'"
+                )
+                conn.commit()
+            return conn
+        except sqlite3.OperationalError as exc:
+            conn.close()
+            last_error = exc
+            if "locked" not in str(exc).lower() or attempt == 2:
+                raise
+            time.sleep(0.25 * (attempt + 1))
+    raise last_error or sqlite3.OperationalError("Unable to open session database")
 
 
 def _utcnow_iso() -> str:
@@ -200,7 +219,7 @@ def create_session(
         conn = _get_connection()
         try:
             conn.execute(
-                "INSERT INTO sessions (session_id, created_at, updated_at, analysis_language) "
+                "INSERT OR IGNORE INTO sessions (session_id, created_at, updated_at, analysis_language) "
                 "VALUES (?, ?, ?, ?)",
                 (session_id, now, now, analysis_language),
             )
@@ -738,6 +757,12 @@ def get_document_workspace(document_id: str) -> dict | None:
 
 def migrate_legacy_session_to_documents(session_id: str) -> list[dict]:
     """Idempotently turn the previous single-document session into version 1."""
+    if not session_id:
+        return []
+    # A browser can resume while a previous deployment is still cleaning up a
+    # session row. Recreate the lightweight parent row before adding documents.
+    if not session_exists(session_id):
+        create_session(session_id)
     existing = list_documents(session_id)
     if existing:
         return existing
