@@ -1482,6 +1482,7 @@ def build_notion_sync_payload(
     billing_tier: str = "free",
     usd_to_jpy: float = 155,
     created_at: dt.datetime | None = None,
+    document_id: str | None = None,
 ) -> dict[str, Any]:
     """Build a secret-free durable payload for a Notion sync run."""
     source_hash = items_source_hash(items)
@@ -1511,9 +1512,15 @@ def build_notion_sync_payload(
         summary = " ".join(str(page.get("summary") or "").strip() for page in pages if page.get("summary"))
     cost = _cost_snapshot(items, analysis, billing_tier, usd_to_jpy)
     raw_json, analysis_hash = _raw_analysis_archive(items, analysis, source_hash)
-    external_id = f"analysis:{source_hash}:{analysis_hash[:16]}"
+    external_id = (
+        f"document:{document_id}:source:{source_hash}"
+        if document_id else f"analysis:{source_hash}:{analysis_hash[:16]}"
+    )
     columns = _analysis_column_snapshot(items, analysis)
-    app_url = PUBLIC_APP_URL.rstrip("/") + "/?" + urlencode({"session": session_id})
+    query = {"session": session_id}
+    if document_id:
+        query["document"] = document_id
+    app_url = PUBLIC_APP_URL.rstrip("/") + "/?" + urlencode(query)
     entities = extract_notion_entities(analysis, external_id)
     columns.update({
         "sentence_count": len(entities["sentences"]),
@@ -2016,6 +2023,7 @@ def enqueue_analysis_sync(
     billing_tier: str = "free",
     usd_to_jpy: float = 155,
     force: bool = False,
+    document_id: str | None = None,
 ) -> dict:
     payload = build_notion_sync_payload(
         session_id,
@@ -2023,6 +2031,7 @@ def enqueue_analysis_sync(
         analysis,
         billing_tier=billing_tier,
         usd_to_jpy=usd_to_jpy,
+        document_id=document_id,
     )
     return session_store.ensure_notion_sync_run(
         session_id,

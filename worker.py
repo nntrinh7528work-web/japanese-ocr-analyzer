@@ -11,6 +11,8 @@ from modules.notion_sync import enqueue_analysis_sync, notion_connection_state
 from modules.text_analyzer import run_analysis, run_page_analyses
 from modules.sentence_analyzer import analyze_manual_sentence
 from modules.translation_guidance import analyze_guidance_job
+from modules.sentence_analyzer import merge_manual_breakdown
+from modules.translation_guidance import merge_guidance_job
 
 
 def run_job(job_id: str, text: str, lang: str):
@@ -67,6 +69,10 @@ def run_job(job_id: str, text: str, lang: str):
                 partial_results.append(page_result)
                 partial_results.sort(key=lambda page: int(page.get("page_index", 0)))
                 update_job(job_id, "running", partial_result=partial_results)
+                if job_data and job_data.get("version_id"):
+                    session_store.save_analysis_version(
+                        job_data["version_id"], partial=partial_results, status="running", job_id=job_id
+                    )
 
             result = run_page_analyses(
                 pages,
@@ -100,10 +106,69 @@ def run_job(job_id: str, text: str, lang: str):
             )
             
         update_job(job_id, "done", result=result, partial_result=[])
+        if job_data and job_data.get("document_id") and job_data.get("version_id") and (
+            lang.startswith("guidance_") or lang.startswith("sentence_")
+        ):
+            version = session_store.get_analysis_version(job_data["version_id"]) or {}
+            base_analysis = version.get("analysis")
+            if lang.startswith("guidance_"):
+                merged, changed = merge_guidance_job(base_analysis, result, job_id)
+            else:
+                merged, changed = merge_manual_breakdown(base_analysis, result, job_id)
+            if changed:
+                session_store.save_analysis_version(job_data["version_id"], analysis=merged)
+                document = session_store.get_document(job_data["document_id"]) or {}
+                if (
+                    document.get("active_version_id") == job_data["version_id"]
+                    and document.get("source_hash") == job_data.get("source_hash")
+                    and notion_connection_state()["configured"]
+                ):
+                    settings = session_store.load_settings(job_data["session_id"])
+                    if settings.get("auto_notion_sync", True):
+                        notion_run = enqueue_analysis_sync(
+                            job_data["session_id"], session_store.load_document_items(job_data["document_id"]), merged,
+                            billing_tier=settings.get("billing_tier", "free"),
+                            usd_to_jpy=float(settings.get("usd_to_jpy", 155)), document_id=job_data["document_id"],
+                        )
+                        if session_store.dispatch_notion_sync_run(notion_run["run_id"]):
+                            subprocess.Popen(
+                                [sys.executable, str(Path(__file__).resolve().parent / "notion_worker.py"), notion_run["run_id"]],
+                                stdout=subprocess.DEVNULL,
+                                stderr=open(str(Path(__file__).resolve().parent / "notion_worker_error.log"), "a"),
+                                cwd=str(Path(__file__).resolve().parent),
+                            )
+            return
         if persist_main_result and job_data and job_data.get("session_id"):
             session_id = job_data["session_id"]
-            items = session_store.load_image_items(session_id)
+            document_id = job_data.get("document_id")
+            version_id = job_data.get("version_id")
+            items = (
+                session_store.load_document_items(document_id)
+                if document_id else session_store.load_image_items(session_id)
+            )
             current_hash = items_source_hash(items)
+            if version_id:
+                # Always retain the historical result. It becomes the visible
+                # version only when the document still has exactly this source.
+                session_store.save_analysis_version(version_id, result, [], status="done", job_id=job_id)
+                if not job_data.get("source_hash") or current_hash == job_data.get("source_hash"):
+                    session_store.activate_analysis_version(document_id, version_id)
+                    settings = session_store.load_settings(session_id)
+                    if settings.get("auto_notion_sync", True) and notion_connection_state()["configured"]:
+                        notion_run = enqueue_analysis_sync(
+                            session_id, items, result,
+                            billing_tier=settings.get("billing_tier", "free"),
+                            usd_to_jpy=float(settings.get("usd_to_jpy", 155)),
+                            document_id=document_id,
+                        )
+                        if session_store.dispatch_notion_sync_run(notion_run["run_id"]):
+                            subprocess.Popen(
+                                [sys.executable, str(Path(__file__).resolve().parent / "notion_worker.py"), notion_run["run_id"]],
+                                stdout=subprocess.DEVNULL,
+                                stderr=open(str(Path(__file__).resolve().parent / "notion_worker_error.log"), "a"),
+                                cwd=str(Path(__file__).resolve().parent),
+                            )
+                return
             if not job_data.get("source_hash") or current_hash == job_data.get("source_hash"):
                 settings = session_store.load_settings(session_id)
                 selected_mode = str(settings.get("analysis_mode") or "full_analysis")

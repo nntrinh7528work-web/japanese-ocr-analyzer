@@ -180,6 +180,8 @@ def _start_guidance_job(
     items: list[dict],
     worker_path: str,
     project_dir: str,
+    document_id: str | None,
+    version_id: str | None,
 ) -> None:
     payload = {
         "catalog": missing,
@@ -194,6 +196,8 @@ def _start_guidance_job(
         lang,
         session_id=st.session_state.session_id,
         source_hash=items_source_hash(items),
+        document_id=document_id,
+        version_id=version_id,
     )
     subprocess.Popen(
         [_sys.executable, worker_path, job_id],
@@ -216,6 +220,8 @@ def _render_translation_guidance(
     persist_analysis_fn,
     worker_path: str,
     project_dir: str,
+    document_id: str | None,
+    version_id: str | None,
 ) -> None:
     st.subheader("Đối chiếu OCR và giáo viên hướng dẫn dịch")
     if not page.get("sentence_catalog"):
@@ -344,6 +350,8 @@ def _render_translation_guidance(
             items,
             worker_path,
             project_dir,
+            document_id,
+            version_id,
         )
 
     with st.expander("Phân tích thêm câu khác", expanded=False):
@@ -381,6 +389,8 @@ def _render_translation_guidance(
                 lang,
                 session_id=st.session_state.session_id,
                 source_hash=items_source_hash(items),
+                document_id=document_id,
+                version_id=version_id,
             )
             subprocess.Popen(
                 [_sys.executable, worker_path, job_id],
@@ -396,13 +406,17 @@ def _render_translation_guidance(
 
 def render_ocr_tab(
     config: dict,
+    active_document: dict,
+    selected_version: dict | None,
     add_sources_fn,
     remove_image_fn,
+    move_image_to_new_document_fn,
     clear_analysis_fn,
     analysis_pages_fn,
     run_item_ocr_fn,
     persist_items_fn,
     persist_analysis_fn,
+    create_analysis_version_fn,
     text_analyzer_module,
     worker_path: str,
     notion_worker_path: str,
@@ -410,6 +424,7 @@ def render_ocr_tab(
 ) -> None:
     """Render Tab 1: Image/PDF OCR & AI Text Analysis."""
     items = st.session_state.image_items
+    version_items = (selected_version or {}).get("source_snapshot") or items
     show_preprocessing = config["show_preprocessing"]
     ocr_model_choice = config["ocr_model_choice"]
     text_model_choice = config["text_model_choice"]
@@ -418,7 +433,20 @@ def render_ocr_tab(
     usd_to_jpy = config["usd_to_jpy"]
 
     # ── Upload Section ──
-    with st.expander("➕ Thêm ảnh hoặc PDF vào bộ phân tích", expanded=not items):
+    with st.expander("➕ Thêm ảnh hoặc PDF", expanded=not items):
+        has_saved_result = bool(active_document.get("active_version_id"))
+        upload_destination = "current"
+        if has_saved_result:
+            destination_label = st.radio(
+                "Ảnh mới sẽ được đưa vào đâu?",
+                ["Tạo bài mới (khuyến nghị)", "Thêm vào bài hiện tại"],
+                horizontal=True,
+                key=f"upload_destination_{active_document.get('document_id')}",
+                help="Bài cũ và các phiên bản đã phân tích luôn được giữ nguyên.",
+            )
+            upload_destination = "new" if destination_label.startswith("Tạo") else "current"
+            if upload_destination == "current":
+                st.warning("Ảnh mới sẽ tạo trạng thái chưa phân tích. Kết quả cũ vẫn xem được trong selector phiên bản.")
         upload_tab, camera_tab = st.tabs(["📁 Chọn ảnh/PDF từ máy", "📷 Chụp thêm ảnh"])
 
         with upload_tab:
@@ -433,7 +461,9 @@ def render_ocr_tab(
 
             if uploaded_files and st.button("➕ Thêm file đã chọn", type="primary", use_container_width=True):
                 with st.spinner("Đang xử lý file upload..."):
-                    added_any = add_sources_fn([(file.name, file.getvalue()) for file in uploaded_files])
+                    added_any = add_sources_fn(
+                        [(file.name, file.getvalue()) for file in uploaded_files], upload_destination
+                    )
                 if added_any:
                     st.session_state.uploader_version += 1
                     st.rerun()
@@ -449,7 +479,9 @@ def render_ocr_tab(
                 key=f"camera_{st.session_state.camera_version}",
             )
             if camera_file and st.button("➕ Thêm ảnh vừa chụp", use_container_width=True):
-                if add_sources_fn([(f"camera_{len(items) + 1}.jpg", camera_file.getvalue())]):
+                if add_sources_fn(
+                    [(f"camera_{len(items) + 1}.jpg", camera_file.getvalue())], upload_destination
+                ):
                     st.session_state.camera_version += 1
                     st.rerun()
 
@@ -536,6 +568,8 @@ def render_ocr_tab(
     # ── Image List Expanders ──
     for index, item in enumerate(items, 1):
         status = "✅ Đã OCR" if item["ocr_result"] else "⏳ Chưa OCR"
+        if item.get("mismatch_status") == "mismatch":
+            status += " · ⚠️ Khác ngôn ngữ"
         with st.expander(f"Ảnh {index}: {item['name']} · {status}", expanded=len(items) == 1):
             original_col, processed_col = st.columns(2)
             with original_col:
@@ -578,6 +612,20 @@ def render_ocr_tab(
 
             if item["ocr_error"]:
                 st.error(f"❌ Lỗi OCR: {item['ocr_error']}")
+            if item.get("mismatch_status") == "mismatch":
+                st.warning(
+                    "Trang này được nhận diện khác ngôn ngữ với bài hiện tại nên sẽ không được phân tích cùng bài. "
+                    "Bạn có thể tạo bài mới từ file này hoặc xác nhận giữ nó trong bài hiện tại."
+                )
+                mismatch_left, mismatch_right = st.columns(2)
+                if mismatch_left.button("Xác nhận giữ trong bài", key=f"keep_language_{item['id']}", use_container_width=True):
+                    item["language_override"] = True
+                    item["mismatch_status"] = "confirmed"
+                    persist_items_fn()
+                    st.rerun()
+                if mismatch_right.button("Chuyển sang bài mới", key=f"move_language_{item['id']}", use_container_width=True):
+                    move_image_to_new_document_fn(item["id"])
+                    st.rerun()
             if item["ocr_result"]:
                 result = item["ocr_result"]
                 meta1, meta2, meta3 = st.columns(3)
@@ -612,14 +660,19 @@ def render_ocr_tab(
 
     # ── Page-by-Page Analysis Section ──
     st.subheader("🧠 Phân tích theo từng trang")
-    analysis_text = combined_text(items)
+    analysis_text = combined_text([item for item in items if item.get("mismatch_status") != "mismatch"])
     pages_to_analyze = analysis_pages_fn(items)
+    mismatched_items = [
+        (index, item.get("name") or f"Trang {index}")
+        for index, item in enumerate(items, 1)
+        if item.get("mismatch_status") == "mismatch"
+    ]
     missing_ocr_items = [
         (index, item.get("name") or f"Trang {index}")
         for index, item in enumerate(items, 1)
-        if not str(item.get("edited_text") or "").strip()
+        if not str(item.get("edited_text") or "").strip() and item.get("mismatch_status") != "mismatch"
     ]
-    all_pages_ready = not missing_ocr_items and len(pages_to_analyze) == len(items)
+    all_pages_ready = not missing_ocr_items and bool(pages_to_analyze)
     partial = st.session_state.partial_page_analyses
 
     reasoning_effort = config.get("reasoning_effort", "standard")
@@ -633,6 +686,12 @@ def render_ocr_tab(
             st.error(
                 "Chưa thể phân tích toàn bộ tài liệu vì còn trang chưa có OCR: "
                 f"{missing_names}. Hãy bấm 'OCR tất cả ảnh chưa xử lý' rồi thử lại."
+            )
+        if mismatched_items:
+            st.warning(
+                "Đang bỏ qua trang khác ngôn ngữ: "
+                + ", ".join(f"{index} ({name})" for index, name in mismatched_items)
+                + ". Chuyển trang sang bài mới hoặc xác nhận giữ trong thẻ ảnh nếu muốn phân tích chung."
             )
         with st.expander("Xem văn bản OCR theo thứ tự trang"):
             st.text_area("Nội dung gộp theo thứ tự ảnh", value=analysis_text, height=260, disabled=True)
@@ -717,7 +776,7 @@ def render_ocr_tab(
                 "auto_translation_guidance": selected_mode == "sentence_guidance",
             })
             session_store.save_settings(st.session_state.session_id, saved_settings)
-            clear_analysis_fn()
+            version = create_analysis_version_fn(selected_mode, analysis_language, text_model_choice)
             input_data = {
                 "pages": pages_to_analyze,
                 "model_name": text_model_choice,
@@ -735,7 +794,10 @@ def render_ocr_tab(
                 "pdf_ja" if analysis_language == "japanese" else "pdf_en",
                 session_id=st.session_state.session_id,
                 source_hash=items_source_hash(items),
+                document_id=active_document.get("document_id"),
+                version_id=version["version_id"],
             )
+            session_store.save_analysis_version(version["version_id"], status="running", job_id=job_id)
             subprocess.Popen(
                 [_sys.executable, worker_path, job_id],
                 stdout=subprocess.DEVNULL,
@@ -785,7 +847,7 @@ def render_ocr_tab(
                 item["ocr_result"].get("model_used") or ocr_model_choice,
                 billing_tier,
             )
-            for item in items
+            for item in version_items
             if item.get("ocr_result")
         ]
         analysis_cost = estimate_cost(analysis.get("usage"), used_model_name, billing_tier)
@@ -836,14 +898,14 @@ def render_ocr_tab(
         with st.expander("💾 Lưu kết quả phân tích", expanded=True):
             st.caption("Tải file về máy/điện thoại để xem lại sau. JSON lưu dữ liệu có cấu trúc, không nhúng ảnh gốc.")
             export_stem = safe_export_stem(
-                st.text_input("Tên file lưu:", value=default_export_stem(items), key="analysis_export_stem")
+                st.text_input("Tên file lưu:", value=default_export_stem(version_items), key="analysis_export_stem")
             )
             docx_name = f"{export_stem}.docx"
             md_name = f"{export_stem}.md"
             json_name = f"{export_stem}.json"
             docx_bytes = export_to_docx(analysis_markdown(analysis), docx_name)
             json_bytes = analysis_json_bytes(
-                items, analysis, session_cost, billing_tier, usd_to_jpy, budget=budget
+                version_items, analysis, session_cost, billing_tier, usd_to_jpy, budget=budget
             )
 
             save_col1, save_col2, save_col3 = st.columns(3)
@@ -876,10 +938,14 @@ def render_ocr_tab(
                 "và mã SHA-256. Các cột Notion là bản tóm lược để lọc và ôn tập."
             )
             notion_state = notion_connection_state()
-            sync_run = session_store.get_notion_sync_for_source(
-                st.session_state.session_id,
-                items_source_hash(items),
+            sync_run = session_store.get_notion_sync_for_external_id(
+                f"document:{active_document.get('document_id')}:source:{(selected_version or {}).get('source_hash') or items_source_hash(version_items)}"
             )
+            if not sync_run and active_document.get("language_source") == "legacy":
+                # Existing Notion runs predate document IDs and remain readable.
+                sync_run = session_store.get_notion_sync_for_source(
+                    st.session_state.session_id, (selected_version or {}).get("source_hash") or items_source_hash(version_items)
+                )
             if not notion_state["configured"]:
                 st.info(
                     "Notion chưa được kết nối. Cấu hình NOTION_TOKEN và "
@@ -941,11 +1007,12 @@ def render_ocr_tab(
             elif st.button("Lưu bài này vào Notion ngay", use_container_width=True):
                 run = enqueue_analysis_sync(
                     st.session_state.session_id,
-                    items,
+                    version_items,
                     analysis,
                     billing_tier=billing_tier,
                     usd_to_jpy=usd_to_jpy,
                     force=True,
+                    document_id=active_document.get("document_id"),
                 )
                 if session_store.dispatch_notion_sync_run(run["run_id"]):
                     subprocess.Popen(
@@ -988,6 +1055,8 @@ def render_ocr_tab(
                     persist_analysis_fn,
                     worker_path,
                     project_dir,
+                    active_document.get("document_id"),
+                    st.session_state.selected_version_id,
                 )
 
                 st.subheader("📊 Từ vựng")

@@ -24,6 +24,8 @@ def init_db():
             session_id TEXT,
             partial_result TEXT,
             source_hash TEXT,
+            document_id TEXT,
+            version_id TEXT,
             created_at REAL,
             updated_at REAL
         )
@@ -35,6 +37,10 @@ def init_db():
         conn.execute("ALTER TABLE jobs ADD COLUMN partial_result TEXT")
     if "source_hash" not in columns:
         conn.execute("ALTER TABLE jobs ADD COLUMN source_hash TEXT")
+    if "document_id" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN document_id TEXT")
+    if "version_id" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN version_id TEXT")
     conn.commit()
     conn.close()
 
@@ -44,14 +50,17 @@ def create_job(
     lang: str,
     session_id: str | None = None,
     source_hash: str | None = None,
+    document_id: str | None = None,
+    version_id: str | None = None,
 ) -> str:
     init_db()
     job_id = str(uuid.uuid4())
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.execute(
         "INSERT INTO jobs (job_id, status, input_text, lang, session_id, partial_result, "
-        "source_hash, created_at, updated_at) VALUES (?, 'pending', ?, ?, ?, '[]', ?, ?, ?)",
-        (job_id, input_text, lang, session_id, source_hash, time.time(), time.time()),
+        "source_hash, document_id, version_id, created_at, updated_at) "
+        "VALUES (?, 'pending', ?, ?, ?, '[]', ?, ?, ?, ?, ?)",
+        (job_id, input_text, lang, session_id, source_hash, document_id, version_id, time.time(), time.time()),
     )
     conn.commit()
     conn.close()

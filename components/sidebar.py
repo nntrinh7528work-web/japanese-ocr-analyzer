@@ -74,12 +74,7 @@ def render_sidebar(
             help="Chế độ Chuyên sâu giúp Gemini 3.5 Flash & 3.1 Pro lập luận kỹ lưỡng các sắc thái ngữ pháp, từ vựng và câu văn phức tạp.",
         )
 
-        analysis_language = st.radio(
-            "Ngôn ngữ phân tích",
-            options=["japanese", "english"],
-            format_func=lambda val: "Tiếng Nhật (Kanji/JLPT)" if val == "japanese" else "Tiếng Anh (CEFR/Grammar)",
-            horizontal=False,
-        )
+        st.caption("Ngôn ngữ phân tích được chọn riêng ở đầu từng bài để ảnh Nhật và Anh không bị trộn.")
 
         analysis_mode = str(st.session_state.get("analysis_mode") or "full_analysis")
 
@@ -114,9 +109,6 @@ def render_sidebar(
         )
         st.session_state["auto_notion_sync"] = auto_notion_sync
 
-    if st.session_state.get("_last_analysis_language") not in (None, analysis_language):
-        clear_analysis_fn()
-    st.session_state["_last_analysis_language"] = analysis_language
     # Group cost options inside expander
     with st.sidebar.expander("💰 Ước tính chi phí", expanded=False):
         billing_tier = st.radio(
@@ -161,7 +153,6 @@ def render_sidebar(
         "ocr_model_choice": ocr_model_choice,
         "text_model_choice": text_model_choice,
         "reasoning_effort": reasoning_effort,
-        "analysis_language": analysis_language,
         "analysis_mode": analysis_mode,
         "auto_sentence_deep_dive": auto_sentence_deep_dive,
         "auto_translation_guidance": auto_translation_guidance,
