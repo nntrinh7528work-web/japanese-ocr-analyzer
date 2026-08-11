@@ -11,6 +11,7 @@ from modules.video_analyzer import (
     normalize_transcript,
     parse_youtube_url,
     transcript_hash,
+    supported_video_model,
     validate_video_upload,
 )
 from modules.notion_sync import extract_notion_entities
@@ -93,6 +94,10 @@ def test_caption_ingest_is_free_but_analysis_has_paid_equivalent():
     estimate = build_cost_estimate(source, [{"segment_id": "one"}], "paid")
     assert estimate["ingest"]["paid_equivalent_usd"] == 0
     assert estimate["analysis_expected"]["paid_equivalent_usd"] > 0
+
+
+def test_deprecated_video_batch_model_is_migrated_automatically():
+    assert supported_video_model("gemini-2.5-flash-lite", "gemini-3.5-flash-lite") == "gemini-3.5-flash-lite"
 
 
 def test_video_analysis_exposes_pages_for_notion_without_raw_transcript():

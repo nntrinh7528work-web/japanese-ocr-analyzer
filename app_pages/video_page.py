@@ -410,6 +410,15 @@ def render_video_tab(
             _render_results(source, selected_segments, analysis, config)
             if selected_segments is not segments:
                 segments = selected_segments
+    elif status == "failed":
+        st.error(source.get("error") or "Phân tích segment chưa hoàn tất.")
+        st.caption("Transcript vẫn được giữ nguyên. Bạn có thể chạy lại chỉ bước phân tích, không cần lấy transcript lần nữa.")
+        if segments and st.button("Chạy lại phân tích từ transcript hiện có", type="primary", use_container_width=True):
+            for segment in segments:
+                if segment.get("status") == "failed":
+                    session_store.update_video_segment(segment["segment_id"], status="pending", error="")
+            session_store.update_video_source(source["source_id"], status="awaiting_cost_confirmation", error="")
+            st.rerun()
     elif source.get("error"):
         st.error(source["error"])
 

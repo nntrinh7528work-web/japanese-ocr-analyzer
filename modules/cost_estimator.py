@@ -83,7 +83,7 @@ def estimate_video_plan_cost(
     )
     batch_expected = estimate_cost(
         {"input_tokens": batch_input, "output_tokens": expected_batch_output},
-        "gemini-2.5-flash-lite", billing_tier,
+        "gemini-3.5-flash-lite", billing_tier,
     )
     deep_expected = estimate_cost(
         {"input_tokens": deep_input, "output_tokens": expected_deep_output},
@@ -91,7 +91,7 @@ def estimate_video_plan_cost(
     )
     batch_max = estimate_cost(
         {"input_tokens": batch_input, "output_tokens": maximum_batch_output},
-        "gemini-2.5-flash-lite", billing_tier,
+        "gemini-3.5-flash-lite", billing_tier,
     )
     deep_max = estimate_cost(
         {"input_tokens": deep_input, "output_tokens": maximum_deep_output},

@@ -20,7 +20,20 @@ from modules.sentence_analyzer import detect_sentence_language, split_sentences
 # upgrading an older config.py. Existing configuration still takes precedence.
 GEMINI_API_KEY = getattr(app_config, "GEMINI_API_KEY", None)
 GEMINI_MODEL_VIDEO = getattr(app_config, "GEMINI_MODEL_VIDEO", "gemini-3.6-flash")
-GEMINI_MODEL_VIDEO_BATCH = getattr(app_config, "GEMINI_MODEL_VIDEO_BATCH", "gemini-2.5-flash-lite")
+_DEPRECATED_VIDEO_MODELS = {
+    # Google returns 404 for this model on new API projects as of August 2026.
+    "gemini-2.5-flash-lite": "gemini-3.5-flash-lite",
+}
+
+
+def supported_video_model(model_name: str | None, fallback: str) -> str:
+    value = str(model_name or fallback).strip() or fallback
+    return _DEPRECATED_VIDEO_MODELS.get(value, value)
+
+
+GEMINI_MODEL_VIDEO_BATCH = supported_video_model(
+    getattr(app_config, "GEMINI_MODEL_VIDEO_BATCH", None), "gemini-3.5-flash-lite"
+)
 MAX_VIDEO_SIZE_MB = int(getattr(app_config, "MAX_VIDEO_SIZE_MB", 100))
 SUPPORTED_VIDEO_FORMATS = list(
     getattr(app_config, "SUPPORTED_VIDEO_FORMATS", ["mp4", "mov", "webm", "mpeg", "mpg", "avi"])
