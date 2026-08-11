@@ -10,16 +10,21 @@ import re
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from config import (
-    GEMINI_API_KEY,
-    GEMINI_MODEL_VIDEO,
-    GEMINI_MODEL_VIDEO_BATCH,
-    MAX_VIDEO_SIZE_MB,
-    SUPPORTED_VIDEO_FORMATS,
-)
+import config as app_config
 from modules.cost_estimator import estimate_video_plan_cost
 from modules.gemini_client import create_gemini_model
 from modules.sentence_analyzer import detect_sentence_language, split_sentences
+
+
+# Keep the optional video subsystem bootable while a hosted deployment is
+# upgrading an older config.py. Existing configuration still takes precedence.
+GEMINI_API_KEY = getattr(app_config, "GEMINI_API_KEY", None)
+GEMINI_MODEL_VIDEO = getattr(app_config, "GEMINI_MODEL_VIDEO", "gemini-3.6-flash")
+GEMINI_MODEL_VIDEO_BATCH = getattr(app_config, "GEMINI_MODEL_VIDEO_BATCH", "gemini-2.5-flash-lite")
+MAX_VIDEO_SIZE_MB = int(getattr(app_config, "MAX_VIDEO_SIZE_MB", 100))
+SUPPORTED_VIDEO_FORMATS = list(
+    getattr(app_config, "SUPPORTED_VIDEO_FORMATS", ["mp4", "mov", "webm", "mpeg", "mpg", "avi"])
+)
 
 
 _YOUTUBE_HOSTS = {

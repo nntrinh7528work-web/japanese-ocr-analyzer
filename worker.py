@@ -4,7 +4,7 @@ import sys
 import json
 import subprocess
 from pathlib import Path
-from config import MAX_VIDEO_DURATION_SECONDS
+import config as app_config
 from modules.job_store import update_job, get_job
 from modules import session_store
 from modules.job_workflow import items_source_hash
@@ -27,6 +27,8 @@ from modules.video_analyzer import (
     transcript_hash,
     transcribe_with_gemini,
 )
+
+MAX_VIDEO_DURATION_SECONDS = int(getattr(app_config, "MAX_VIDEO_DURATION_SECONDS", 60 * 60))
 
 
 def _video_notion_items(source: dict, segments: list[dict]) -> list[dict]:
