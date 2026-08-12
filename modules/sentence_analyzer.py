@@ -549,20 +549,74 @@ def _merge_raw_breakdown(primary: dict[str, Any], repair: dict[str, Any]) -> dic
     return result
 
 
-def _parse_json_response(text: str) -> dict[str, Any]:
-    cleaned = str(text or "").strip()
-    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.I)
-    cleaned = re.sub(r"\s*```$", "", cleaned)
-    try:
-        value = json.loads(cleaned)
-    except json.JSONDecodeError:
-        start, end = cleaned.find("{"), cleaned.rfind("}")
-        if start < 0 or end <= start:
-            raise ValueError("Gemini không trả về JSON hợp lệ.")
-        value = json.loads(cleaned[start : end + 1])
+def _coerce_breakdown_payload(value: Any) -> dict[str, Any] | None:
+    """Accept Gemini JSON envelopes without accepting arbitrary prose as data."""
+    for _ in range(2):
+        if not isinstance(value, str):
+            break
+        try:
+            value = json.loads(value.strip())
+        except json.JSONDecodeError:
+            return None
+    if isinstance(value, list):
+        return {"sentences": value}
     if not isinstance(value, dict):
-        raise ValueError("Phản hồi giải mã câu dài phải là JSON object.")
+        return None
+    if isinstance(value.get("sentences"), list):
+        return value
+    # Some otherwise usable single-sentence replies omit the outer envelope.
+    if value.get("sentence_id"):
+        return {"sentences": [value]}
     return value
+
+
+def _json_values_from_text(text: str) -> list[Any]:
+    """Extract complete JSON values from prose or Markdown without brace slicing."""
+    source = str(text or "").strip()
+    if not source:
+        return []
+    candidates = [source]
+    candidates.extend(match.group(1).strip() for match in re.finditer(r"```(?:json)?\s*(.*?)```", source, re.I | re.S))
+    values: list[Any] = []
+    decoder = json.JSONDecoder()
+    for candidate in candidates:
+        try:
+            values.append(json.loads(candidate))
+        except json.JSONDecodeError:
+            pass
+        # raw_decode respects quoted braces and stops after one complete value.
+        for index, char in enumerate(candidate):
+            if char not in "{[":
+                continue
+            try:
+                value, _ = decoder.raw_decode(candidate[index:])
+            except json.JSONDecodeError:
+                continue
+            values.append(value)
+    return values
+
+
+def _parse_json_response(text: str) -> dict[str, Any]:
+    for value in _json_values_from_text(text):
+        payload = _coerce_breakdown_payload(value)
+        if payload is not None:
+            return payload
+    raise ValueError("Gemini không trả về JSON hợp lệ.")
+
+
+def _json_recovery_prompt(sentences: list[dict[str, Any]], language: str) -> str:
+    """A compact retry prompt prevents long, truncated output from wasting retries."""
+    requested = [
+        {"sentence_id": row["sentence_id"], "original": row["original"]}
+        for row in sentences
+    ]
+    language_note = "Thêm reading bằng hiragana cho câu tiếng Nhật." if _language(language) == "japanese" else "Nêu khung S-V-O-C-A và động từ trung tâm cho câu tiếng Anh."
+    return f"""Lần trả lời trước không đọc được như JSON. Hãy trả lại DUY NHẤT JSON hợp lệ, không Markdown, không lời dẫn.
+Mọi giải thích dùng tiếng Việt, giữ nguyên original. Viết ngắn gọn để JSON hoàn chỉnh, không bỏ dở giữa chừng. {language_note}
+Dạng bắt buộc:
+{{"sentences":[{{"sentence_id":"...","reading":"","segments":[{{"text":"đúng OCR","role":"","meaning_vi":""}}],"clauses":[],"structure_summary":"","sentence_skeleton":{{"pattern":"","predicate":""}},"grammar_links":[{{"source":"","form":"","function_vi":""}}],"connectors":[],"translations":{{"chunked":"","literal":"","natural":""}},"omitted_elements":[],"references":[],"logic":[],"translation_steps":[{{"order":"1","source_chunk":"","meaning_vi":"","advice_vi":""}}],"ambiguities":[],"simplified_source":"","simplified_vi":"","questions":[{{"question":"","answer":"","explanation":"","evidence":""}}]}}]}}
+CÂU CẦN PHÂN TÍCH:
+{json.dumps(requested, ensure_ascii=False)}"""
 
 
 def analyze_sentence_batch(
@@ -592,8 +646,17 @@ def analyze_sentence_batch(
         config["thinking_config"] = {"thinking_budget": 4096}
     last_error: Exception | None = None
     for attempt in range(3):
+        retrying = attempt > 0
+        current_prompt = _json_recovery_prompt(requested, language) if retrying else prompt
+        current_config = dict(config)
+        if retrying:
+            # A smaller valid response is more useful than another truncated
+            # detailed response. The existing repair pass fills omissions.
+            current_config["max_output_tokens"] = 8192
+            if attempt == 2:
+                current_config.pop("response_json_schema", None)
         try:
-            response = _generate_structured(model, prompt, config)
+            response = _generate_structured(model, current_prompt, current_config)
             payload = _parse_json_response(getattr(response, "text", ""))
             rows = payload.get("sentences")
             if not isinstance(rows, list):

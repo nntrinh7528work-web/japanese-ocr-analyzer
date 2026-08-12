@@ -8,6 +8,7 @@ from modules.sentence_analyzer import (
     deep_analysis_batches,
     merge_manual_breakdown,
     normalize_breakdown,
+    _parse_json_response,
     score_complexity,
     select_auto_sentences,
     split_sentences,
@@ -176,6 +177,41 @@ def test_normalization_supplies_all_eight_layers_for_partial_json():
     ):
         assert field in row
 
+
+def test_sentence_parser_recovers_json_from_prose_and_double_encoding():
+    payload = {"sentences": [{"sentence_id": "p1-s1", "translations": {"natural": "Bản dịch."}}]}
+    prose = "Đây là kết quả:\n```json\n" + json.dumps(payload) + "\n```\nHết."
+    assert _parse_json_response(prose) == payload
+    assert _parse_json_response(json.dumps(json.dumps(payload))) == payload
+    assert _parse_json_response(json.dumps(payload["sentences"])) == payload
+
+
+def test_sentence_batch_uses_compact_json_retry_after_invalid_response():
+    class Model:
+        calls = 0
+
+        def generate_content(self, prompt, generation_config):
+            self.calls += 1
+            if self.calls == 1:
+                return SimpleNamespace(text="Tôi sẽ phân tích câu này.", usage_metadata=SimpleNamespace())
+            assert "Lần trả lời trước không đọc được như JSON" in prompt
+            assert generation_config["max_output_tokens"] == 8192
+            return SimpleNamespace(
+                text=json.dumps({"sentences": [{
+                    "sentence_id": "p1-s1", "segments": [{"text": "A difficult sentence.", "role": "S", "meaning_vi": "câu khó"}],
+                    "structure_summary": "S + V", "sentence_skeleton": {"pattern": "S + V", "predicate": "is"},
+                    "grammar_links": [{"source": "is", "form": "be", "function_vi": "động từ"}],
+                    "translations": {"literal": "Câu khó.", "natural": "Đây là câu khó."},
+                    "translation_steps": [{"order": "1", "source_chunk": "sentence", "meaning_vi": "câu", "advice_vi": "dịch"}],
+                    "questions": [{"question": "Đây là gì?", "answer": "Một câu", "explanation": "", "evidence": "sentence"}],
+                }]}),
+                usage_metadata=SimpleNamespace(),
+            )
+
+    rows, _ = analyze_sentence_batch(
+        Model(), [{"sentence_id": "p1-s1", "ordinal": 1, "original": "A difficult sentence."}], "Context", "english"
+    )
+    assert rows[0]["quality_status"] == "complete"
 
 def test_sentence_batch_preserves_requested_order_and_normalizes_missing_row():
     class Model:
