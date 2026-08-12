@@ -58,3 +58,8 @@ def test_partial_results_survive_running_updates():
     job = get_job(job_id)
     assert job["partial_result"] == partial
     assert job["result"] is None
+
+
+def test_video_worker_ignores_legacy_string_analysis_values():
+    assert worker._has_sentence_breakdown({"analysis": "legacy raw response"}) is False
+    assert worker._has_sentence_breakdown({"analysis": {"sentence_breakdown": {"original": "Hello"}}}) is True

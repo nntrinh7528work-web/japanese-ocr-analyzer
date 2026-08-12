@@ -36,6 +36,14 @@ from modules.video_analyzer import (
 
 MAX_VIDEO_DURATION_SECONDS = int(getattr(app_config, "MAX_VIDEO_DURATION_SECONDS", 30 * 60))
 
+def _mapping(value: object) -> dict:
+    """Treat malformed persisted/model values as empty structured data."""
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _has_sentence_breakdown(segment: dict) -> bool:
+    return bool(_mapping(segment.get("analysis")).get("sentence_breakdown"))
+
 
 def _video_notion_items(source: dict, segments: list[dict]) -> list[dict]:
     """Expose only the cleaned transcript to Notion and shared exporters."""
@@ -293,7 +301,7 @@ def _run_video_analysis(job_id: str, job_data: dict, payload: dict) -> None:
     segments = session_store.list_video_segments(source["source_id"])
     if not segments:
         raise ValueError("Video chưa có transcript hoặc mục lục để phân tích.")
-    deep_count = sum(1 for row in segments if (row.get("analysis") or {}).get("sentence_breakdown"))
+    deep_count = sum(1 for row in segments if _has_sentence_breakdown(row))
     failures = []
     pending = [row for row in segments if not (row.get("status") == "done" and row.get("analysis"))]
     batches = build_segment_batches(pending)
@@ -301,6 +309,8 @@ def _run_video_analysis(job_id: str, job_data: dict, payload: dict) -> None:
 
     def persist_result(segment: dict, result: dict, usage: dict) -> None:
         nonlocal deep_count, completed_count
+        result = _mapping(result)
+        usage = _mapping(usage)
         candidate = _hard_sentence_row(segment, result.get("hard_sentence_candidate"))
         if candidate and deep_count < 15 and bool(payload.get("analyze_hard_sentences", True)):
             try:
@@ -428,7 +438,10 @@ def run_job(job_id: str, text: str, lang: str):
             _run_video_translate(job_id, job_data, json.loads(text or "{}"))
             return
         if job_data and job_data.get("job_kind") in {"video_analysis", "video_deep_analysis"}:
-            _run_video_analysis(job_id, job_data, json.loads(text or "{}"))
+            payload = json.loads(text or "{}")
+            if not isinstance(payload, dict):
+                raise ValueError("Video job payload is invalid.")
+            _run_video_analysis(job_id, job_data, payload)
             return
         if job_data and job_data.get("job_kind") == "video_visual":
             _run_video_visual(job_id, job_data, json.loads(text or "{}"))
