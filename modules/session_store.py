@@ -992,9 +992,14 @@ def ensure_video_cues(source: dict | None) -> list[dict]:
 
 def _decode_video_segment(row: sqlite3.Row) -> dict:
     data = dict(row)
-    data["speakers"] = json.loads(data.pop("speakers_json") or "[]")
-    data["analysis"] = json.loads(data.pop("analysis_json") or "null")
-    data["usage"] = json.loads(data.pop("usage_json") or "{}")
+    speakers = json.loads(data.pop("speakers_json") or "[]")
+    analysis = json.loads(data.pop("analysis_json") or "null")
+    usage = json.loads(data.pop("usage_json") or "{}")
+    # Older interrupted video jobs can contain a JSON string rather than an
+    # object. Normalize at the storage boundary so every consumer is safe.
+    data["speakers"] = speakers if isinstance(speakers, list) else []
+    data["analysis"] = analysis if isinstance(analysis, dict) else {}
+    data["usage"] = usage if isinstance(usage, dict) else {}
     return data
 
 

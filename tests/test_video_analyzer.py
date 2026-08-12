@@ -260,6 +260,21 @@ def test_video_analysis_normalizes_string_rows_from_model_without_crashing():
     assert page["vocabulary_all"][0]["value"] == "hello"
     assert "Hello" in analysis["full_markdown"]
 
+def test_video_analysis_ignores_legacy_string_analysis_and_usage():
+    source = {"source_id": "source", "ingest_usage": "legacy usage"}
+    segments = [{
+        "segment_id": "one", "ordinal": 1, "start_seconds": 0, "end_seconds": 2,
+        "title": "Intro", "language": "english", "clean_text": "Hello.",
+        "analysis": "legacy raw response", "usage": "legacy usage",
+    }, {
+        "segment_id": "two", "ordinal": 2, "start_seconds": 2, "end_seconds": 4,
+        "title": "Lesson", "language": "english", "clean_text": "Study carefully.",
+        "analysis": {"summary": "Luyện nghe"}, "usage": {},
+    }]
+    analysis = build_video_analysis(source, segments)
+    assert len(analysis["video_segments"]) == 1
+    assert analysis["summary"] == "Luyện nghe"
+
 
 def test_mixed_video_routes_japanese_and_english_entities_independently():
     analysis = {

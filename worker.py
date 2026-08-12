@@ -346,6 +346,7 @@ def _run_video_analysis(job_id: str, job_data: dict, payload: dict) -> None:
         )
         try:
             results, batch_usage = analyze_video_segment_batch(batch)
+            batch_usage = _mapping(batch_usage)
             batch_usage["run_id"] = f"{job_id}:batch:{batch_index + 1}"
             for segment, result in zip(batch, results):
                 persist_result(segment, result, dict(batch_usage))
@@ -355,6 +356,7 @@ def _run_video_analysis(job_id: str, job_data: dict, payload: dict) -> None:
                 for segment in batch:
                     try:
                         rows, usage = analyze_video_segment_batch([segment])
+                        usage = _mapping(usage)
                         usage["run_id"] = f"{job_id}:segment:{segment['segment_id']}"
                         persist_result(segment, rows[0], usage)
                     except Exception as segment_error:
@@ -400,9 +402,9 @@ def _run_video_visual(job_id: str, job_data: dict, payload: dict) -> None:
         raise ValueError("Không tìm thấy đoạn video cần phân tích hình ảnh.")
     update_job(job_id, "running", stage="visual_context", checkpoint={"segment_id": segment_id})
     visual, visual_usage = analyze_video_visual_segment(source, segment)
-    analysis_row = dict(segment.get("analysis") or {})
+    analysis_row = _mapping(segment.get("analysis"))
     analysis_row["visual_context_detail"] = visual
-    usage = dict(segment.get("usage") or {})
+    usage = _mapping(segment.get("usage"))
     usage["visual_context_usage"] = visual_usage
     session_store.update_video_segment(segment_id, analysis=analysis_row, usage=usage, status="done", error="")
     segments = session_store.list_video_segments(source["source_id"])

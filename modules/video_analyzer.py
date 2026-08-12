@@ -961,7 +961,7 @@ def build_video_analysis(source: dict, segments: list[dict]) -> dict:
         str(source.get("transcript_provider") or ""),
     )
     usage_runs = []
-    ingest_usage = source.get("ingest_usage") or {}
+    ingest_usage = _as_mapping(source.get("ingest_usage"))
     ingest_runs = [run for run in ingest_usage.get("runs") or [] if isinstance(run, dict)]
     if ingest_runs:
         for run in ingest_runs:
@@ -977,7 +977,7 @@ def build_video_analysis(source: dict, segments: list[dict]) -> dict:
         if isinstance(run, dict):
             usage_runs.append({**run, "stage": "caption_translation"})
     for segment in completed:
-        usage = segment.get("usage") or {}
+        usage = _as_mapping(segment.get("usage"))
         bulk_usage = {key: value for key, value in usage.items() if key != "deep_sentence_usage"}
         usage_runs.append({
             "run_id": usage.get("run_id") or f"{segment['segment_id']}:bulk",
@@ -985,7 +985,7 @@ def build_video_analysis(source: dict, segments: list[dict]) -> dict:
             "usage": bulk_usage,
             "stage": "segment_analysis",
         })
-        analysis_row = segment.get("analysis") or {}
+        analysis_row = normalize_video_segment_result(segment.get("analysis"))
         deep_usage = usage.get("deep_sentence_usage") or analysis_row.get("sentence_analysis_usage") or {}
         if deep_usage:
             usage_runs.append({
@@ -1027,7 +1027,7 @@ def build_video_analysis(source: dict, segments: list[dict]) -> dict:
         timestamp_url = ""
         if source.get("source_url"):
             timestamp_url = f"{source['source_url']}&t={int(segment.get('start_seconds', 0) or 0)}s"
-        turns = row.get("dialogue_turns") or []
+        turns = _as_record_list(row.get("dialogue_turns"), "text")
         guidance = []
         for sentence in catalog:
             original = str(sentence.get("original") or "")
@@ -1065,7 +1065,7 @@ def build_video_analysis(source: dict, segments: list[dict]) -> dict:
                 "timestamp_url": sentence_url,
                 "video_start_seconds": sentence_start,
             })
-        breakdown = dict(row.get("sentence_breakdown") or {})
+        breakdown = _as_mapping(row.get("sentence_breakdown"))
         if breakdown:
             deep_original = str(breakdown.get("original") or "").strip()
             matched_sentence = next(
@@ -1091,13 +1091,16 @@ def build_video_analysis(source: dict, segments: list[dict]) -> dict:
             "sentence_catalog": catalog,
             "translation_guidance": guidance,
             "sentence_breakdowns": [breakdown] if breakdown else [],
-            "usage": segment.get("usage") or {},
+            "usage": _as_mapping(segment.get("usage")),
         })
         page_analyses.append(row)
     analysis = {
         "analysis_type": "video", "analysis_mode": "video_balanced",
         "analysis_language": "mixed" if len({row.get('language') for row in completed}) > 1 else (completed[0].get("language") if completed else "unknown"),
-        "summary": " ".join(str((row.get("analysis") or {}).get("summary") or "") for row in completed).strip(),
+        "summary": " ".join(
+            str(normalize_video_segment_result(row.get("analysis")).get("summary") or "")
+            for row in completed
+        ).strip(),
         "video_source": {key: source.get(key) for key in ("source_id", "source_kind", "source_url", "video_id", "file_name", "duration_seconds", "transcript_provider", "transcript_hash")},
         "video_metadata": source.get("metadata") or {},
         "transcript_clean": source.get("clean_transcript") or [],
