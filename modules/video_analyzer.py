@@ -731,7 +731,9 @@ def transcript_hash(rows: list[dict]) -> str:
     return hashlib.sha256(json.dumps(rows, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-def build_segments(rows: list[dict], window_seconds: int = 180) -> list[dict]:
+def build_segments(
+    rows: list[dict], window_seconds: int = 180, *, namespace: str = "",
+) -> list[dict]:
     """Stable local chapter fallback; the model later supplies meaningful titles."""
     if not rows:
         return []
@@ -752,7 +754,9 @@ def build_segments(rows: list[dict], window_seconds: int = 180) -> list[dict]:
         language, _, _ = detect_sentence_language(text, "english")
         speakers = sorted({row["speaker"] for row in bucket if row.get("speaker")})
         segments.append({
-            "segment_id": str(hashlib.sha256(f"{index}|{bucket[0]['start']}|{text}".encode("utf-8")).hexdigest()[:24]),
+            "segment_id": str(hashlib.sha256(
+                f"{namespace}|{index}|{bucket[0]['start']}|{text}".encode("utf-8")
+            ).hexdigest()[:24]),
             "start_seconds": bucket[0]["start"], "end_seconds": bucket[-1]["end"],
             "title": f"Đoạn {index}", "language": language,
             "original_text": text, "clean_text": text, "speakers": speakers,

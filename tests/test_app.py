@@ -3,6 +3,7 @@ import io
 from PIL import Image
 from streamlit.testing.v1 import AppTest
 
+from modules import session_store
 from modules.multi_image_workflow import create_image_item
 
 
@@ -22,6 +23,31 @@ def test_app_starts_without_upload():
     assert "📷 Phân tích từ Ảnh / PDF" in tab_labels
     assert "YouTube / Video" in tab_labels
     assert "💬 Luyện Hội Thoại" in tab_labels
+
+
+def test_document_query_opens_video_even_when_picker_remembers_old_lesson(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_store, "_DB_PATH", str(tmp_path / "sessions.db"))
+    session_store.create_session("video-route")
+    session_store.create_document("video-route", "Bài ảnh cũ")
+    video = session_store.create_document(
+        "video-route", "YouTube lesson", document_type="video", language_source="video"
+    )
+    session_store.create_video_source(
+        video["document_id"], "youtube", video_id="dQw4w9WgXcQ",
+        source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    )
+
+    app = AppTest.from_file("app.py")
+    app.query_params["session"] = "video-route"
+    app.query_params["document"] = video["document_id"]
+    app.session_state["document_library_picker"] = "[?] Bài ảnh cũ · 0 ảnh · 0 phiên bản"
+    app.run(timeout=20)
+
+    assert not app.exception
+    picker = next(box for box in app.selectbox if box.label == "Bài đang mở")
+    assert "YouTube lesson" in picker.value
+    assert app.session_state["active_document_id"] == video["document_id"]
+    assert app.query_params["document"] == [video["document_id"]]
 
 
 def test_app_can_switch_dark_mode_without_error():

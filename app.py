@@ -397,7 +397,13 @@ def render_document_library() -> None:
         current = st.session_state.active_document_id
         option_labels = list(options) or [_document_label(active_document)]
         current_index = next((i for i, label in enumerate(option_labels) if options.get(label) == current), 0)
-        selected_label = left.selectbox("Bài đang mở", option_labels, index=current_index, key="document_library_picker")
+        # Scope widget state to the active document. A fixed key keeps the
+        # previous label after a video job changes the URL, which then switches
+        # the app straight back to the old image lesson on the next rerun.
+        selected_label = left.selectbox(
+            "Bài đang mở", option_labels, index=current_index,
+            key=f"document_library_picker_{current}",
+        )
         if right.button("＋ Bài mới", use_container_width=True):
             document = session_store.create_document(st.session_state.session_id)
             st.session_state.active_document_id = document["document_id"]

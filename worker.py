@@ -96,7 +96,7 @@ def _finalize_video_transcript(
         )
         return
 
-    segments = build_segments(clean_rows)
+    segments = build_segments(clean_rows, namespace=source["source_id"])
     session_store.replace_video_segments(source["source_id"], segments)
     translated = all(str(cue.get("translation_vi") or "").strip() for cue in cues)
     status = "awaiting_cost_confirmation" if translated else "awaiting_translation_confirmation"

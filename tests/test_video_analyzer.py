@@ -69,6 +69,15 @@ def test_transcript_normalization_segmentation_and_stable_hash():
     assert [row["language"] for row in segments] == ["japanese", "english"]
 
 
+def test_segment_ids_are_stable_but_isolated_between_video_sources():
+    rows = normalize_transcript([{"start": 0, "end": 2, "text": "Hello."}])
+    first = build_segments(rows, namespace="source-a")
+    repeated = build_segments(rows, namespace="source-a")
+    second = build_segments(rows, namespace="source-b")
+    assert first[0]["segment_id"] == repeated[0]["segment_id"]
+    assert first[0]["segment_id"] != second[0]["segment_id"]
+
+
 def test_audio_windows_overlap_without_exceeding_duration():
     windows = build_audio_windows(601)
     assert windows == [

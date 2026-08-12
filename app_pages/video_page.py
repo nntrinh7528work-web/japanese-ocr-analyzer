@@ -80,7 +80,7 @@ def _apply_caption_range(source: dict, start: float, end: float, config: dict) -
     session_store.update_document_source_hash(
         source["document_id"], selected_hash, status=next_status
     )
-    segments = build_segments(clean_rows)
+    segments = build_segments(clean_rows, namespace=source["source_id"])
     session_store.replace_video_segments(source["source_id"], segments)
     refreshed = session_store.get_video_source(source["source_id"]) or source
     estimate = build_cost_estimate(
