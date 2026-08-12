@@ -18,37 +18,41 @@ from modules.video_analyzer import (
     build_cost_estimate,
     build_segments,
     clean_transcript,
+    estimate_audio_transcription_cost,
+    estimate_cue_translation_cost,
     format_timestamp,
     normalize_video_segment_result,
     parse_youtube_url,
-    probe_video_duration,
+    probe_video_metadata,
     transcript_hash,
     validate_video_upload,
+    validate_video_duration,
 )
+from components.video_player import render_upload_transcript, render_youtube_player
 
 
 def _range_inputs(source: dict, key_prefix: str) -> tuple[float, float]:
-    duration = max(1.0, float(source.get("duration_seconds") or 3600))
+    duration = max(1.0, float(source.get("duration_seconds") or 1800))
     saved = source.get("metadata") or {}
     start = st.number_input(
         "Bắt đầu (giây)", min_value=0.0, max_value=max(0.0, duration - 1),
         value=min(float(saved.get("range_start") or 0), max(0.0, duration - 1)), step=30.0,
         key=f"{key_prefix}_start",
     )
-    default_end = min(duration, start + 3600)
+    default_end = min(duration, start + 1800)
     end = st.number_input(
         "Kết thúc (giây)", min_value=start + 1, max_value=duration,
         value=min(duration, max(start + 1, float(saved.get("range_end") or default_end))), step=30.0,
         key=f"{key_prefix}_end",
     )
-    if end - start > 3600:
-        st.warning("Khoảng đã chọn vượt 60 phút.")
+    if end - start > 1800:
+        st.warning("Khoảng đã chọn vượt 30 phút.")
     return float(start), float(end)
 
 
 def _apply_caption_range(source: dict, start: float, end: float, config: dict) -> None:
-    if end <= start or end - start > 3600:
-        raise ValueError("Khoảng video phải lớn hơn 0 và không vượt 60 phút.")
+    if end <= start or end - start > 1800:
+        raise ValueError("Khoảng video phải lớn hơn 0 và không vượt 30 phút.")
     selected = [
         row for row in source.get("raw_transcript") or []
         if float(row.get("end", 0) or 0) >= start and float(row.get("start", 0) or 0) <= end
@@ -56,15 +60,25 @@ def _apply_caption_range(source: dict, start: float, end: float, config: dict) -
     if not selected:
         raise ValueError("Khoảng đã chọn không có transcript.")
     clean_rows, cleanup_warnings = clean_transcript(selected)
+    selected_cues = [
+        cue for cue in session_store.list_video_cues(source["source_id"])
+        if float(cue.get("end_seconds", 0) or 0) >= start
+        and float(cue.get("start_seconds", 0) or 0) <= end
+    ]
+    if selected_cues:
+        session_store.replace_video_cues(source["source_id"], selected_cues)
     selected_hash = transcript_hash(selected)
     metadata = {**(source.get("metadata") or {}), "range_start": start, "range_end": end}
+    translated = selected_cues and all(cue.get("translation_vi") for cue in selected_cues)
+    next_status = "awaiting_cost_confirmation" if translated else "awaiting_translation_confirmation"
     session_store.update_video_source(
         source["source_id"], metadata=metadata, clean_transcript=clean_rows,
+        raw_transcript=selected,
         transcript_warnings=[*(source.get("transcript_warnings") or []), *cleanup_warnings],
-        transcript_hash=selected_hash, status="segmenting", error="",
+        transcript_hash=selected_hash, status=next_status, error="",
     )
     session_store.update_document_source_hash(
-        source["document_id"], selected_hash, status="awaiting_cost_confirmation"
+        source["document_id"], selected_hash, status=next_status
     )
     segments = build_segments(clean_rows)
     session_store.replace_video_segments(source["source_id"], segments)
@@ -73,7 +87,7 @@ def _apply_caption_range(source: dict, start: float, end: float, config: dict) -
         refreshed, session_store.list_video_segments(source["source_id"]), config.get("billing_tier", "free")
     )
     session_store.update_video_source(
-        source["source_id"], cost_estimate=estimate, status="awaiting_cost_confirmation"
+        source["source_id"], cost_estimate=estimate, status=next_status
     )
 
 
@@ -101,6 +115,20 @@ def _queue_ingest(
         source_id=source["source_id"], stage="pending",
     )
     session_store.update_video_source(source["source_id"], status="ingesting", error="")
+    _start_worker(worker_path, project_dir, job_id)
+
+
+def _queue_video_job(
+    source: dict, config: dict, worker_path: str, project_dir: str, job_kind: str,
+) -> None:
+    payload = {"billing_tier": config.get("billing_tier", "free")}
+    job_id = create_job(
+        json.dumps(payload, ensure_ascii=False), "video", st.session_state.session_id,
+        document_id=source["document_id"], job_kind=job_kind,
+        source_id=source["source_id"], stage="pending",
+    )
+    status = "transcribing" if job_kind == "video_transcribe" else "translating"
+    session_store.update_video_source(source["source_id"], status=status, error="")
     _start_worker(worker_path, project_dir, job_id)
 
 
@@ -139,7 +167,7 @@ def _render_new_source(config: dict, worker_path: str, project_dir: str) -> None
     with upload_tab:
         with st.form("video_upload_form", clear_on_submit=True):
             uploaded = st.file_uploader(
-                "MP4, MOV, WEBM, MPEG hoặc AVI (tối đa 100 MB, 60 phút)",
+                "MP4, MOV, WEBM, MPEG hoặc AVI (tối đa 100 MB, 30 phút)",
                 type=["mp4", "mov", "webm", "mpeg", "avi"],
             )
             submitted = st.form_submit_button("Tạo bài video", use_container_width=True)
@@ -155,7 +183,9 @@ def _render_new_source(config: dict, worker_path: str, project_dir: str) -> None
                     local_path = upload_dir / f"{uuid.uuid4().hex}.{checked['suffix']}"
                     local_path.write_bytes(data)
                     try:
-                        duration = probe_video_duration(str(local_path))
+                        media = probe_video_metadata(str(local_path))
+                        validate_video_duration(media)
+                        duration = float(media["duration_seconds"])
                     except Exception:
                         local_path.unlink(missing_ok=True)
                         raise
@@ -163,8 +193,9 @@ def _render_new_source(config: dict, worker_path: str, project_dir: str) -> None
                     session_store.create_video_source(
                         document["document_id"], "upload", file_name=uploaded.name,
                         mime_type=checked["mime_type"], local_path=str(local_path),
-                        duration_seconds=duration, metadata={"title": Path(uploaded.name).stem},
-                        status="awaiting_ingest_confirmation",
+                        duration_seconds=duration,
+                        metadata={"title": Path(uploaded.name).stem, "media": media},
+                        status="awaiting_transcription_confirmation",
                     )
                     st.rerun()
                 except Exception as exc:
@@ -191,7 +222,7 @@ def _render_cost_confirmation(
         f"{estimate.get('pricing_effective_date', 'không rõ')}; free tier vẫn hiện mức tương đương trả phí."
     )
     analyze_hard = st.checkbox("Giải mã tối đa một câu khó mỗi đoạn (tối đa 15 câu)", value=True)
-    if st.button("Xác nhận và phân tích toàn bộ video", type="primary", use_container_width=True):
+    if st.button("Phân tích học sâu toàn video", type="primary", use_container_width=True):
         snapshot = [
             {
                 "id": row["segment_id"], "name": row.get("title"),
@@ -213,7 +244,7 @@ def _render_cost_confirmation(
         job_id = create_job(
             json.dumps(payload, ensure_ascii=False), "video", st.session_state.session_id,
             source_hash=source_hash, document_id=source["document_id"], version_id=version["version_id"],
-            job_kind="video_analysis", source_id=source["source_id"], stage="pending",
+            job_kind="video_deep_analysis", source_id=source["source_id"], stage="pending",
         )
         session_store.save_analysis_version(version["version_id"], status="running", job_id=job_id)
         session_store.update_video_source(source["source_id"], status="analyzing", error="")
@@ -273,7 +304,11 @@ def _render_segment(
             st.markdown(str(visual.get("summary") or ""))
             if visual.get("visual_cues"):
                 st.dataframe(visual["visual_cues"], use_container_width=True, hide_index=True)
-        can_visual = bool(source.get("source_url") or (source.get("ingest_usage") or {}).get("gemini_file_uri"))
+        can_visual = bool(
+            source.get("source_url")
+            or (source.get("ingest_usage") or {}).get("gemini_file_uri")
+            or (source.get("local_path") and Path(str(source.get("local_path"))).exists())
+        )
         if can_visual and st.button("Bổ sung phân tích hình ảnh", key=f"visual_{segment['segment_id']}"):
             version_id = st.session_state.get("selected_version_id") or (
                 session_store.get_document(source["document_id"]) or {}
@@ -288,19 +323,20 @@ def _render_segment(
             st.rerun()
 
 
-def _video_json_bytes(source: dict, segments: list[dict], analysis: dict) -> bytes:
+def _video_json_bytes(source: dict, cues: list[dict], segments: list[dict], analysis: dict) -> bytes:
     payload = {
         "schema_version": "video-1.0",
         "source": {**source, "local_path": None},
         "transcript_raw": source.get("raw_transcript") or [],
         "transcript_clean": source.get("clean_transcript") or [],
+        "video_cues": cues,
         "segments": segments,
         "analysis": analysis,
     }
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str).encode("utf-8")
 
 
-def _render_results(source: dict, segments: list[dict], analysis: dict, config: dict) -> None:
+def _render_results(source: dict, cues: list[dict], segments: list[dict], analysis: dict, config: dict) -> None:
     st.subheader("Kết quả phân tích video")
     markdown = str(analysis.get("full_markdown") or "")
     actual = estimate_run_costs(
@@ -322,7 +358,7 @@ def _render_results(source: dict, segments: list[dict], analysis: dict, config: 
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document", use_container_width=True,
     )
     cols[2].download_button(
-        "Tải JSON đầy đủ", _video_json_bytes(source, segments, analysis), "video_analysis.json",
+        "Tải JSON đầy đủ", _video_json_bytes(source, cues, segments, analysis), "video_analysis.json",
         "application/json", use_container_width=True,
     )
 
@@ -334,16 +370,28 @@ def render_video_tab(
     workspace = session_store.get_document_workspace(active_document.get("document_id", "")) or {}
     source = workspace.get("video_source") if active_document.get("document_type") == "video" else None
     segments = workspace.get("video_segments") or []
+    cues = workspace.get("video_cues") or []
     if source is None:
         _render_new_source(config, worker_path, project_dir)
         return
 
     title = (source.get("metadata") or {}).get("title") or source.get("file_name") or "Video"
     st.subheader(title)
-    if source.get("source_url"):
+    if source.get("source_kind") == "youtube" and source.get("video_id") and cues:
+        render_youtube_player(str(source["video_id"]), cues, key=f"youtube_sync_{source['source_id']}")
+    elif source.get("source_url"):
         st.video(source["source_url"])
     elif source.get("local_path") and Path(source["local_path"]).exists():
-        st.video(source["local_path"])
+        if cues:
+            player_column, script_column = st.columns([1.08, 1])
+            with player_column:
+                st.video(source["local_path"])
+            with script_column:
+                render_upload_transcript(cues, key=f"upload_sync_{source['source_id']}")
+        else:
+            st.video(source["local_path"])
+    elif source.get("source_kind") == "upload":
+        st.warning("File video tạm đã hết hạn. Kết quả script vẫn còn nhưng cần tải lại file để phát video.")
     st.caption(
         f"Nguồn: {'YouTube' if source.get('source_kind') == 'youtube' else 'File tải lên'} | "
         f"Thời lượng: {format_timestamp(source.get('duration_seconds', 0))} | "
@@ -352,10 +400,28 @@ def render_video_tab(
 
     status = str(source.get("status") or "pending")
     if status in {"pending", "ingesting", "segmenting"}:
-        st.info("Đang lấy transcript và tạo mục lục. Bạn có thể chuyển sang bài khác; job vẫn tiếp tục.")
+        st.info("Đang lấy caption và tạo mục lục. Bạn có thể chuyển sang bài khác; job vẫn tiếp tục.")
+        return
+    if status == "transcribing":
+        metadata = source.get("metadata") or {}
+        done = len(metadata.get("transcription_completed_windows") or [])
+        total = int(metadata.get("transcription_total_windows") or 1)
+        st.info(f"Đang tạo script và bản dịch: {done}/{total} cửa sổ audio đã hoàn thành.")
+        st.progress(min(1.0, done / max(1, total)))
+        return
+    if status == "translating":
+        translated = sum(1 for cue in cues if cue.get("translation_vi"))
+        st.info(f"Đang dịch caption: {translated}/{len(cues)} dòng đã có bản dịch Việt.")
+        st.progress(translated / max(1, len(cues)))
+        return
+    if status == "caption_unavailable":
+        st.error(source.get("error") or "Video không có caption tiếng Nhật hoặc tiếng Anh công khai.")
+        st.caption("Theo chế độ đã chọn, app không gọi Gemini để đọc video YouTube không có caption.")
+        st.divider()
+        _render_new_source(config, worker_path, project_dir)
         return
     if status == "awaiting_range_selection":
-        st.warning("Video dài hơn 60 phút. Hãy chọn một khoảng tối đa 60 phút để tạo bài học.")
+        st.warning("Video dài hơn 30 phút. Hãy chọn một khoảng tối đa 30 phút để tạo bài học.")
         range_start, range_end = _range_inputs(source, f"caption_range_{source['source_id']}")
         if st.button("Dùng khoảng đã chọn", type="primary", use_container_width=True):
             try:
@@ -364,32 +430,53 @@ def render_video_tab(
             except Exception as exc:
                 st.error(str(exc))
         return
-    if status == "awaiting_ingest_confirmation":
-        duration = float(source.get("duration_seconds") or 600)
-        provisional = build_cost_estimate(
-            {**source, "duration_seconds": duration, "transcript_provider": "gemini_video"}, [],
-            config.get("billing_tier", "free"),
+    if status in {"awaiting_ingest_confirmation", "awaiting_transcription_confirmation"}:
+        estimate = estimate_audio_transcription_cost(
+            float(source.get("duration_seconds") or 0), config.get("billing_tier", "free")
         )
-        jpy = float((provisional.get("ingest") or {}).get("paid_equivalent_usd", 0)) * float(config.get("usd_to_jpy", 155))
-        st.warning(
-            f"Không lấy được caption miễn phí. Gemini cần đọc video ở độ phân giải thấp. "
-            f"Ước tính bước này khoảng ¥{jpy:,.2f}; video chưa biết thời lượng dùng giả định 10 phút."
+        rate = float(config.get("usd_to_jpy", 155) or 155)
+        cols = st.columns(4)
+        cols[0].metric("Token audio dự kiến", f"{int(estimate.get('input_tokens', 0)):,}")
+        cols[1].metric("Số cửa sổ", str(estimate.get("window_count", 0)))
+        cols[2].metric(
+            "Chi phí dự kiến",
+            f"¥{float((estimate.get('expected') or {}).get('paid_equivalent_usd', 0)) * rate:,.2f}",
         )
-        if source.get("error"):
-            st.caption(f"Lý do caption không dùng được: {source['error']}")
-        if float(source.get("duration_seconds") or 0) > 3600:
-            st.caption("File dài hơn 60 phút. Gemini chỉ được yêu cầu trả transcript cho khoảng bạn chọn dưới đây.")
-            range_start, range_end = _range_inputs(source, f"upload_range_{source['source_id']}")
-            metadata = {**(source.get("metadata") or {}), "range_start": range_start, "range_end": range_end}
-            session_store.update_video_source(source["source_id"], metadata=metadata)
-        if st.button("Xác nhận dùng Gemini để lấy transcript", type="primary", use_container_width=True):
-            metadata = session_store.get_video_source(source["source_id"]).get("metadata") or {}
-            if float(source.get("duration_seconds") or 0) > 3600 and (
-                float(metadata.get("range_end") or 0) - float(metadata.get("range_start") or 0) > 3600
-            ):
-                st.error("Khoảng video không được vượt 60 phút.")
-                return
-            _queue_ingest(source, config, worker_path, project_dir, allow_gemini=True)
+        cols[3].metric(
+            "Tối đa dự kiến",
+            f"¥{float((estimate.get('maximum') or {}).get('paid_equivalent_usd', 0)) * rate:,.2f}",
+        )
+        st.caption(
+            "App chỉ tách và gửi audio mono cho Gemini Flash-Lite; video gốc không được gửi ở bước tạo script. "
+            "Free tier vẫn hiển thị mức tương đương trả phí."
+        )
+        if st.button("Tạo script và bản dịch", type="primary", use_container_width=True):
+            _queue_video_job(source, config, worker_path, project_dir, "video_transcribe")
+            st.rerun()
+        return
+    if status in {"transcription_partial"}:
+        st.warning(source.get("error") or "Một số cửa sổ audio chưa tạo được script.")
+        st.caption("Các cửa sổ đã hoàn thành vẫn được giữ. Chạy tiếp chỉ xử lý phần còn thiếu.")
+        if st.button("Tiếp tục tạo script", type="primary", use_container_width=True):
+            _queue_video_job(source, config, worker_path, project_dir, "video_transcribe")
+            st.rerun()
+        return
+    if status in {"awaiting_translation_confirmation", "translation_partial"}:
+        pending = [cue for cue in cues if not str(cue.get("translation_vi") or "").strip()]
+        estimate = estimate_cue_translation_cost(pending, config.get("billing_tier", "free"))
+        rate = float(config.get("usd_to_jpy", 155) or 155)
+        if status == "translation_partial" and source.get("error"):
+            st.warning(source["error"])
+        st.info(f"Đã có script. {len(pending)}/{len(cues)} dòng chưa có bản dịch tiếng Việt.")
+        cols = st.columns(3)
+        cols[0].metric("Dòng cần dịch", len(pending))
+        cols[1].metric("Số batch", estimate.get("batch_count", 0))
+        cols[2].metric(
+            "Chi phí tương đương",
+            f"¥{float((estimate.get('expected') or {}).get('paid_equivalent_usd', 0)) * rate:,.2f}",
+        )
+        if st.button("Dịch các dòng còn thiếu", type="primary", use_container_width=True):
+            _queue_video_job(source, config, worker_path, project_dir, "video_translate")
             st.rerun()
         return
     if status == "awaiting_cost_confirmation":
@@ -408,13 +495,17 @@ def render_video_tab(
         analysis = selected_version.get("analysis") or {}
         if analysis:
             selected_segments = analysis.get("video_segments") or segments
-            _render_results(source, selected_segments, analysis, config)
+            _render_results(source, cues, selected_segments, analysis, config)
             if selected_segments is not segments:
                 segments = selected_segments
     elif status == "failed":
         st.error(source.get("error") or "Phân tích segment chưa hoàn tất.")
-        st.caption("Transcript vẫn được giữ nguyên. Bạn có thể chạy lại chỉ bước phân tích, không cần lấy transcript lần nữa.")
-        if segments and st.button("Chạy lại phân tích từ transcript hiện có", type="primary", use_container_width=True):
+        if source.get("source_kind") == "upload" and not cues:
+            st.caption("File video vẫn được giữ. Bạn có thể chạy lại bước tạo script từ cửa sổ đầu tiên.")
+            if st.button("Chạy lại tạo script", type="primary", use_container_width=True):
+                _queue_video_job(source, config, worker_path, project_dir, "video_transcribe")
+                st.rerun()
+        elif segments and st.button("Chạy lại phân tích từ transcript hiện có", type="primary", use_container_width=True):
             for segment in segments:
                 if segment.get("status") == "failed":
                     session_store.update_video_segment(segment["segment_id"], status="pending", error="")

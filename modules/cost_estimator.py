@@ -65,7 +65,10 @@ def estimate_video_plan_cost(
 ) -> dict[str, Any]:
     """Estimate the planned video pipeline before its output exists."""
     video_tokens = 0
-    if transcript_provider not in {"youtube_caption", "manual_caption"}:
+    audio_tokens = 0
+    if transcript_provider == "gemini_audio":
+        audio_tokens = int(max(0, duration_seconds) * 32)
+    elif transcript_provider not in {"youtube_caption", "manual_caption"}:
         video_tokens = int(max(0, duration_seconds) * (100 if media_resolution == "low" else 300))
     batch_input = max(0, transcript_tokens) * 2 + max(1, segment_count) * 350
     expected_batch_output = max(1, segment_count) * 1800
@@ -74,6 +77,11 @@ def estimate_video_plan_cost(
     expected_deep_output = max(0, hard_sentence_count) * 1200
     maximum_deep_output = max(0, hard_sentence_count) * 2000
     ingest = (
+        estimate_cost(
+            {"input_tokens": audio_tokens, "output_tokens": transcript_tokens},
+            "gemini-3.5-flash-lite", billing_tier, modality="audio",
+        )
+        if audio_tokens else
         estimate_cost(
             {"input_tokens": video_tokens, "output_tokens": transcript_tokens},
             "gemini-3.6-flash", billing_tier, modality="video",
@@ -108,6 +116,7 @@ def estimate_video_plan_cost(
         "batch_count": max(1, (segment_count + 3) // 4),
         "hard_sentence_count": hard_sentence_count,
         "video_input_tokens": video_tokens,
+        "audio_input_tokens": audio_tokens,
         "expected": expected,
         "maximum": maximum,
         "ingest": ingest,
@@ -150,6 +159,7 @@ def estimate_run_costs(
                 run.get("usage"),
                 str(run.get("model_used") or fallback_model),
                 billing_tier,
+                modality=str(run.get("modality") or "text"),
             )
             for run in unique_runs
         ]

@@ -7,11 +7,13 @@ import json
 import mimetypes
 from pathlib import Path
 import re
+import subprocess
+import tempfile
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import config as app_config
-from modules.cost_estimator import estimate_video_plan_cost
+from modules.cost_estimator import estimate_cost, estimate_video_plan_cost, PRICING_EFFECTIVE_DATE
 from modules.gemini_client import create_gemini_model
 from modules.sentence_analyzer import detect_sentence_language, split_sentences
 
@@ -34,7 +36,11 @@ def supported_video_model(model_name: str | None, fallback: str) -> str:
 GEMINI_MODEL_VIDEO_BATCH = supported_video_model(
     getattr(app_config, "GEMINI_MODEL_VIDEO_BATCH", None), "gemini-3.5-flash-lite"
 )
+GEMINI_MODEL_AUDIO = supported_video_model(
+    getattr(app_config, "GEMINI_MODEL_AUDIO", None), "gemini-3.5-flash-lite"
+)
 MAX_VIDEO_SIZE_MB = int(getattr(app_config, "MAX_VIDEO_SIZE_MB", 100))
+MAX_VIDEO_DURATION_SECONDS = int(getattr(app_config, "MAX_VIDEO_DURATION_SECONDS", 30 * 60))
 SUPPORTED_VIDEO_FORMATS = list(
     getattr(app_config, "SUPPORTED_VIDEO_FORMATS", ["mp4", "mov", "webm", "mpeg", "mpg", "avi"])
 )
@@ -84,23 +90,119 @@ def validate_video_upload(name: str, data: bytes, mime_type: str | None = None) 
     return {"suffix": suffix, "mime_type": mime, "size_bytes": len(data)}
 
 
+def probe_video_metadata(path: str) -> dict[str, Any]:
+    """Inspect media with ffprobe, with OpenCV as a duration-only fallback."""
+    try:
+        completed = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-show_entries",
+                "format=duration:stream=codec_type,codec_name", "-of", "json", path,
+            ],
+            check=True, capture_output=True, text=True, timeout=30,
+        )
+        payload = json.loads(completed.stdout or "{}")
+        streams = payload.get("streams") or []
+        duration = float((payload.get("format") or {}).get("duration") or 0)
+        return {
+            "duration_seconds": duration,
+            "has_audio": any(str(row.get("codec_type")) == "audio" for row in streams if isinstance(row, dict)),
+            "video_codec": next((str(row.get("codec_name") or "") for row in streams if row.get("codec_type") == "video"), ""),
+            "audio_codec": next((str(row.get("codec_name") or "") for row in streams if row.get("codec_type") == "audio"), ""),
+        }
+    except Exception:
+        duration = 0.0
+        try:
+            import cv2
+
+            capture = cv2.VideoCapture(path)
+            fps = float(capture.get(cv2.CAP_PROP_FPS) or 0)
+            frames = float(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            duration = frames / fps if fps > 0 else 0
+            capture.release()
+        except Exception:
+            pass
+        return {"duration_seconds": duration, "has_audio": None, "video_codec": "", "audio_codec": ""}
+
+
 def probe_video_duration(path: str) -> float:
     """Read duration locally without loading the video into SQLite."""
-    try:
-        import cv2
+    return float(probe_video_metadata(path).get("duration_seconds") or 0)
 
-        capture = cv2.VideoCapture(path)
-        fps = float(capture.get(cv2.CAP_PROP_FPS) or 0)
-        frames = float(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        capture.release()
-        duration = frames / fps if fps > 0 else 0
-    except Exception:
-        duration = 0
-    return duration
+
+def validate_video_duration(metadata: dict[str, Any]) -> None:
+    duration = float(metadata.get("duration_seconds") or 0)
+    if duration <= 0:
+        raise ValueError("Không đọc được thời lượng video.")
+    if duration > MAX_VIDEO_DURATION_SECONDS:
+        raise ValueError("Video vượt quá giới hạn 30 phút.")
+    if metadata.get("has_audio") is False:
+        raise ValueError("Video không có track âm thanh để tạo script.")
+
+
+def build_audio_windows(
+    duration_seconds: float, window_seconds: float = 300, overlap_seconds: float = 2,
+) -> list[dict]:
+    """Return stable five-minute windows while retaining a short boundary overlap."""
+    duration = max(0.0, float(duration_seconds or 0))
+    if not duration:
+        return []
+    step = max(1.0, window_seconds - overlap_seconds)
+    windows = []
+    start = 0.0
+    index = 1
+    while start < duration:
+        end = min(duration, start + window_seconds)
+        windows.append({"index": index, "start": start, "end": end})
+        if end >= duration:
+            break
+        start += step
+        index += 1
+    return windows
+
+
+def extract_audio_window(video_path: str, output_path: str, start: float, end: float) -> None:
+    """Create a compact mono speech track without modifying the uploaded video."""
+    duration = max(0.1, float(end) - float(start))
+    try:
+        subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                "-ss", f"{float(start):.3f}", "-i", video_path, "-t", f"{duration:.3f}",
+                "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k", output_path,
+            ],
+            check=True, capture_output=True, timeout=max(60, int(duration * 2)),
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("Máy chủ chưa cài FFmpeg để tách audio.") from exc
+    except subprocess.CalledProcessError as exc:
+        message = (exc.stderr or b"").decode("utf-8", errors="ignore").strip()
+        raise RuntimeError(f"Không thể tách audio khỏi video: {message or 'FFmpeg thất bại'}") from exc
+
+
+def estimate_audio_transcription_cost(duration_seconds: float, billing_tier: str = "paid") -> dict[str, Any]:
+    """Estimate one aligned source+Vietnamese transcript before any API call."""
+    duration = max(0.0, float(duration_seconds or 0))
+    input_tokens = int(duration * 32)
+    expected_output = max(500, int(duration * 5))
+    maximum_output = max(1000, int(duration * 8))
+    return {
+        "model": GEMINI_MODEL_AUDIO,
+        "input_tokens": input_tokens,
+        "window_count": len(build_audio_windows(duration)),
+        "expected": estimate_cost(
+            {"input_tokens": input_tokens, "output_tokens": expected_output},
+            GEMINI_MODEL_AUDIO, billing_tier, modality="audio",
+        ),
+        "maximum": estimate_cost(
+            {"input_tokens": input_tokens, "output_tokens": maximum_output},
+            GEMINI_MODEL_AUDIO, billing_tier, modality="audio",
+        ),
+        "pricing_effective_date": PRICING_EFFECTIVE_DATE,
+    }
 
 
 def fetch_youtube_caption(video_id: str, preferred_language: str = "unknown") -> tuple[list[dict], str]:
-    """Fetch the best original caption track, raising so callers can fall back."""
+    """Fetch source captions and attach a free Vietnamese track when available."""
     from youtube_transcript_api import YouTubeTranscriptApi
 
     api = YouTubeTranscriptApi()
@@ -113,13 +215,24 @@ def fetch_youtube_caption(video_id: str, preferred_language: str = "unknown") ->
     elif preferred_language == "japanese":
         preferred_codes = ["ja", "en"]
 
+    def language_rank(code: str) -> int:
+        normalized = code.lower().split("-", 1)[0]
+        return preferred_codes.index(normalized) if normalized in preferred_codes else len(preferred_codes)
+
     def rank(track: Any) -> tuple[int, int]:
         code = str(getattr(track, "language_code", ""))
-        preferred = preferred_codes.index(code) if code in preferred_codes else len(preferred_codes)
+        preferred = language_rank(code)
         generated = 1 if bool(getattr(track, "is_generated", False)) else 0
         return preferred, generated
 
-    track = sorted(tracks, key=rank)[0]
+    source_tracks = [track for track in tracks if str(getattr(track, "language_code", "")).lower().split("-", 1)[0] in {"ja", "en"}]
+    if not source_tracks:
+        raise RuntimeError("Video không có caption tiếng Nhật hoặc tiếng Anh công khai.")
+    track = sorted(source_tracks, key=rank)[0]
+    source_code = str(getattr(track, "language_code", "")).lower().split("-", 1)[0]
+    source_language = "japanese" if source_code == "ja" else "english"
+    provider = "youtube_caption_auto" if bool(getattr(track, "is_generated", False)) else "youtube_caption"
+
     rows = []
     for snippet in track.fetch():
         text = str(getattr(snippet, "text", "") or "").strip()
@@ -127,10 +240,52 @@ def fetch_youtube_caption(video_id: str, preferred_language: str = "unknown") ->
             continue
         start = float(getattr(snippet, "start", 0) or 0)
         duration = float(getattr(snippet, "duration", 0) or 0)
-        rows.append({"start": start, "end": start + duration, "text": text, "speaker": ""})
+        rows.append({
+            "start": start, "end": start + duration, "text": text, "speaker": "",
+            "language": source_language, "transcript_provider": provider,
+        })
     if not rows:
         raise RuntimeError("Caption không chứa nội dung đọc được.")
-    provider = "youtube_caption_auto" if bool(getattr(track, "is_generated", False)) else "youtube_caption"
+
+    translated_track = next(
+        (
+            candidate for candidate in tracks
+            if str(getattr(candidate, "language_code", "")).lower().split("-", 1)[0] == "vi"
+        ),
+        None,
+    )
+    translation_provider = "youtube_caption_vi" if translated_track is not None else ""
+    if translated_track is None and bool(getattr(track, "is_translatable", False)):
+        available = {
+            str(row.get("language_code") if isinstance(row, dict) else getattr(row, "language_code", ""))
+            for row in (getattr(track, "translation_languages", None) or [])
+        }
+        if not available or "vi" in available:
+            try:
+                translated_track = track.translate("vi")
+                translation_provider = "youtube_auto_translate_vi"
+            except Exception:
+                translated_track = None
+
+    if translated_track is not None:
+        try:
+            translated = []
+            for snippet in translated_track.fetch():
+                text = str(getattr(snippet, "text", "") or "").strip()
+                if not text:
+                    continue
+                start = float(getattr(snippet, "start", 0) or 0)
+                translated.append({"start": start, "text": text})
+            for index, row in enumerate(rows):
+                nearest = min(translated, key=lambda item: abs(item["start"] - row["start"])) if translated else None
+                if nearest and abs(nearest["start"] - row["start"]) <= 2:
+                    row["translation_vi"] = nearest["text"]
+                    row["translation_provider"] = translation_provider
+                elif index < len(translated):
+                    row["translation_vi"] = translated[index]["text"]
+                    row["translation_provider"] = translation_provider
+        except Exception:
+            pass
     return rows, provider
 
 
@@ -282,10 +437,157 @@ def transcribe_with_gemini(source: dict) -> tuple[list[dict], dict]:
     return rows, usage
 
 
+def transcribe_audio_window(source: dict, window: dict, temp_dir: str | None = None) -> tuple[list[dict], dict]:
+    """Transcribe one uploaded-video audio window and translate each cue to Vietnamese."""
+    local_path = str(source.get("local_path") or "")
+    if not local_path or not Path(local_path).exists():
+        raise ValueError("File video tạm không còn tồn tại. Hãy tải lại video.")
+    start = float(window.get("start", 0) or 0)
+    end = float(window.get("end", start) or start)
+    temp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False, dir=temp_dir)
+    audio_path = temp.name
+    temp.close()
+    model = create_gemini_model(GEMINI_MODEL_AUDIO, GEMINI_API_KEY)
+    uploaded_name = ""
+    try:
+        extract_audio_window(local_path, audio_path, start, end)
+        uploaded = model.upload_file(audio_path, "audio/mp3")
+        uploaded_name = str(getattr(uploaded, "name", "") or "")
+        uploaded = model.wait_for_file(uploaded_name)
+        uploaded_uri = str(getattr(uploaded, "uri", "") or "")
+        prompt = """Bạn là hệ thống chép lời song ngữ Nhật-Anh.
+Chép chính xác toàn bộ lời nói trong audio, không sửa nguyên văn và không bỏ từ.
+Tự nhận diện từng dòng là japanese hoặc english. Dịch từng dòng sang tiếng Việt tự nhiên.
+Timestamp start/end tính bằng giây từ đầu file audio nhỏ này, không dùng timestamp tuyệt đối của video.
+Giữ dòng ngắn theo lượt nói/caption, không gộp thành đoạn dài. Speaker để rỗng nếu không chắc chắn.
+Trả duy nhất JSON object dạng:
+{"cues":[{"start":0.0,"end":2.0,"speaker":"","language":"japanese|english","text":"","translation_vi":""}],"warnings":[]}.
+"""
+        response = model.create_interaction([
+            {"type": "text", "text": prompt},
+            {"type": "audio", "uri": uploaded_uri, "mime_type": "audio/mp3"},
+        ])
+        payload = _parse_json(_response_text(response))
+        rows = []
+        for raw in _as_record_list(payload.get("cues"), "text"):
+            text = str(raw.get("text") or raw.get("source_text") or "").strip()
+            if not text:
+                continue
+            relative_start = max(0.0, float(raw.get("start", 0) or 0))
+            relative_end = max(relative_start, float(raw.get("end", relative_start) or relative_start))
+            language = str(raw.get("language") or "unknown").lower()
+            if language not in {"japanese", "english"}:
+                language, _, _ = detect_sentence_language(text, "english")
+            rows.append({
+                "start": start + relative_start, "end": min(end, start + relative_end),
+                "speaker": str(raw.get("speaker") or ""), "language": language,
+                "text": text,
+                "translation_vi": str(raw.get("translation_vi") or raw.get("translation") or "").strip(),
+                "transcript_provider": "gemini_audio",
+                "translation_provider": "gemini_audio",
+            })
+        normalized = normalize_transcript(rows)
+        if not normalized:
+            raise ValueError("Gemini không nhận diện được lời nói trong cửa sổ audio này.")
+        usage = response_usage(response)
+        usage.update({
+            "model_used": GEMINI_MODEL_AUDIO,
+            "window_index": int(window.get("index", 0) or 0),
+            "window_start": start, "window_end": end,
+            "warnings": _as_text_list(payload.get("warnings")),
+        })
+        return normalized, usage
+    finally:
+        if uploaded_name:
+            try:
+                model.delete_file(uploaded_name)
+            except Exception:
+                pass
+        Path(audio_path).unlink(missing_ok=True)
+
+
+def build_cue_translation_batches(
+    cues: list[dict], max_cues: int = 80, max_chars: int = 5000,
+) -> list[list[dict]]:
+    batches: list[list[dict]] = []
+    current: list[dict] = []
+    chars = 0
+    language = ""
+    for cue in cues:
+        cue_language = "japanese" if cue.get("language") == "japanese" else "english"
+        length = len(str(cue.get("source_text") or ""))
+        if current and (cue_language != language or len(current) >= max_cues or chars + length > max_chars):
+            batches.append(current)
+            current, chars = [], 0
+        current.append(cue)
+        chars += length
+        language = cue_language
+    if current:
+        batches.append(current)
+    return batches
+
+
+def estimate_cue_translation_cost(cues: list[dict], billing_tier: str = "paid") -> dict[str, Any]:
+    chars = sum(len(str(cue.get("source_text") or "")) for cue in cues)
+    input_tokens = max(1, chars // 3) + len(cues) * 12
+    output_tokens = max(1, chars // 2) + len(cues) * 8
+    return {
+        "model": GEMINI_MODEL_VIDEO_BATCH,
+        "batch_count": len(build_cue_translation_batches(cues)),
+        "expected": estimate_cost(
+            {"input_tokens": input_tokens, "output_tokens": output_tokens},
+            GEMINI_MODEL_VIDEO_BATCH, billing_tier,
+        ),
+        "pricing_effective_date": PRICING_EFFECTIVE_DATE,
+    }
+
+
+def translate_video_cue_batch(cues: list[dict]) -> tuple[dict[str, str], dict]:
+    """Translate source-aligned caption rows without changing their boundaries."""
+    if not cues:
+        return {}, {}
+    requested = [
+        {
+            "cue_id": cue.get("cue_id"), "speaker": cue.get("speaker", ""),
+            "language": cue.get("language", "unknown"), "text": cue.get("source_text", ""),
+        }
+        for cue in cues
+    ]
+    model = create_gemini_model(GEMINI_MODEL_VIDEO_BATCH, GEMINI_API_KEY)
+    prompt = f"""Dịch từng caption Nhật hoặc Anh sau sang tiếng Việt tự nhiên.
+Các caption có thể là mảnh câu; dùng toàn bộ batch làm ngữ cảnh nhưng không gộp, tách, sửa hay đổi thứ tự cue.
+Giữ đúng cue_id. Trả duy nhất JSON object dạng {{"translations":[{{"cue_id":"...","translation_vi":"..."}}]}}.
+{json.dumps(requested, ensure_ascii=False)}
+"""
+    input_tokens = model.count_tokens(prompt)
+    response = model.generate_content(
+        prompt, {"response_mime_type": "application/json", "max_output_tokens": 6000}
+    )
+    payload = _parse_json(_response_text(response))
+    translated = {
+        str(row.get("cue_id")): str(row.get("translation_vi") or row.get("translation") or "").strip()
+        for row in _as_record_list(payload.get("translations"), "translation_vi")
+        if row.get("cue_id") and str(row.get("translation_vi") or row.get("translation") or "").strip()
+    }
+    missing = [str(cue.get("cue_id")) for cue in cues if str(cue.get("cue_id")) not in translated]
+    if missing:
+        raise ValueError(f"Gemini bỏ sót {len(missing)} dòng caption khi dịch.")
+    usage = response_usage(response)
+    usage["input_tokens"] = usage.get("input_tokens") or input_tokens
+    usage["model_used"] = GEMINI_MODEL_VIDEO_BATCH
+    return translated, usage
+
+
 def analyze_video_visual_segment(source: dict, segment: dict) -> tuple[dict, dict]:
     """On-demand visual explanation for one timestamp range."""
     model = create_gemini_model(GEMINI_MODEL_VIDEO, GEMINI_API_KEY)
     uri = source.get("source_url") or (source.get("ingest_usage") or {}).get("gemini_file_uri")
+    uploaded_name = ""
+    if not uri and source.get("local_path") and Path(str(source["local_path"])).exists():
+        uploaded = model.upload_file(str(source["local_path"]), source.get("mime_type") or "video/mp4")
+        uploaded_name = str(getattr(uploaded, "name", "") or "")
+        uploaded = model.wait_for_file(uploaded_name)
+        uri = str(getattr(uploaded, "uri", "") or "")
     if not uri:
         raise ValueError("Nguồn video tạm đã hết hạn; hãy tải lại file để phân tích hình ảnh.")
     prompt = (
@@ -294,14 +596,21 @@ def analyze_video_visual_segment(source: dict, segment: dict) -> tuple[dict, dic
         "onscreen text, gestures, or speaker changes help understand the transcript. Return JSON only with "
         "{summary:string, visual_cues:[{timestamp,description,learning_value}], onscreen_text:[string], warnings:[string]}."
     )
-    response = model.create_interaction([
-        {"type": "text", "text": prompt},
-        {"type": "video", "uri": uri, "mime_type": source.get("mime_type") or "video/mp4", "resolution": "low"},
-    ])
-    result = _parse_json(_response_text(response))
-    usage = response_usage(response)
-    usage["model_used"] = GEMINI_MODEL_VIDEO
-    return result, usage
+    try:
+        response = model.create_interaction([
+            {"type": "text", "text": prompt},
+            {"type": "video", "uri": uri, "mime_type": source.get("mime_type") or "video/mp4", "resolution": "low"},
+        ])
+        result = _parse_json(_response_text(response))
+        usage = response_usage(response)
+        usage["model_used"] = GEMINI_MODEL_VIDEO
+        return result, usage
+    finally:
+        if uploaded_name:
+            try:
+                model.delete_file(uploaded_name)
+            except Exception:
+                pass
 
 
 def normalize_transcript(rows: list[Any]) -> list[dict]:
@@ -317,11 +626,85 @@ def normalize_transcript(rows: list[Any]) -> list[dict]:
             continue
         start = max(0.0, float(row.get("start", 0) or 0))
         end = float(row.get("end", start + float(row.get("duration", 0) or 0)) or start)
+        language = str(row.get("language") or "unknown")
+        if language not in {"japanese", "english"}:
+            language, _, _ = detect_sentence_language(text, "english")
         result.append({
             "start": start, "end": max(start, end), "text": text,
-            "speaker": str(row.get("speaker") or ""),
+            "speaker": str(row.get("speaker") or ""), "language": language,
+            "translation_vi": str(row.get("translation_vi") or "").strip(),
+            "transcript_provider": str(row.get("transcript_provider") or ""),
+            "translation_provider": str(row.get("translation_provider") or ""),
+            "warning": str(row.get("warning") or ""),
         })
     return sorted(result, key=lambda row: (row["start"], row["end"]))
+
+
+def transcript_rows_to_cues(rows: list[dict], source_id: str, provider: str = "") -> list[dict]:
+    """Convert external caption/ASR rows into stable UI and persistence records."""
+    cues = []
+    for ordinal, row in enumerate(normalize_transcript(rows), 1):
+        value = "|".join((
+            source_id, str(ordinal), f"{row['start']:.3f}", f"{row['end']:.3f}", row["text"],
+        ))
+        translation = str(row.get("translation_vi") or "")
+        cues.append({
+            "cue_id": hashlib.sha256(value.encode("utf-8")).hexdigest()[:24],
+            "ordinal": ordinal, "start_seconds": row["start"], "end_seconds": row["end"],
+            "speaker": row.get("speaker") or "", "language": row.get("language") or "unknown",
+            "source_text": row["text"], "translation_vi": translation,
+            "transcript_provider": row.get("transcript_provider") or provider,
+            "translation_provider": row.get("translation_provider") or "",
+            "status": "translated" if translation else "translation_pending",
+            "warning": row.get("warning") or "",
+        })
+    return cues
+
+
+def cues_to_transcript_rows(cues: list[dict]) -> list[dict]:
+    return normalize_transcript([
+        {
+            "start": cue.get("start_seconds", 0), "end": cue.get("end_seconds", 0),
+            "text": cue.get("source_text", ""), "speaker": cue.get("speaker", ""),
+            "language": cue.get("language", "unknown"),
+            "translation_vi": cue.get("translation_vi", ""),
+            "transcript_provider": cue.get("transcript_provider", ""),
+            "translation_provider": cue.get("translation_provider", ""),
+            "warning": cue.get("warning", ""),
+        }
+        for cue in cues if isinstance(cue, dict)
+    ])
+
+
+def merge_transcript_cues(existing: list[dict], incoming: list[dict]) -> list[dict]:
+    """Merge overlapping ASR windows without dropping distinct neighboring speech."""
+    merged = [dict(row) for row in existing if isinstance(row, dict)]
+    for candidate in incoming:
+        if not isinstance(candidate, dict) or not str(candidate.get("source_text") or "").strip():
+            continue
+        normalized = re.sub(r"[\s,.!?。、！？]+", "", str(candidate.get("source_text") or "").lower())
+        duplicate = next(
+            (
+                row for row in merged
+                if normalized
+                and normalized == re.sub(r"[\s,.!?。、！？]+", "", str(row.get("source_text") or "").lower())
+                and abs(float(row.get("start_seconds", 0)) - float(candidate.get("start_seconds", 0))) <= 3
+            ),
+            None,
+        )
+        if duplicate:
+            if not duplicate.get("translation_vi") and candidate.get("translation_vi"):
+                duplicate["translation_vi"] = candidate["translation_vi"]
+                duplicate["translation_provider"] = candidate.get("translation_provider", "gemini_audio")
+            duplicate["end_seconds"] = max(
+                float(duplicate.get("end_seconds", 0)), float(candidate.get("end_seconds", 0))
+            )
+            continue
+        merged.append(dict(candidate))
+    merged.sort(key=lambda row: (float(row.get("start_seconds", 0)), float(row.get("end_seconds", 0))))
+    for ordinal, row in enumerate(merged, 1):
+        row["ordinal"] = ordinal
+    return merged
 
 
 def clean_transcript(rows: list[dict]) -> tuple[list[dict], list[str]]:
@@ -498,6 +881,20 @@ def video_analysis_markdown(source: dict, segments: list[dict]) -> str:
     lines = [f"# {metadata.get('title') or source.get('file_name') or 'Phân tích video'}", ""]
     if source.get("source_url"):
         lines.append(f"Nguồn: {source['source_url']}")
+    cues = source.get("video_cues") or transcript_rows_to_cues(
+        source.get("clean_transcript") or [], str(source.get("source_id") or "video"),
+        str(source.get("transcript_provider") or ""),
+    )
+    if cues:
+        lines.extend([
+            "", "## Script và bản dịch đồng bộ", "",
+            "| Thời gian | Nguyên văn | Bản dịch tiếng Việt |",
+            "|---|---|---|",
+        ])
+        for cue in cues:
+            original = str(cue.get("source_text") or "").replace("|", "\\|").replace("\n", " ")
+            translation = str(cue.get("translation_vi") or "").replace("|", "\\|").replace("\n", " ")
+            lines.append(f"| {format_timestamp(cue.get('start_seconds', 0))} | {original} | {translation} |")
     lines.extend(["", "## Mục lục video", ""])
     for segment in segments:
         lines.append(
@@ -550,15 +947,26 @@ def build_video_analysis(source: dict, segments: list[dict]) -> dict:
         {**segment, "analysis": normalize_video_segment_result(segment.get("analysis"))}
         for segment in segments if _as_mapping(segment.get("analysis"))
     ]
+    video_cues = source.get("video_cues") or transcript_rows_to_cues(
+        source.get("clean_transcript") or [], str(source.get("source_id") or "video"),
+        str(source.get("transcript_provider") or ""),
+    )
     usage_runs = []
     ingest_usage = source.get("ingest_usage") or {}
-    if ingest_usage and sum(int(ingest_usage.get(key, 0) or 0) for key in ("input_tokens", "output_tokens")):
+    ingest_runs = [run for run in ingest_usage.get("runs") or [] if isinstance(run, dict)]
+    if ingest_runs:
+        for run in ingest_runs:
+            usage_runs.append({**run, "stage": "video_transcription"})
+    elif ingest_usage and sum(int(ingest_usage.get(key, 0) or 0) for key in ("input_tokens", "output_tokens")):
         usage_runs.append({
             "run_id": f"{source.get('source_id')}:ingest",
             "model_used": ingest_usage.get("model_used") or GEMINI_MODEL_VIDEO,
             "usage": ingest_usage,
             "stage": "video_ingest",
         })
+    for run in source.get("translation_runs") or []:
+        if isinstance(run, dict):
+            usage_runs.append({**run, "stage": "caption_translation"})
     for segment in completed:
         usage = segment.get("usage") or {}
         bulk_usage = {key: value for key, value in usage.items() if key != "deep_sentence_usage"}
@@ -588,9 +996,25 @@ def build_video_analysis(source: dict, segments: list[dict]) -> dict:
     page_analyses = []
     for fallback_index, segment in enumerate(completed, 1):
         row = normalize_video_segment_result(segment.get("analysis"))
-        catalog = split_sentences(
-            str(segment.get("clean_text") or ""), str(segment.get("language") or "english"), fallback_index
-        )
+        segment_cues = [
+            cue for cue in video_cues
+            if float(cue.get("end_seconds", 0) or 0) >= float(segment.get("start_seconds", 0) or 0)
+            and float(cue.get("start_seconds", 0) or 0) <= float(segment.get("end_seconds", 0) or 0)
+        ]
+        catalog = [
+            {
+                "sentence_id": cue.get("cue_id") or f"p{fallback_index}-s{index}",
+                "ordinal": index, "original": cue.get("source_text") or "",
+                "detected_language": cue.get("language") or segment.get("language") or "unknown",
+                "language_confidence": 1.0, "language_source": "video_cue",
+                "video_start_seconds": cue.get("start_seconds", 0),
+            }
+            for index, cue in enumerate(segment_cues, 1)
+        ]
+        if not catalog:
+            catalog = split_sentences(
+                str(segment.get("clean_text") or ""), str(segment.get("language") or "english"), fallback_index
+            )
         timestamp_url = ""
         if source.get("source_url"):
             timestamp_url = f"{source['source_url']}&t={int(segment.get('start_seconds', 0) or 0)}s"
@@ -598,6 +1022,10 @@ def build_video_analysis(source: dict, segments: list[dict]) -> dict:
         guidance = []
         for sentence in catalog:
             original = str(sentence.get("original") or "")
+            matched_cue = next(
+                (cue for cue in segment_cues if str(cue.get("cue_id")) == str(sentence.get("sentence_id"))),
+                {},
+            )
             matched_turn = next(
                 (
                     turn for turn in turns
@@ -609,19 +1037,24 @@ def build_video_analysis(source: dict, segments: list[dict]) -> dict:
                 ),
                 {},
             )
-            sentence["timestamp_url"] = timestamp_url
-            sentence["video_start_seconds"] = segment.get("start_seconds", 0)
+            sentence_start = float(matched_cue.get("start_seconds", segment.get("start_seconds", 0)) or 0)
+            sentence_url = (
+                f"{source['source_url']}&t={int(sentence_start)}s" if source.get("source_url") else ""
+            )
+            sentence["timestamp_url"] = sentence_url
+            sentence["video_start_seconds"] = sentence_start
             guidance.append({
                 "sentence_id": sentence.get("sentence_id"),
                 "original": original,
                 "detected_language": sentence.get("detected_language") or segment.get("language"),
                 "translations": {
-                    "natural": matched_turn.get("translation_vi") or (
+                    "natural": matched_cue.get("translation_vi") or matched_turn.get("translation_vi") or (
                         row.get("natural_translation") if len(catalog) == 1 else ""
                     )
                 },
                 "key_points": row.get("key_points") or [],
-                "timestamp_url": timestamp_url,
+                "timestamp_url": sentence_url,
+                "video_start_seconds": sentence_start,
             })
         breakdown = dict(row.get("sentence_breakdown") or {})
         if breakdown:
@@ -659,6 +1092,7 @@ def build_video_analysis(source: dict, segments: list[dict]) -> dict:
         "video_source": {key: source.get(key) for key in ("source_id", "source_kind", "source_url", "video_id", "file_name", "duration_seconds", "transcript_provider", "transcript_hash")},
         "video_metadata": source.get("metadata") or {},
         "transcript_clean": source.get("clean_transcript") or [],
+        "video_cues": video_cues,
         "transcript_warnings": source.get("transcript_warnings") or [],
         "video_segments": completed,
         "page_analyses": page_analyses,
@@ -666,5 +1100,5 @@ def build_video_analysis(source: dict, segments: list[dict]) -> dict:
         "video_analysis_runs": usage_runs,
         "model_used": GEMINI_MODEL_VIDEO_BATCH,
     }
-    analysis["full_markdown"] = video_analysis_markdown(source, completed)
+    analysis["full_markdown"] = video_analysis_markdown({**source, "video_cues": video_cues}, completed)
     return analysis

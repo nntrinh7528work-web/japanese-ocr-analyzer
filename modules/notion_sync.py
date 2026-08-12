@@ -1515,6 +1515,11 @@ def build_notion_sync_payload(
         else "Một phần"
     )
     names = [str(item.get("name") or "") for item in items if item.get("name")]
+    if analysis.get("analysis_type") == "video":
+        video_title = str((analysis.get("video_metadata") or {}).get("title") or "").strip()
+        video_file = str((analysis.get("video_source") or {}).get("file_name") or "").strip()
+        if video_title or video_file:
+            names = [video_title or video_file]
     first_name = names[0].rsplit(".", 1)[0] if names else "Bài phân tích"
     title = first_name if len(names) <= 1 else f"{first_name} và {len(names) - 1} trang khác"
     summary = str(analysis.get("summary") or "").strip()

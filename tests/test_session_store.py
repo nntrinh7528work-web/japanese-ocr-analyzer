@@ -68,6 +68,13 @@ class TestVideoDocuments:
             transcript_hash="hash", transcript_provider="youtube_caption",
             status="awaiting_cost_confirmation",
         )
+        cues = session_store.ensure_video_cues(session_store.get_video_source(source["source_id"]))
+        assert cues[0]["source_text"] == "Hello"
+        assert cues[0]["status"] == "translation_pending"
+        session_store.update_video_cue(
+            cues[0]["cue_id"], translation_vi="Xin chào",
+            translation_provider="gemini_translation", status="translated",
+        )
         session_store.replace_video_segments(source["source_id"], [{
             "segment_id": "seg-1", "start_seconds": 0, "end_seconds": 2,
             "title": "Intro", "language": "english", "original_text": "Hello", "clean_text": "Hello",
@@ -81,6 +88,7 @@ class TestVideoDocuments:
         assert workspace["document_type"] == "video"
         assert workspace["video_source"]["transcript_hash"] == "hash"
         assert workspace["video_segments"][0]["analysis"]["summary"] == "Mở đầu"
+        assert workspace["video_cues"][0]["translation_vi"] == "Xin chào"
         listed = session_store.list_documents("video01")
         assert listed[0]["video_count"] == 1
 

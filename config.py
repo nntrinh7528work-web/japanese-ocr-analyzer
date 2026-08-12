@@ -49,12 +49,13 @@ MAX_IMAGE_SIZE_MB = 20
 MAX_PDF_SIZE_MB = 50
 MAX_PDF_PAGES = 60
 MAX_VIDEO_SIZE_MB = 100
-MAX_VIDEO_DURATION_SECONDS = 60 * 60
+MAX_VIDEO_DURATION_SECONDS = 30 * 60
 SUPPORTED_VIDEO_FORMATS = ["mp4", "mov", "webm", "mpeg", "mpg", "avi"]
 GEMINI_MODEL_VIDEO = _get_streamlit_secret("GEMINI_MODEL_VIDEO") or os.getenv("GEMINI_MODEL_VIDEO") or "gemini-3.6-flash"
 # Gemini 2.5 Flash-Lite is no longer available to new Gemini API users.
 # Keep this separate from the regular text model because video segments favor
 # low-cost, high-throughput structured extraction.
 GEMINI_MODEL_VIDEO_BATCH = _get_streamlit_secret("GEMINI_MODEL_VIDEO_BATCH") or os.getenv("GEMINI_MODEL_VIDEO_BATCH") or "gemini-3.5-flash-lite"
+GEMINI_MODEL_AUDIO = _get_streamlit_secret("GEMINI_MODEL_AUDIO") or os.getenv("GEMINI_MODEL_AUDIO") or "gemini-3.5-flash-lite"
 SUPPORTED_FORMATS = ["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff"]
 SUPPORTED_UPLOAD_FORMATS = [*SUPPORTED_FORMATS, "pdf"]

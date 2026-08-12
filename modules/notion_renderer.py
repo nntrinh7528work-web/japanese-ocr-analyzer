@@ -284,6 +284,17 @@ def _key_point_text(point: Any) -> str:
     return _plain(point)
 
 
+def _language_label(language: Any) -> str:
+    value = str(language or "").lower()
+    if value == "japanese":
+        return "Tiếng Nhật"
+    if value == "english":
+        return "Tiếng Anh"
+    if value == "mixed":
+        return "Nhật - Anh"
+    return "Tự nhận diện"
+
+
 def _render_sentence_cards(page: dict[str, Any], page_path: str, coverage: _Coverage) -> list[str]:
     catalog = {str(row.get("sentence_id") or ""): row for row in page.get("sentence_catalog") or []}
     guidance = {str(row.get("sentence_id") or ""): row for row in page.get("translation_guidance") or []}
@@ -306,6 +317,9 @@ def _render_sentence_cards(page: dict[str, Any], page_path: str, coverage: _Cove
             lines.append(f"**Hiragana / Cách đọc:** {_plain(reading)}")
         if natural:
             lines.append(f"**Dịch tự nhiên:** {_plain(natural)}")
+        timestamp_url = guide.get("timestamp_url") or cat.get("timestamp_url") or deep.get("timestamp_url")
+        if timestamp_url:
+            lines.append(f"[Mở video tại câu này]({_escape(timestamp_url)})")
         key_points = guide.get("key_points") or []
         if key_points:
             lines.append("**Điểm mấu chốt:**")
@@ -372,7 +386,7 @@ def render_notion_lesson_markdown(
         _callout(
             "\n".join(
                 [
-                    f"**Ngôn ngữ:** {'Tiếng Nhật' if metadata.get('language') == 'japanese' else 'Tiếng Anh'}",
+                    f"**Ngôn ngữ:** {_language_label(metadata.get('language'))}",
                     f"**Nguồn:** {_plain(', '.join(metadata.get('source_names') or []) or 'Không rõ')}",
                     f"**Số trang:** {metadata.get('analyzed_page_count', 0)}/{metadata.get('page_count', 0)}",
                     f"**Trạng thái:** {_plain(metadata.get('sync_status') or 'Hoàn tất')}",

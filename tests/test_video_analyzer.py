@@ -3,18 +3,25 @@ from __future__ import annotations
 import pytest
 
 from modules.video_analyzer import (
+    build_audio_windows,
     build_cost_estimate,
+    build_cue_translation_batches,
     build_segment_batches,
     build_segments,
     build_video_analysis,
     clean_transcript,
+    cues_to_transcript_rows,
+    estimate_audio_transcription_cost,
+    merge_transcript_cues,
     normalize_transcript,
     parse_youtube_url,
+    transcript_rows_to_cues,
     transcript_hash,
     supported_video_model,
     validate_video_upload,
+    validate_video_duration,
 )
-from modules.notion_sync import extract_notion_entities
+from modules.notion_sync import build_notion_sync_payload, extract_notion_entities
 
 
 @pytest.mark.parametrize(
@@ -60,6 +67,65 @@ def test_transcript_normalization_segmentation_and_stable_hash():
     segments = build_segments(rows)
     assert [row["ordinal"] if "ordinal" in row else index for index, row in enumerate(segments, 1)] == [1, 2]
     assert [row["language"] for row in segments] == ["japanese", "english"]
+
+
+def test_audio_windows_overlap_without_exceeding_duration():
+    windows = build_audio_windows(601)
+    assert windows == [
+        {"index": 1, "start": 0.0, "end": 300.0},
+        {"index": 2, "start": 298.0, "end": 598.0},
+        {"index": 3, "start": 596.0, "end": 601.0},
+    ]
+
+
+def test_video_duration_rejects_long_or_silent_uploads():
+    validate_video_duration({"duration_seconds": 1800, "has_audio": True})
+    with pytest.raises(ValueError, match="30 phút"):
+        validate_video_duration({"duration_seconds": 1801, "has_audio": True})
+    with pytest.raises(ValueError, match="âm thanh"):
+        validate_video_duration({"duration_seconds": 10, "has_audio": False})
+
+
+def test_cues_round_trip_language_translation_and_stable_order():
+    rows = normalize_transcript([
+        {"start": 0, "end": 2, "text": "今日は", "language": "japanese", "translation_vi": "Hôm nay"},
+        {"start": 2, "end": 4, "text": "we study", "language": "english", "translation_vi": "chúng ta học"},
+    ])
+    cues = transcript_rows_to_cues(rows, "source", "gemini_audio")
+    assert [cue["language"] for cue in cues] == ["japanese", "english"]
+    assert all(cue["status"] == "translated" for cue in cues)
+    restored = cues_to_transcript_rows(cues)
+    assert [row["translation_vi"] for row in restored] == ["Hôm nay", "chúng ta học"]
+
+
+def test_overlapping_audio_cues_are_deduplicated_but_keep_translation():
+    existing = [{
+        "cue_id": "one", "start_seconds": 297, "end_seconds": 299,
+        "source_text": "Hello world", "translation_vi": "", "language": "english",
+    }]
+    incoming = [{
+        "cue_id": "two", "start_seconds": 298, "end_seconds": 300,
+        "source_text": "Hello world", "translation_vi": "Xin chào", "language": "english",
+    }]
+    merged = merge_transcript_cues(existing, incoming)
+    assert len(merged) == 1
+    assert merged[0]["translation_vi"] == "Xin chào"
+    assert merged[0]["end_seconds"] == 300
+
+
+def test_translation_batches_split_on_language_and_limits():
+    cues = [
+        {"cue_id": "ja", "language": "japanese", "source_text": "あ" * 100},
+        {"cue_id": "en", "language": "english", "source_text": "hello"},
+    ]
+    assert [[row["cue_id"] for row in batch] for batch in build_cue_translation_batches(cues)] == [["ja"], ["en"]]
+
+
+def test_audio_transcription_estimate_uses_32_tokens_per_second():
+    estimate = estimate_audio_transcription_cost(600, "paid")
+    assert estimate["input_tokens"] == 19_200
+    assert estimate["window_count"] == 3
+    assert estimate["expected"]["paid_equivalent_usd"] > 0
 
 
 def test_transcript_cleaner_keeps_raw_available_but_removes_safe_repeats():
@@ -119,6 +185,53 @@ def test_video_analysis_exposes_pages_for_notion_without_raw_transcript():
     assert analysis["page_analyses"][0]["source_text"] == "Hello"
     assert "raw_transcript" not in analysis
     assert "RAW" not in analysis["full_markdown"]
+
+
+def test_video_analysis_exports_aligned_cues_and_uses_them_for_guidance():
+    source = {
+        "source_id": "source", "source_kind": "upload", "transcript_provider": "gemini_audio",
+        "video_cues": [{
+            "cue_id": "cue-1", "start_seconds": 1, "end_seconds": 3,
+            "source_text": "How are you?", "translation_vi": "Bạn khỏe không?", "language": "english",
+        }],
+        "clean_transcript": [{"start": 1, "end": 3, "text": "How are you?", "translation_vi": "Bạn khỏe không?"}],
+    }
+    segments = [{
+        "segment_id": "one", "ordinal": 1, "start_seconds": 0, "end_seconds": 5,
+        "title": "Intro", "language": "english", "clean_text": "How are you?",
+        "analysis": {"summary": "Lời hỏi thăm"}, "usage": {},
+    }]
+    analysis = build_video_analysis(source, segments)
+    assert analysis["video_cues"][0]["translation_vi"] == "Bạn khỏe không?"
+    assert analysis["page_analyses"][0]["translation_guidance"][0]["translations"]["natural"] == "Bạn khỏe không?"
+    assert "| 00:01 | How are you? | Bạn khỏe không? |" in analysis["full_markdown"]
+
+
+def test_video_notion_payload_uses_video_title_and_timestamp_link():
+    source = {
+        "source_id": "source", "source_kind": "youtube",
+        "source_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "metadata": {"title": "English listening lesson"},
+        "video_cues": [{
+            "cue_id": "cue-1", "start_seconds": 12, "end_seconds": 15,
+            "source_text": "Listen carefully.", "translation_vi": "Hãy nghe kỹ.",
+            "language": "english",
+        }],
+    }
+    segments = [{
+        "segment_id": "one", "ordinal": 1, "start_seconds": 10, "end_seconds": 20,
+        "title": "Intro", "language": "english", "clean_text": "Listen carefully.",
+        "analysis": {"summary": "Luyện nghe."}, "usage": {},
+    }]
+    analysis = build_video_analysis(source, segments)
+    payload = build_notion_sync_payload(
+        "session", [{"id": "one", "name": "Đoạn 1", "edited_text": "Listen carefully."}],
+        analysis, document_id="video-document",
+    )
+    assert payload["title"] == "English listening lesson"
+    assert payload["language"] == "english"
+    assert "Mở video tại câu này" in payload["markdown"]
+    assert "t=12s" in payload["markdown"]
 
 
 def test_video_analysis_normalizes_string_rows_from_model_without_crashing():

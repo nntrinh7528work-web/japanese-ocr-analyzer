@@ -170,6 +170,7 @@ CREATE TABLE IF NOT EXISTS video_sources (
     transcript_provider TEXT,
     transcript_hash TEXT,
     ingest_usage_json TEXT NOT NULL DEFAULT '{}',
+    translation_runs_json TEXT NOT NULL DEFAULT '[]',
     cost_estimate_json TEXT NOT NULL DEFAULT '{}',
     error TEXT,
     created_at TEXT NOT NULL,
@@ -179,6 +180,28 @@ CREATE TABLE IF NOT EXISTS video_sources (
 
 CREATE INDEX IF NOT EXISTS idx_video_sources_status
 ON video_sources(status, updated_at);
+
+CREATE TABLE IF NOT EXISTS video_cues (
+    cue_id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL,
+    start_seconds REAL NOT NULL,
+    end_seconds REAL NOT NULL,
+    speaker TEXT NOT NULL DEFAULT '',
+    language TEXT NOT NULL DEFAULT 'unknown',
+    source_text TEXT NOT NULL DEFAULT '',
+    translation_vi TEXT NOT NULL DEFAULT '',
+    transcript_provider TEXT NOT NULL DEFAULT '',
+    translation_provider TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    warning TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL,
+    UNIQUE(source_id, ordinal),
+    FOREIGN KEY (source_id) REFERENCES video_sources(source_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_cues_source_order
+ON video_cues(source_id, ordinal);
 
 CREATE TABLE IF NOT EXISTS video_segments (
     segment_id TEXT PRIMARY KEY,
@@ -239,6 +262,14 @@ def _get_connection() -> sqlite3.Connection:
             if "document_type" not in document_columns:
                 conn.execute(
                     "ALTER TABLE documents ADD COLUMN document_type TEXT NOT NULL DEFAULT 'image'"
+                )
+                conn.commit()
+            video_source_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(video_sources)").fetchall()
+            }
+            if "translation_runs_json" not in video_source_columns:
+                conn.execute(
+                    "ALTER TABLE video_sources ADD COLUMN translation_runs_json TEXT NOT NULL DEFAULT '[]'"
                 )
                 conn.commit()
             return conn
@@ -756,6 +787,7 @@ def _decode_video_source(row: sqlite3.Row | None) -> dict | None:
         ("clean_transcript_json", "clean_transcript", []),
         ("warnings_json", "transcript_warnings", []),
         ("ingest_usage_json", "ingest_usage", {}),
+        ("translation_runs_json", "translation_runs", []),
         ("cost_estimate_json", "cost_estimate", {}),
     ):
         data[key] = json.loads(data.pop(column) or json.dumps(fallback))
@@ -794,6 +826,7 @@ def update_video_source(source_id: str, **changes) -> None:
         "metadata": "metadata_json", "raw_transcript": "raw_transcript_json",
         "clean_transcript": "clean_transcript_json", "transcript_warnings": "warnings_json",
         "ingest_usage": "ingest_usage_json", "cost_estimate": "cost_estimate_json",
+        "translation_runs": "translation_runs_json",
     }
     fields, values = [], []
     for key, value in changes.items():
@@ -845,6 +878,116 @@ def replace_video_segments(source_id: str, segments: list[dict]) -> None:
             conn.commit()
         finally:
             conn.close()
+
+
+def _stable_video_cue_id(source_id: str, ordinal: int, cue: dict) -> str:
+    value = "|".join((
+        source_id,
+        str(ordinal),
+        f"{float(cue.get('start_seconds', cue.get('start', 0)) or 0):.3f}",
+        f"{float(cue.get('end_seconds', cue.get('end', 0)) or 0):.3f}",
+        str(cue.get("source_text") or cue.get("text") or ""),
+    ))
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:24]
+
+
+def replace_video_cues(source_id: str, cues: list[dict]) -> None:
+    """Replace timestamped transcript cues while preserving their source order."""
+    now = _utcnow_iso()
+    with _lock:
+        conn = _get_connection()
+        try:
+            conn.execute("DELETE FROM video_cues WHERE source_id=?", (source_id,))
+            for ordinal, cue in enumerate(cues, 1):
+                start = float(cue.get("start_seconds", cue.get("start", 0)) or 0)
+                end = max(start, float(cue.get("end_seconds", cue.get("end", start)) or start))
+                source_text = str(cue.get("source_text") or cue.get("text") or "").strip()
+                if not source_text:
+                    continue
+                translation = str(cue.get("translation_vi") or "").strip()
+                conn.execute(
+                    "INSERT INTO video_cues (cue_id, source_id, ordinal, start_seconds, end_seconds, speaker, "
+                    "language, source_text, translation_vi, transcript_provider, translation_provider, status, "
+                    "warning, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        str(cue.get("cue_id") or _stable_video_cue_id(source_id, ordinal, cue)),
+                        source_id, ordinal, start, end, str(cue.get("speaker") or ""),
+                        str(cue.get("language") or "unknown"), source_text, translation,
+                        str(cue.get("transcript_provider") or ""),
+                        str(cue.get("translation_provider") or ""),
+                        str(cue.get("status") or ("translated" if translation else "translation_pending")),
+                        str(cue.get("warning") or ""), now,
+                    ),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def list_video_cues(source_id: str) -> list[dict]:
+    with _lock:
+        conn = _get_connection()
+        conn.row_factory = sqlite3.Row
+        try:
+            return [
+                dict(row) for row in conn.execute(
+                    "SELECT * FROM video_cues WHERE source_id=? ORDER BY ordinal", (source_id,)
+                ).fetchall()
+            ]
+        finally:
+            conn.close()
+
+
+def update_video_cue(cue_id: str, **changes) -> None:
+    mapping = {
+        "translation_vi": "translation_vi", "translation_provider": "translation_provider",
+        "status": "status", "warning": "warning", "language": "language",
+        "source_text": "source_text", "speaker": "speaker",
+    }
+    fields, values = [], []
+    for key, value in changes.items():
+        column = mapping.get(key)
+        if column:
+            fields.append(f"{column}=?")
+            values.append(value)
+    if not fields:
+        return
+    fields.append("updated_at=?")
+    values.extend((_utcnow_iso(), cue_id))
+    with _lock:
+        conn = _get_connection()
+        try:
+            conn.execute(f"UPDATE video_cues SET {', '.join(fields)} WHERE cue_id=?", values)
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def ensure_video_cues(source: dict | None) -> list[dict]:
+    """Lazily expose timestamp rows saved before the cue schema was introduced."""
+    if not source:
+        return []
+    source_id = str(source.get("source_id") or "")
+    existing = list_video_cues(source_id)
+    if existing:
+        return existing
+    rows = source.get("clean_transcript") or source.get("raw_transcript") or []
+    if not rows:
+        return []
+    provider = str(source.get("transcript_provider") or "legacy_transcript")
+    replace_video_cues(source_id, [
+        {
+            "start": row.get("start", 0), "end": row.get("end", 0),
+            "text": row.get("text", ""), "speaker": row.get("speaker", ""),
+            "language": row.get("language", "unknown"),
+            "translation_vi": row.get("translation_vi", ""),
+            "transcript_provider": row.get("transcript_provider") or provider,
+            "translation_provider": row.get("translation_provider", ""),
+            "warning": row.get("warning", ""),
+        }
+        for row in rows if isinstance(row, dict)
+    ])
+    return list_video_cues(source_id)
 
 
 def _decode_video_segment(row: sqlite3.Row) -> dict:
@@ -1019,6 +1162,7 @@ def get_document_workspace(document_id: str) -> dict | None:
         list_video_segments(document["video_source"]["source_id"])
         if document["video_source"] else []
     )
+    document["video_cues"] = ensure_video_cues(document["video_source"])
     document["versions"] = list_analysis_versions(document_id)
     active_id = document.get("active_version_id")
     active = get_analysis_version(active_id) if active_id else None

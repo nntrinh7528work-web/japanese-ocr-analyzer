@@ -18,17 +18,23 @@ from modules.video_analyzer import (
     analyze_video_segment_batch,
     analyze_video_visual_segment,
     build_cost_estimate,
+    build_audio_windows,
+    build_cue_translation_batches,
     build_segment_batches,
     build_segments,
     build_video_analysis,
     clean_transcript,
+    cues_to_transcript_rows,
     fetch_youtube_caption,
+    merge_transcript_cues,
     normalize_transcript,
+    transcribe_audio_window,
+    transcript_rows_to_cues,
     transcript_hash,
-    transcribe_with_gemini,
+    translate_video_cue_batch,
 )
 
-MAX_VIDEO_DURATION_SECONDS = int(getattr(app_config, "MAX_VIDEO_DURATION_SECONDS", 60 * 60))
+MAX_VIDEO_DURATION_SECONDS = int(getattr(app_config, "MAX_VIDEO_DURATION_SECONDS", 30 * 60))
 
 
 def _video_notion_items(source: dict, segments: list[dict]) -> list[dict]:
@@ -64,106 +70,200 @@ def _dispatch_notion_for_video(job_data: dict, source: dict, segments: list[dict
         )
 
 
+def _finalize_video_transcript(
+    job_id: str, job_data: dict, source: dict, cues: list[dict], provider: str,
+    usage: dict, billing_tier: str, warnings: list[str] | None = None,
+) -> None:
+    raw_rows = cues_to_transcript_rows(cues)
+    clean_rows, cleanup_warnings = clean_transcript(raw_rows)
+    duration = float(source.get("duration_seconds") or (raw_rows[-1]["end"] if raw_rows else 0))
+    current_hash = transcript_hash(raw_rows)
+    all_warnings = [*(warnings or []), *(usage.get("warnings") or []), *cleanup_warnings]
+    metadata = {**(source.get("metadata") or {})}
+    selected = metadata.get("range_start") is not None and metadata.get("range_end") is not None
+    if duration > MAX_VIDEO_DURATION_SECONDS and not selected:
+        status = "awaiting_range_selection"
+        session_store.update_video_source(
+            source["source_id"], duration_seconds=duration, raw_transcript=raw_rows,
+            clean_transcript=[], transcript_warnings=all_warnings, metadata=metadata,
+            transcript_provider=provider, transcript_hash=current_hash, ingest_usage=usage,
+            status=status, error="",
+        )
+        session_store.update_document_source_hash(job_data["document_id"], current_hash, status=status)
+        update_job(
+            job_id, "done", stage=status,
+            result={"job_kind": job_data.get("job_kind"), "status": status, "duration_seconds": duration},
+        )
+        return
+
+    segments = build_segments(clean_rows)
+    session_store.replace_video_segments(source["source_id"], segments)
+    translated = all(str(cue.get("translation_vi") or "").strip() for cue in cues)
+    status = "awaiting_cost_confirmation" if translated else "awaiting_translation_confirmation"
+    session_store.update_video_source(
+        source["source_id"], duration_seconds=duration, raw_transcript=raw_rows,
+        clean_transcript=clean_rows, transcript_warnings=all_warnings, metadata=metadata,
+        transcript_provider=provider, transcript_hash=current_hash, ingest_usage=usage,
+        status=status, error="",
+    )
+    session_store.update_document_source_hash(job_data["document_id"], current_hash, status=status)
+    refreshed = session_store.get_video_source(source["source_id"]) or source
+    estimate = build_cost_estimate(refreshed, segments, billing_tier)
+    session_store.update_video_source(source["source_id"], cost_estimate=estimate, status=status)
+    update_job(
+        job_id, "done", stage=status,
+        result={
+            "job_kind": job_data.get("job_kind"), "status": status,
+            "source_id": source["source_id"], "cue_count": len(cues),
+            "segment_count": len(segments), "cost_estimate": estimate,
+        },
+    )
+
+
 def _run_video_ingest(job_id: str, job_data: dict, payload: dict) -> None:
     source = session_store.get_video_source(job_data.get("source_id"))
     if not source:
         raise ValueError("Không tìm thấy nguồn video của job.")
-    update_job(job_id, "running", stage="fetching_transcript", checkpoint={"window": 0})
-    allow_gemini = bool(payload.get("allow_gemini", False))
-    provider = ""
-    usage: dict = {}
+    update_job(job_id, "running", stage="fetching_caption", checkpoint={"window": 0})
+    if source.get("source_kind") != "youtube":
+        raise ValueError("Job lấy caption chỉ dành cho link YouTube.")
     try:
-        if source.get("source_kind") == "youtube" and not allow_gemini:
-            rows, provider = fetch_youtube_caption(
-                str(source.get("video_id") or ""), str(payload.get("preferred_language") or "unknown")
-            )
-        elif allow_gemini:
-            rows, usage = transcribe_with_gemini(source)
-            provider = "gemini_video"
-        else:
-            session_store.update_video_source(source["source_id"], status="awaiting_ingest_confirmation")
-            update_job(
-                job_id, "done", stage="awaiting_ingest_confirmation",
-                result={"job_kind": "video_ingest", "status": "awaiting_ingest_confirmation"},
-            )
-            return
+        rows, provider = fetch_youtube_caption(
+            str(source.get("video_id") or ""), str(payload.get("preferred_language") or "unknown")
+        )
     except Exception as exc:
-        if source.get("source_kind") == "youtube" and not allow_gemini:
-            session_store.update_video_source(
-                source["source_id"], status="awaiting_ingest_confirmation", error=str(exc)
-            )
-            update_job(
-                job_id, "done", stage="awaiting_ingest_confirmation",
-                result={"job_kind": "video_ingest", "status": "awaiting_ingest_confirmation", "reason": str(exc)},
-            )
-            return
-        raise
-
-    raw_rows = normalize_transcript(rows)
-    clean_rows, cleanup_warnings = clean_transcript(raw_rows)
-    duration = float(
-        source.get("duration_seconds") or usage.get("duration_seconds") or (raw_rows[-1]["end"] if raw_rows else 0)
-    )
-    selected_range = source.get("metadata") or {}
-    has_selected_range = (
-        selected_range.get("range_start") is not None and selected_range.get("range_end") is not None
-        and float(selected_range.get("range_end") or 0) > float(selected_range.get("range_start") or 0)
-    )
-    current_transcript_hash = transcript_hash(raw_rows)
-    source_metadata = {
-        **(source.get("metadata") or {}),
-        "visual_context": usage.get("visual_context") or [],
-    }
-    transcript_warnings = [*(usage.get("warnings") or []), *cleanup_warnings]
-    if duration > MAX_VIDEO_DURATION_SECONDS and not has_selected_range:
-        session_store.update_video_source(
-            source["source_id"], duration_seconds=duration, raw_transcript=raw_rows,
-            clean_transcript=[], transcript_warnings=transcript_warnings,
-            metadata=source_metadata,
-            transcript_provider=provider, transcript_hash=current_transcript_hash,
-            ingest_usage=usage, status="awaiting_range_selection", error="",
-        )
-        session_store.update_document_source_hash(
-            job_data["document_id"], current_transcript_hash, status="awaiting_range_selection"
-        )
+        session_store.update_video_source(source["source_id"], status="caption_unavailable", error=str(exc))
         update_job(
-            job_id, "done", stage="awaiting_range_selection",
-            result={
-                "job_kind": "video_ingest", "status": "awaiting_range_selection",
-                "source_id": source["source_id"], "duration_seconds": duration,
-            },
+            job_id, "done", stage="caption_unavailable",
+            result={"job_kind": "video_ingest", "status": "caption_unavailable", "reason": str(exc)},
         )
         return
-    session_store.update_video_source(
-        source["source_id"], duration_seconds=duration, raw_transcript=raw_rows,
-        clean_transcript=clean_rows, transcript_warnings=transcript_warnings,
-        metadata=source_metadata,
-        transcript_provider=provider, transcript_hash=current_transcript_hash,
-        ingest_usage=usage, status="segmenting", error="",
+    cues = transcript_rows_to_cues(rows, source["source_id"], provider)
+    session_store.replace_video_cues(source["source_id"], cues)
+    _finalize_video_transcript(
+        job_id, job_data, source, cues, provider, {}, payload.get("billing_tier", "free")
     )
-    session_store.update_document_source_hash(
-        job_data["document_id"], current_transcript_hash, status="awaiting_cost_confirmation"
-    )
-    segments = build_segments(clean_rows)
-    session_store.replace_video_segments(source["source_id"], segments)
-    source = session_store.get_video_source(source["source_id"]) or source
-    estimate = build_cost_estimate(source, session_store.list_video_segments(source["source_id"]), payload.get("billing_tier", "free"))
-    session_store.update_video_source(
-        source["source_id"], cost_estimate=estimate, status="awaiting_cost_confirmation"
-    )
-    local_path = str(source.get("local_path") or "")
-    if local_path and allow_gemini:
+
+
+def _run_video_transcribe(job_id: str, job_data: dict, payload: dict) -> None:
+    source = session_store.get_video_source(job_data.get("source_id"))
+    if not source:
+        raise ValueError("Không tìm thấy file video của job.")
+    windows = build_audio_windows(float(source.get("duration_seconds") or 0))
+    if not windows:
+        raise ValueError("Không đọc được thời lượng video để tạo script.")
+    metadata = dict(source.get("metadata") or {})
+    completed = {int(value) for value in metadata.get("transcription_completed_windows") or []}
+    cues = session_store.list_video_cues(source["source_id"])
+    usage_state = dict(source.get("ingest_usage") or {})
+    runs = list(usage_state.get("runs") or [])
+    run_ids = {str(run.get("run_id")) for run in runs if isinstance(run, dict)}
+    failures = []
+    session_store.update_video_source(source["source_id"], status="transcribing", error="")
+
+    for window in windows:
+        index = int(window["index"])
+        if index in completed:
+            continue
+        update_job(
+            job_id, "running", stage="transcribing_audio",
+            checkpoint={"window": index, "completed": len(completed), "total": len(windows)},
+        )
         try:
-            Path(local_path).unlink(missing_ok=True)
-            session_store.update_video_source(source["source_id"], local_path="")
-        except OSError:
-            pass
+            rows, usage = transcribe_audio_window(source, window, str(Path(source["local_path"]).parent))
+            incoming = transcript_rows_to_cues(rows, source["source_id"], "gemini_audio")
+            cues = merge_transcript_cues(cues, incoming)
+            session_store.replace_video_cues(source["source_id"], cues)
+            completed.add(index)
+            run_id = f"{source['source_id']}:audio:{index}"
+            if run_id not in run_ids:
+                runs.append({
+                    "run_id": run_id, "model_used": usage.get("model_used"),
+                    "usage": usage, "modality": "audio",
+                })
+                run_ids.add(run_id)
+            metadata["transcription_completed_windows"] = sorted(completed)
+            metadata["transcription_total_windows"] = len(windows)
+            usage_state["runs"] = runs
+            usage_state["input_tokens"] = sum(int((run.get("usage") or {}).get("input_tokens", 0)) for run in runs)
+            usage_state["output_tokens"] = sum(int((run.get("usage") or {}).get("output_tokens", 0)) for run in runs)
+            usage_state["model_used"] = usage.get("model_used")
+            session_store.update_video_source(
+                source["source_id"], metadata=metadata, ingest_usage=usage_state, status="transcribing"
+            )
+        except Exception as exc:
+            failures.append({"window": index, "error": str(exc)})
+
+    if failures:
+        metadata["transcription_errors"] = failures
+        status = "transcription_partial" if cues else "failed"
+        message = "; ".join(f"Cửa sổ {row['window']}: {row['error']}" for row in failures)
+        session_store.update_video_source(
+            source["source_id"], metadata=metadata, ingest_usage=usage_state, status=status, error=message
+        )
+        update_job(
+            job_id, "done", stage=status,
+            result={"job_kind": "video_transcribe", "status": status, "failures": failures},
+        )
+        return
+    metadata.pop("transcription_errors", None)
+    source = session_store.get_video_source(source["source_id"]) or source
+    source["metadata"] = metadata
+    _finalize_video_transcript(
+        job_id, job_data, source, cues, "gemini_audio", usage_state,
+        payload.get("billing_tier", "free"),
+    )
+
+
+def _run_video_translate(job_id: str, job_data: dict, payload: dict) -> None:
+    source = session_store.get_video_source(job_data.get("source_id"))
+    if not source:
+        raise ValueError("Không tìm thấy nguồn video cần dịch.")
+    cues = session_store.list_video_cues(source["source_id"])
+    pending = [cue for cue in cues if not str(cue.get("translation_vi") or "").strip()]
+    batches = build_cue_translation_batches(pending)
+    runs = list(source.get("translation_runs") or [])
+    run_ids = {str(run.get("run_id")) for run in runs if isinstance(run, dict)}
+    failures = []
+    session_store.update_video_source(source["source_id"], status="translating", error="")
+    for index, batch in enumerate(batches, 1):
+        update_job(
+            job_id, "running", stage="translating_cues",
+            checkpoint={"batch": index, "completed": index - 1, "total": len(batches)},
+        )
+        try:
+            translated, usage = translate_video_cue_batch(batch)
+            for cue in batch:
+                session_store.update_video_cue(
+                    cue["cue_id"], translation_vi=translated[cue["cue_id"]],
+                    translation_provider="gemini_translation", status="translated", warning="",
+                )
+            run_id = f"{job_id}:translation:{index}"
+            if run_id not in run_ids:
+                runs.append({"run_id": run_id, "model_used": usage.get("model_used"), "usage": usage})
+                run_ids.add(run_id)
+            session_store.update_video_source(source["source_id"], translation_runs=runs)
+        except Exception as exc:
+            failures.append({"batch": index, "error": str(exc)})
+    cues = session_store.list_video_cues(source["source_id"])
+    rows = cues_to_transcript_rows(cues)
+    clean_rows, warnings = clean_transcript(rows)
+    if failures:
+        message = "; ".join(f"Batch {row['batch']}: {row['error']}" for row in failures)
+        session_store.update_video_source(
+            source["source_id"], raw_transcript=rows, clean_transcript=clean_rows,
+            status="translation_partial", error=message,
+        )
+        update_job(job_id, "done", stage="translation_partial", result={"failures": failures})
+        return
+    session_store.update_video_source(
+        source["source_id"], raw_transcript=rows, clean_transcript=clean_rows,
+        transcript_warnings=[*(source.get("transcript_warnings") or []), *warnings],
+        status="awaiting_cost_confirmation", error="", translation_runs=runs,
+    )
     update_job(
         job_id, "done", stage="awaiting_cost_confirmation",
-        result={
-            "job_kind": "video_ingest", "status": "awaiting_cost_confirmation",
-            "source_id": source["source_id"], "segment_count": len(segments), "cost_estimate": estimate,
-        },
+        result={"job_kind": "video_translate", "status": "awaiting_cost_confirmation"},
     )
 
 
@@ -258,7 +358,9 @@ def _run_video_analysis(job_id: str, job_data: dict, payload: dict) -> None:
                 completed_count += 1
 
     segments = session_store.list_video_segments(source["source_id"])
-    analysis = build_video_analysis(source, segments)
+    analysis = build_video_analysis(
+        {**source, "video_cues": session_store.list_video_cues(source["source_id"])}, segments
+    )
     analysis["video_segment_errors"] = failures
     if not analysis.get("video_segments"):
         raise RuntimeError("Không có đoạn video nào phân tích thành công.")
@@ -294,7 +396,9 @@ def _run_video_visual(job_id: str, job_data: dict, payload: dict) -> None:
     usage["visual_context_usage"] = visual_usage
     session_store.update_video_segment(segment_id, analysis=analysis_row, usage=usage, status="done", error="")
     segments = session_store.list_video_segments(source["source_id"])
-    analysis = build_video_analysis(source, segments)
+    analysis = build_video_analysis(
+        {**source, "video_cues": session_store.list_video_cues(source["source_id"])}, segments
+    )
     version_id = job_data.get("version_id")
     if version_id:
         session_store.save_analysis_version(version_id, analysis=analysis, status="done", job_id=job_id)
@@ -317,7 +421,13 @@ def run_job(job_id: str, text: str, lang: str):
         if job_data and job_data.get("job_kind") == "video_ingest":
             _run_video_ingest(job_id, job_data, json.loads(text or "{}"))
             return
-        if job_data and job_data.get("job_kind") == "video_analysis":
+        if job_data and job_data.get("job_kind") == "video_transcribe":
+            _run_video_transcribe(job_id, job_data, json.loads(text or "{}"))
+            return
+        if job_data and job_data.get("job_kind") == "video_translate":
+            _run_video_translate(job_id, job_data, json.loads(text or "{}"))
+            return
+        if job_data and job_data.get("job_kind") in {"video_analysis", "video_deep_analysis"}:
             _run_video_analysis(job_id, job_data, json.loads(text or "{}"))
             return
         if job_data and job_data.get("job_kind") == "video_visual":
