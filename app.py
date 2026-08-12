@@ -226,8 +226,15 @@ if job_id_from_url:
         if job_changed:
             _persist_analysis()
         if job_status == "done":
-            if job.get("job_kind") == "video_ingest":
+            job_kind = str(job.get("job_kind") or "")
+            if job_kind == "video_ingest":
                 st.success("Đã hoàn tất bước lấy transcript. Hãy kiểm tra dự toán trước khi phân tích.")
+            elif job_kind == "video_transcribe":
+                st.success("Đã tạo script và bản dịch từ file video.")
+            elif job_kind == "video_translate":
+                st.success("Đã hoàn tất bản dịch tiếng Việt cho script.")
+            elif job_kind == "video_visual":
+                st.success("Đã bổ sung phân tích hình ảnh cho đoạn video.")
             else:
                 st.success("Phân tích đã hoàn tất!")
         elif job_status == "running":
