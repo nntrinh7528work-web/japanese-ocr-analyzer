@@ -91,14 +91,24 @@ def _apply_caption_range(source: dict, start: float, end: float, config: dict) -
     )
 
 
-def _start_worker(worker_path: str, project_dir: str, job_id: str) -> None:
+def _start_worker(
+    worker_path: str, project_dir: str, job_id: str, *, document_id: str | None = None,
+) -> None:
     subprocess.Popen(
         [sys.executable, worker_path, job_id],
         stdout=subprocess.DEVNULL,
         stderr=open(str(Path(project_dir) / "worker_error.log"), "a"),
         cwd=project_dir,
     )
-    st.query_params["job_id"] = job_id
+    if document_id:
+        st.session_state.active_document_id = document_id
+        st.session_state.loaded_document_id = None
+        # Keep the job and its owning lesson together. Updating these query
+        # parameters in one operation prevents a rerun from reopening the
+        # previously selected image lesson while the video job continues.
+        st.query_params.update({"document": document_id, "job_id": job_id})
+    else:
+        st.query_params["job_id"] = job_id
 
 
 def _queue_ingest(
@@ -115,7 +125,7 @@ def _queue_ingest(
         source_id=source["source_id"], stage="pending",
     )
     session_store.update_video_source(source["source_id"], status="ingesting", error="")
-    _start_worker(worker_path, project_dir, job_id)
+    _start_worker(worker_path, project_dir, job_id, document_id=source["document_id"])
 
 
 def _queue_video_job(
@@ -129,7 +139,7 @@ def _queue_video_job(
     )
     status = "transcribing" if job_kind == "video_transcribe" else "translating"
     session_store.update_video_source(source["source_id"], status=status, error="")
-    _start_worker(worker_path, project_dir, job_id)
+    _start_worker(worker_path, project_dir, job_id, document_id=source["document_id"])
 
 
 def _create_video_document(title: str) -> dict:
@@ -249,7 +259,7 @@ def _render_cost_confirmation(
         session_store.save_analysis_version(version["version_id"], status="running", job_id=job_id)
         session_store.update_video_source(source["source_id"], status="analyzing", error="")
         st.session_state.working_version_id = version["version_id"]
-        _start_worker(worker_path, project_dir, job_id)
+        _start_worker(worker_path, project_dir, job_id, document_id=source["document_id"])
         st.rerun()
 
 
@@ -319,7 +329,7 @@ def _render_segment(
                 source_hash=source.get("transcript_hash"), document_id=source["document_id"],
                 version_id=version_id, job_kind="video_visual", source_id=source["source_id"], stage="pending",
             )
-            _start_worker(worker_path, project_dir, job_id)
+            _start_worker(worker_path, project_dir, job_id, document_id=source["document_id"])
             st.rerun()
 
 
