@@ -209,7 +209,10 @@ def fetch_youtube_caption(video_id: str, preferred_language: str = "unknown") ->
     tracks = list(api.list(video_id))
     if not tracks:
         raise RuntimeError("Video không có caption công khai.")
-    preferred_codes = ["ja", "en"]
+    # With no explicit lesson language, preserve YouTube's source-track order.
+    # Hard-coding Japanese first can select a translated Japanese subtitle for
+    # an English video even when the original English caption is available.
+    preferred_codes: list[str] = []
     if preferred_language == "english":
         preferred_codes = ["en", "ja"]
     elif preferred_language == "japanese":
@@ -217,6 +220,8 @@ def fetch_youtube_caption(video_id: str, preferred_language: str = "unknown") ->
 
     def language_rank(code: str) -> int:
         normalized = code.lower().split("-", 1)[0]
+        if not preferred_codes:
+            return 0
         return preferred_codes.index(normalized) if normalized in preferred_codes else len(preferred_codes)
 
     def rank(track: Any) -> tuple[int, int]:
