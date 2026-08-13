@@ -14,11 +14,13 @@ from modules.video_analyzer import (
     build_segments,
     build_video_analysis,
     build_video_usage_cost_breakdown,
+    classify_youtube_caption_error,
     clean_transcript,
     cues_to_transcript_rows,
     estimate_audio_transcription_cost,
     merge_transcript_cues,
     normalize_transcript,
+    parse_manual_youtube_transcript,
     parse_youtube_url,
     transcript_rows_to_cues,
     transcript_hash,
@@ -54,6 +56,34 @@ def test_parse_youtube_urls(url, video_id):
 def test_rejects_unsafe_or_unsupported_youtube_urls(url):
     with pytest.raises(ValueError):
         parse_youtube_url(url)
+
+
+def test_youtube_ip_block_is_classified_without_exposing_provider_error():
+    blocked = (
+        "Could not retrieve a transcript. YouTube is blocking requests from your IP "
+        "because the IP belongs to a cloud provider."
+    )
+    assert classify_youtube_caption_error(blocked) == "youtube_ip_blocked"
+    assert classify_youtube_caption_error("No transcripts are available") == "youtube_caption_unavailable"
+
+
+def test_manual_youtube_transcript_parses_srt_and_plain_text():
+    srt = """1
+00:00:01,200 --> 00:00:03,500
+Hello everyone.
+
+2
+00:00:03,500 --> 00:00:05,000
+日本語を勉強します。
+"""
+    timestamped = parse_manual_youtube_transcript(srt)
+    assert [(row["start"], row["end"], row["language"]) for row in timestamped] == [
+        (1.2, 3.5, "english"), (3.5, 5.0, "japanese")
+    ]
+
+    plain = parse_manual_youtube_transcript("""Hello everyone.
+日本語を勉強します。""")
+    assert [(row["start"], row["end"]) for row in plain] == [(0.0, 3.0), (3.0, 6.0)]
 
 
 def test_upload_validation_checks_extension_mime_and_size():

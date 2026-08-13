@@ -24,9 +24,11 @@ from modules.video_analyzer import (
     estimate_cue_translation_cost,
     format_timestamp,
     normalize_video_segment_result,
+    parse_manual_youtube_transcript,
     parse_youtube_url,
     probe_video_metadata,
     transcript_hash,
+    transcript_rows_to_cues,
     validate_video_upload,
     validate_video_duration,
 )
@@ -91,6 +93,34 @@ def _apply_caption_range(source: dict, start: float, end: float, config: dict) -
     session_store.update_video_source(
         source["source_id"], cost_estimate=estimate, status=next_status
     )
+
+
+def _apply_manual_youtube_transcript(source: dict, value: str, config: dict) -> None:
+    """Continue a blocked YouTube lesson using user-supplied captions."""
+    rows = parse_manual_youtube_transcript(value)
+    clean_rows, warnings = clean_transcript(rows)
+    cues = transcript_rows_to_cues(rows, source["source_id"], "manual_transcript")
+    session_store.replace_video_cues(source["source_id"], cues)
+    segments = build_segments(clean_rows, namespace=source["source_id"])
+    session_store.replace_video_segments(source["source_id"], segments)
+    source_hash = transcript_hash(rows)
+    metadata = {
+        **(source.get("metadata") or {}),
+        "caption_error_code": "",
+        "manual_transcript": True,
+    }
+    session_store.update_video_source(
+        source["source_id"], raw_transcript=rows, clean_transcript=clean_rows,
+        transcript_warnings=warnings, transcript_provider="manual_transcript",
+        transcript_hash=source_hash, metadata=metadata,
+        status="awaiting_translation_confirmation", error="",
+    )
+    session_store.update_document_source_hash(
+        source["document_id"], source_hash, status="awaiting_translation_confirmation"
+    )
+    refreshed = session_store.get_video_source(source["source_id"]) or source
+    estimate = build_cost_estimate(refreshed, segments, config.get("billing_tier", "free"))
+    session_store.update_video_source(source["source_id"], cost_estimate=estimate)
 
 
 def _start_worker(
@@ -627,8 +657,38 @@ def render_video_tab(
         st.progress(translated / max(1, len(cues)))
         return
     if status == "caption_unavailable":
-        st.error(source.get("error") or "Video không có caption tiếng Nhật hoặc tiếng Anh công khai.")
-        st.caption("Theo chế độ đã chọn, app không gọi Gemini để đọc video YouTube không có caption.")
+        error_code = str((source.get("metadata") or {}).get("caption_error_code") or "")
+        if error_code == "youtube_ip_blocked":
+            st.error("YouTube đang chặn IP máy chủ Streamlit Cloud, nên app chưa thể lấy caption tự động.")
+            st.caption(
+                "Link vẫn hợp lệ. Đây là giới hạn của YouTube với IP cloud, không phải lỗi Gemini hay lỗi video."
+            )
+        elif error_code == "youtube_caption_unavailable":
+            st.error("Video không có caption tiếng Nhật hoặc tiếng Anh công khai.")
+        else:
+            st.error("Chưa thể lấy caption từ YouTube ở thời điểm này.")
+        with st.expander("Dán subtitle hoặc transcript để tiếp tục", expanded=True):
+            st.caption(
+                "Dán SRT/VTT để giữ timestamp và đồng bộ player. Nếu chỉ có văn bản, hãy để mỗi câu một dòng; "
+                "app sẽ tạo timestamp ước lượng để vẫn phân tích được."
+            )
+            manual_text = st.text_area(
+                "Subtitle / transcript", key=f"manual_youtube_transcript_{source['source_id']}",
+                height=240, placeholder="00:00:01,000 --> 00:00:03,000\nHello everyone.",
+            )
+            if st.button(
+                "Dùng transcript này", type="primary", use_container_width=True,
+                key=f"apply_manual_youtube_transcript_{source['source_id']}",
+            ):
+                try:
+                    _apply_manual_youtube_transcript(source, manual_text, config)
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
+        st.info(
+            "Không dùng proxy hoặc cookie YouTube trong app: chúng không ổn định trên Cloud và có thể làm tài khoản "
+            "YouTube bị chặn. Bạn cũng có thể tải file video từ thiết bị vào tab File video để app tự tạo script."
+        )
         st.divider()
         _render_new_source(config, worker_path, project_dir)
         return

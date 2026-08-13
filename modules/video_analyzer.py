@@ -57,6 +57,9 @@ _YOUTUBE_HOSTS = {
     "www.youtube-nocookie.com", "youtube-nocookie.com",
 }
 _VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+_TIMESTAMP_RE = re.compile(
+    r"(?P<hours>\d{1,2}:)?(?P<minutes>\d{1,2}):(?P<seconds>\d{2})[,.](?P<milliseconds>\d{3})"
+)
 
 
 def parse_youtube_url(value: str) -> dict[str, str]:
@@ -80,6 +83,72 @@ def parse_youtube_url(value: str) -> dict[str, str]:
         "video_id": video_id,
         "canonical_url": f"https://www.youtube.com/watch?v={video_id}",
     }
+
+
+def classify_youtube_caption_error(error: object) -> str:
+    """Map third-party caption errors to stable, user-safe states."""
+    message = str(error or "").lower()
+    blocked_markers = (
+        "youtube is blocking", "ip has been blocked", "requestblocked",
+        "ipblocked", "cloud provider", "too many requests",
+    )
+    if any(marker in message for marker in blocked_markers):
+        return "youtube_ip_blocked"
+    unavailable_markers = (
+        "no transcripts", "transcript is disabled", "no caption",
+        "not available", "could not retrieve a transcript",
+    )
+    if any(marker in message for marker in unavailable_markers):
+        return "youtube_caption_unavailable"
+    return "youtube_caption_error"
+
+
+def _subtitle_seconds(value: str) -> float:
+    match = _TIMESTAMP_RE.search(str(value or ""))
+    if not match:
+        raise ValueError("Timestamp subtitle không hợp lệ.")
+    hours = int((match.group("hours") or "0:").rstrip(":"))
+    minutes = int(match.group("minutes"))
+    seconds = int(match.group("seconds"))
+    milliseconds = int(match.group("milliseconds"))
+    return hours * 3600 + minutes * 60 + seconds + milliseconds / 1000
+
+
+def parse_manual_youtube_transcript(value: str) -> list[dict]:
+    """Parse pasted SRT/VTT captions, with a readable plain-text fallback."""
+    source = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not source:
+        raise ValueError("Hãy dán transcript hoặc subtitle trước.")
+    source = re.sub(r"^WEBVTT[^\n]*\n", "", source, flags=re.I)
+    rows: list[dict] = []
+    for block in re.split(r"\n\s*\n", source):
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        timestamp_index = next((
+            index for index, line in enumerate(lines) if "-->" in line and _TIMESTAMP_RE.search(line)
+        ), None)
+        if timestamp_index is None:
+            continue
+        start_text, end_text = lines[timestamp_index].split("-->", 1)
+        try:
+            start, end = _subtitle_seconds(start_text), _subtitle_seconds(end_text)
+        except ValueError:
+            continue
+        text = re.sub(r"<[^>]+>", "", " ".join(lines[timestamp_index + 1:])).strip()
+        if text and end >= start:
+            rows.append({"start": start, "end": end, "text": text})
+    if rows:
+        return normalize_transcript(rows)
+
+    # Plain text remains useful for analysis even when the user has no subtitle file.
+    # Give each line a conservative three-second display slot in the player.
+    plain_lines = [re.sub(r"<[^>]+>", "", line).strip() for line in source.splitlines()]
+    plain_lines = [line for line in plain_lines if line and not line.isdigit()]
+    if not plain_lines:
+        raise ValueError("Không đọc được transcript. Dùng định dạng SRT, VTT hoặc mỗi câu một dòng.")
+    return normalize_transcript([
+        {"start": index * 3.0, "end": index * 3.0 + 3.0, "text": line}
+        for index, line in enumerate(plain_lines)
+    ])
 
 
 def validate_video_upload(name: str, data: bytes, mime_type: str | None = None) -> dict[str, Any]:

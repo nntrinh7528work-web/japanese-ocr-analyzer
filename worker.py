@@ -24,6 +24,7 @@ from modules.video_analyzer import (
     build_segments,
     build_video_analysis,
     clean_transcript,
+    classify_youtube_caption_error,
     cues_to_transcript_rows,
     fetch_youtube_caption,
     merge_transcript_cues,
@@ -140,10 +141,17 @@ def _run_video_ingest(job_id: str, job_data: dict, payload: dict) -> None:
             str(source.get("video_id") or ""), str(payload.get("preferred_language") or "unknown")
         )
     except Exception as exc:
-        session_store.update_video_source(source["source_id"], status="caption_unavailable", error=str(exc))
+        error_code = classify_youtube_caption_error(exc)
+        metadata = {**(source.get("metadata") or {}), "caption_error_code": error_code}
+        session_store.update_video_source(
+            source["source_id"], status="caption_unavailable", metadata=metadata, error=str(exc)
+        )
         update_job(
             job_id, "done", stage="caption_unavailable",
-            result={"job_kind": "video_ingest", "status": "caption_unavailable", "reason": str(exc)},
+            result={
+                "job_kind": "video_ingest", "status": "caption_unavailable",
+                "reason": str(exc), "error_code": error_code,
+            },
         )
         return
     cues = transcript_rows_to_cues(rows, source["source_id"], provider)
