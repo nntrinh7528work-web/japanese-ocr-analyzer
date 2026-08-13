@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
+import modules.video_analyzer as video_analyzer
 
 from modules.video_analyzer import (
     build_audio_windows,
@@ -9,6 +13,7 @@ from modules.video_analyzer import (
     build_segment_batches,
     build_segments,
     build_video_analysis,
+    build_video_usage_cost_breakdown,
     clean_transcript,
     cues_to_transcript_rows,
     estimate_audio_transcription_cost,
@@ -17,9 +22,11 @@ from modules.video_analyzer import (
     parse_youtube_url,
     transcript_rows_to_cues,
     transcript_hash,
+    transcribe_audio_window,
     supported_video_model,
     validate_video_upload,
     validate_video_duration,
+    _coverage_gaps,
 )
 from modules.notion_sync import build_notion_sync_payload, extract_notion_entities
 
@@ -64,6 +71,8 @@ def test_transcript_normalization_segmentation_and_stable_hash():
     ])
     assert rows[0]["text"] == "今日は 学びます"
     assert transcript_hash(rows) == transcript_hash(list(rows))
+    translated = [{**row, "translation_vi": "Bản dịch", "recheck": {"text": "khác"}} for row in rows]
+    assert transcript_hash(rows) == transcript_hash(translated)
     segments = build_segments(rows)
     assert [row["ordinal"] if "ordinal" in row else index for index, row in enumerate(segments, 1)] == [1, 2]
     assert [row["language"] for row in segments] == ["japanese", "english"]
@@ -81,10 +90,69 @@ def test_segment_ids_are_stable_but_isolated_between_video_sources():
 def test_audio_windows_overlap_without_exceeding_duration():
     windows = build_audio_windows(601)
     assert windows == [
-        {"index": 1, "start": 0.0, "end": 300.0},
-        {"index": 2, "start": 298.0, "end": 598.0},
-        {"index": 3, "start": 596.0, "end": 601.0},
+        {"index": 1, "start": 0.0, "end": 90.0},
+        {"index": 2, "start": 85.0, "end": 175.0},
+        {"index": 3, "start": 170.0, "end": 260.0},
+        {"index": 4, "start": 255.0, "end": 345.0},
+        {"index": 5, "start": 340.0, "end": 430.0},
+        {"index": 6, "start": 425.0, "end": 515.0},
+        {"index": 7, "start": 510.0, "end": 600.0},
+        {"index": 8, "start": 595.0, "end": 601.0},
     ]
+
+
+def test_coverage_gaps_subtract_existing_cues_from_audible_audio():
+    gaps = _coverage_gaps(
+        [{"start": 2, "end": 4}, {"start": 6, "end": 8}],
+        [(0, 10)],
+        0,
+    )
+    assert gaps == [
+        {"start": 0, "end": 2.0, "reason": "Có âm thanh nhưng chưa có transcript."},
+        {"start": 4.0, "end": 6.0, "reason": "Có âm thanh nhưng chưa có transcript."},
+        {"start": 8.0, "end": 10.0, "reason": "Có âm thanh nhưng chưa có transcript."},
+    ]
+
+
+def test_transcribe_audio_window_requests_json_schema_with_required_mime(tmp_path, monkeypatch):
+    video_path = tmp_path / "video.mp4"
+    video_path.write_bytes(b"video")
+    captured = {}
+
+    class FakeModel:
+        def upload_file(self, path, mime_type):
+            assert mime_type == "audio/flac"
+            return SimpleNamespace(name="files/audio")
+
+        def wait_for_file(self, name):
+            return SimpleNamespace(name=name, uri="files://audio")
+
+        def create_interaction(self, inputs, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                text='{"cues":[{"start":0,"end":1.5,"speaker":"","language":"english",'
+                     '"text":"Hello","confidence":"high","uncertainty_reason":""}],'
+                     '"warnings":[]}',
+                usage={"input_tokens": 10, "output_tokens": 5},
+            )
+
+        def delete_file(self, name):
+            return None
+
+    def fake_extract(video, output, start, end):
+        Path(output).write_bytes(b"flac")
+
+    monkeypatch.setattr(video_analyzer, "create_gemini_model", lambda *args: FakeModel())
+    monkeypatch.setattr(video_analyzer, "extract_audio_window", fake_extract)
+    monkeypatch.setattr(video_analyzer, "detect_non_silent_intervals", lambda *args: [(0, 1.5)])
+
+    rows, usage = transcribe_audio_window(
+        {"local_path": str(video_path)}, {"index": 1, "start": 0, "end": 2}, str(tmp_path)
+    )
+    assert rows[0]["text"] == "Hello"
+    assert usage["model_used"] == video_analyzer.GEMINI_MODEL_AUDIO
+    assert captured["response_mime_type"] == "application/json"
+    assert captured["response_format"]["required"] == ["cues", "warnings"]
 
 
 def test_video_duration_rejects_long_or_silent_uploads():
@@ -122,6 +190,22 @@ def test_overlapping_audio_cues_are_deduplicated_but_keep_translation():
     assert merged[0]["end_seconds"] == 300
 
 
+def test_near_duplicate_overlap_is_merged_and_flagged_for_review():
+    merged = merge_transcript_cues(
+        [{
+            "cue_id": "one", "start_seconds": 85, "end_seconds": 89,
+            "source_text": "I think that this is important.", "confidence": "high",
+        }],
+        [{
+            "cue_id": "two", "start_seconds": 86, "end_seconds": 90,
+            "source_text": "I think this is important", "confidence": "high",
+        }],
+    )
+    assert len(merged) == 1
+    assert merged[0]["verification_status"] == "needs_review"
+    assert merged[0]["end_seconds"] == 90
+
+
 def test_translation_batches_split_on_language_and_limits():
     cues = [
         {"cue_id": "ja", "language": "japanese", "source_text": "あ" * 100},
@@ -133,11 +217,49 @@ def test_translation_batches_split_on_language_and_limits():
 def test_audio_transcription_estimate_uses_32_tokens_per_second():
     estimate = estimate_audio_transcription_cost(600, "paid")
     assert estimate["input_tokens"] == 19_200
-    assert estimate["window_count"] == 3
-    assert estimate["expected"]["paid_equivalent_usd"] > 0
+    assert estimate["window_count"] == 7
+    assert estimate["primary_expected"]["paid_equivalent_usd"] > 0
+    assert estimate["verification_expected"]["paid_equivalent_usd"] > 0
+    assert estimate["expected"]["paid_equivalent_usd"] == pytest.approx(
+        estimate["primary_expected"]["paid_equivalent_usd"]
+        + estimate["verification_expected"]["paid_equivalent_usd"]
+    )
+    assert estimate["maximum"]["paid_equivalent_usd"] >= estimate["expected"]["paid_equivalent_usd"]
 
 
-def test_transcript_cleaner_keeps_raw_available_but_removes_safe_repeats():
+def test_actual_video_costs_are_split_by_stage_without_double_counting():
+    analysis = {
+        "video_analysis_runs": [
+            {
+                "run_id": "primary", "stage": "transcript_primary",
+                "model_used": "gemini-3.6-flash", "modality": "audio",
+                "usage": {"input_tokens": 1000, "output_tokens": 100},
+            },
+            {
+                "run_id": "verify", "stage": "transcript_verification",
+                "model_used": "gemini-3.6-flash", "modality": "audio",
+                "usage": {"input_tokens": 200, "output_tokens": 20},
+            },
+            {
+                "run_id": "translate", "stage": "caption_translation",
+                "model_used": "gemini-3.5-flash-lite",
+                "usage": {"input_tokens": 300, "output_tokens": 200},
+            },
+            {
+                "run_id": "deep", "stage": "segment_analysis",
+                "model_used": "gemini-3.5-flash-lite",
+                "usage": {"input_tokens": 500, "output_tokens": 400},
+            },
+        ]
+    }
+    costs = build_video_usage_cost_breakdown({}, analysis, "paid")
+    assert costs["transcript_primary"]["input_tokens"] == 1000
+    assert costs["transcript_verification"]["input_tokens"] == 200
+    assert costs["translation_vi"]["input_tokens"] == 300
+    assert costs["deep_analysis"]["input_tokens"] == 500
+
+
+def test_transcript_cleaner_keeps_fillers_and_removes_only_safe_repeats():
     raw = normalize_transcript([
         {"start": 0, "end": 1, "text": "um"},
         {"start": 1, "end": 2, "text": "Hello world"},
@@ -145,7 +267,7 @@ def test_transcript_cleaner_keeps_raw_available_but_removes_safe_repeats():
     ])
     cleaned, warnings = clean_transcript(raw)
     assert [row["text"] for row in raw] == ["um", "Hello world", "Hello world"]
-    assert [row["text"] for row in cleaned] == ["Hello world"]
+    assert [row["text"] for row in cleaned] == ["um", "Hello world"]
     assert len(warnings) == 2
 
 

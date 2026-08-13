@@ -153,6 +153,209 @@ def _run_video_ingest(job_id: str, job_data: dict, payload: dict) -> None:
     )
 
 
+def _cue_recheck_window(source: dict, cue: dict) -> dict:
+    duration = float(source.get("duration_seconds") or 0)
+    cue_start = float(cue.get("start_seconds", 0) or 0)
+    cue_end = max(cue_start, float(cue.get("end_seconds", cue_start) or cue_start))
+    center = (cue_start + cue_end) / 2
+    start = max(0.0, center - 12.5)
+    end = min(duration or center + 12.5, start + 25.0)
+    if end - start < 12 and duration:
+        start = max(0.0, end - 12)
+    return {"index": -1, "start": start, "end": end}
+
+
+def _transcribe_cue_proposal(source: dict, cue: dict) -> tuple[dict, dict]:
+    window = _cue_recheck_window(source, cue)
+    rows, usage = transcribe_audio_window(source, window, str(Path(source["local_path"]).parent))
+    cue_start = float(cue.get("start_seconds", 0) or 0)
+    cue_end = float(cue.get("end_seconds", cue_start) or cue_start)
+    matching = [
+        row for row in rows
+        if float(row.get("end", 0)) >= cue_start - 1.5
+        and float(row.get("start", 0)) <= cue_end + 1.5
+    ]
+    if not matching:
+        midpoint = (cue_start + cue_end) / 2
+        matching = [min(rows, key=lambda row: abs(((float(row["start"]) + float(row["end"])) / 2) - midpoint))]
+    confidence_rank = {"unknown": 0, "low": 1, "medium": 2, "high": 3}
+    confidence = min(
+        (str(row.get("confidence") or "unknown") for row in matching),
+        key=lambda value: confidence_rank.get(value, 0),
+        default="unknown",
+    )
+    proposal = {
+        "source_text": " ".join(str(row.get("text") or "").strip() for row in matching).strip(),
+        "start_seconds": min(float(row.get("start", cue_start)) for row in matching),
+        "end_seconds": max(float(row.get("end", cue_end)) for row in matching),
+        "speaker": next((str(row.get("speaker") or "") for row in matching if row.get("speaker")), ""),
+        "language": str(matching[0].get("language") or cue.get("language") or "unknown"),
+        "confidence": confidence,
+        "uncertainty_reason": "; ".join(
+            str(row.get("uncertainty_reason") or "").strip()
+            for row in matching if str(row.get("uncertainty_reason") or "").strip()
+        ),
+        "window": window,
+    }
+    return proposal, usage
+
+
+def _run_video_cue_recheck(job_id: str, job_data: dict, payload: dict) -> None:
+    source = session_store.get_video_source(job_data.get("source_id"))
+    if not source:
+        raise ValueError("Không tìm thấy nguồn video cần nghe lại.")
+    expected_hash = str(job_data.get("source_hash") or "")
+    if expected_hash and expected_hash != str(source.get("transcript_hash") or ""):
+        raise ValueError("Transcript đã thay đổi; kết quả nghe lại cũ bị từ chối.")
+    cue_id = str(payload.get("cue_id") or "")
+    cue = next((row for row in session_store.list_video_cues(source["source_id"]) if row.get("cue_id") == cue_id), None)
+    if not cue:
+        raise ValueError("Không tìm thấy dòng script cần nghe lại.")
+    expected_revision = int(payload.get("revision", cue.get("revision", 0)) or 0)
+    if expected_revision != int(cue.get("revision", 0) or 0):
+        raise ValueError("Dòng script đã được sửa; hãy bấm nghe lại lần nữa.")
+    update_job(job_id, "running", stage="rechecking_cue", checkpoint={"cue_id": cue_id})
+    proposal, usage = _transcribe_cue_proposal(source, cue)
+    refreshed = session_store.get_video_source(source["source_id"]) or {}
+    latest_cue = next(
+        (row for row in session_store.list_video_cues(source["source_id"]) if row.get("cue_id") == cue_id),
+        None,
+    )
+    if (
+        (expected_hash and expected_hash != str(refreshed.get("transcript_hash") or ""))
+        or not latest_cue
+        or expected_revision != int(latest_cue.get("revision", 0) or 0)
+    ):
+        raise ValueError("Transcript đã thay đổi trong lúc nghe lại; đề xuất cũ bị từ chối.")
+    session_store.update_video_cue(
+        cue_id, recheck=proposal, verification_status="recheck_ready",
+        uncertainty_reason=proposal.get("uncertainty_reason") or cue.get("uncertainty_reason") or "",
+    )
+    usage_state = dict(refreshed.get("ingest_usage") or {})
+    runs = list(usage_state.get("runs") or [])
+    run_id = f"{source['source_id']}:manual-verify:{cue_id}:{expected_revision}"
+    if run_id not in {str(run.get("run_id")) for run in runs if isinstance(run, dict)}:
+        runs.append({
+            "run_id": run_id, "model_used": usage.get("model_used"),
+            "usage": usage, "modality": "audio", "stage": "transcript_verification_manual",
+        })
+    cues.sort(
+        key=lambda row: (
+            float(row.get("start_seconds", 0) or 0),
+            float(row.get("end_seconds", 0) or 0),
+        )
+    )
+    usage_state["runs"] = runs
+    usage_state["input_tokens"] = sum(
+        int((run.get("usage") or {}).get("input_tokens", 0))
+        for run in runs if isinstance(run, dict)
+    )
+    usage_state["output_tokens"] = sum(
+        int((run.get("usage") or {}).get("output_tokens", 0))
+        for run in runs if isinstance(run, dict)
+    )
+    session_store.update_video_source(source["source_id"], ingest_usage=usage_state)
+    update_job(
+        job_id, "done", stage="done",
+        result={"job_kind": "video_cue_recheck", "cue_id": cue_id, "proposal": proposal, "usage": usage},
+    )
+
+def _auto_verify_transcript(source: dict, cues: list[dict], usage_state: dict) -> tuple[list[dict], dict]:
+    """Recheck only the riskiest fifth of cues and uncovered audible regions."""
+    candidates = [row for row in cues if row.get("verification_status") == "needs_review"]
+    covered_gaps: list[dict] = []
+    for run in usage_state.get("runs") or []:
+        usage = run.get("usage") if isinstance(run, dict) else {}
+        for gap in (usage or {}).get("coverage_gaps") or []:
+            if not isinstance(gap, dict):
+                continue
+            start = float(gap.get("start", 0) or 0)
+            end = float(gap.get("end", start) or start)
+            if end <= start or any(
+                float(cue.get("end_seconds", 0) or 0) >= start
+                and float(cue.get("start_seconds", 0) or 0) <= end
+                for cue in cues
+            ):
+                continue
+            covered_gaps.append({
+                "cue_id": f"gap-{source['source_id']}-{start:.3f}-{end:.3f}",
+                "start_seconds": start, "end_seconds": end,
+                "source_text": "", "confidence": "unknown", "revision": 0,
+                "verification_status": "needs_review", "_coverage_gap": True,
+            })
+    candidates.extend(covered_gaps)
+    limit = min(8, max(0, (max(len(cues), len(candidates)) + 4) // 5))
+    runs = list(usage_state.get("runs") or [])
+    existing_ids = {str(run.get("run_id")) for run in runs if isinstance(run, dict)}
+    confidence_rank = {"unknown": 0, "low": 1, "medium": 2, "high": 3}
+    for cue in candidates[:limit]:
+        run_id = f"{source['source_id']}:verify:{cue['cue_id']}:{int(cue.get('revision', 0) or 0)}"
+        if run_id in existing_ids:
+            continue
+        try:
+            proposal, usage = _transcribe_cue_proposal(source, cue)
+            current_rank = confidence_rank.get(str(cue.get("confidence") or "unknown"), 0)
+            proposed_rank = confidence_rank.get(str(proposal.get("confidence") or "unknown"), 0)
+            if cue.get("_coverage_gap") and proposal.get("source_text"):
+                cue.update({
+                    "source_text": proposal["source_text"],
+                    "original_source_text": proposal["source_text"],
+                    "start_seconds": proposal["start_seconds"],
+                    "end_seconds": proposal["end_seconds"],
+                    "speaker": proposal.get("speaker") or "",
+                    "language": proposal.get("language") or "unknown",
+                    "confidence": proposal.get("confidence") or "unknown",
+                    "verification_status": "verified_auto" if proposed_rank >= 3 else "recheck_ready",
+                    "uncertainty_reason": "" if proposed_rank >= 3 else (
+                        proposal.get("uncertainty_reason") or "Đoạn lời nói bổ sung cần kiểm tra."
+                    ),
+                    "revision": 1,
+                    "recheck": {} if proposed_rank >= 3 else proposal,
+                    "translation_vi": "",
+                    "translation_provider": "",
+                    "status": "translation_pending",
+                    "transcript_provider": "gemini_audio_v2_recheck",
+                })
+                cue.pop("_coverage_gap", None)
+                cues.append(cue)
+            elif proposed_rank >= 3 and proposed_rank > current_rank and proposal.get("source_text"):
+                changed_text = proposal["source_text"] != str(cue.get("source_text") or "")
+                cue["source_text"] = proposal["source_text"]
+                cue["start_seconds"] = proposal["start_seconds"]
+                cue["end_seconds"] = proposal["end_seconds"]
+                cue["speaker"] = proposal.get("speaker") or cue.get("speaker") or ""
+                cue["language"] = proposal.get("language") or cue.get("language") or "unknown"
+                cue["confidence"] = proposal["confidence"]
+                cue["verification_status"] = "verified_auto"
+                cue["uncertainty_reason"] = ""
+                cue["revision"] = int(cue.get("revision", 0) or 0) + 1
+                cue["recheck"] = {}
+                if changed_text:
+                    cue["translation_vi"] = ""
+                    cue["translation_provider"] = ""
+                    cue["status"] = "translation_pending"
+            else:
+                cue["recheck"] = proposal
+                cue["verification_status"] = "recheck_ready"
+            runs.append({"run_id": run_id, "model_used": usage.get("model_used"), "usage": usage, "modality": "audio", "stage": "transcript_verification"})
+            existing_ids.add(run_id)
+        except Exception as exc:
+            cue["uncertainty_reason"] = str(cue.get("uncertainty_reason") or exc)
+    cues.sort(
+        key=lambda row: (
+            float(row.get("start_seconds", 0) or 0),
+            float(row.get("end_seconds", 0) or 0),
+        )
+    )
+    usage_state["runs"] = runs
+    usage_state["input_tokens"] = sum(
+        int((run.get("usage") or {}).get("input_tokens", 0)) for run in runs if isinstance(run, dict)
+    )
+    usage_state["output_tokens"] = sum(
+        int((run.get("usage") or {}).get("output_tokens", 0)) for run in runs if isinstance(run, dict)
+    )
+    return cues, usage_state
+
 def _run_video_transcribe(job_id: str, job_data: dict, payload: dict) -> None:
     source = session_store.get_video_source(job_data.get("source_id"))
     if not source:
@@ -163,6 +366,14 @@ def _run_video_transcribe(job_id: str, job_data: dict, payload: dict) -> None:
     metadata = dict(source.get("metadata") or {})
     completed = {int(value) for value in metadata.get("transcription_completed_windows") or []}
     cues = session_store.list_video_cues(source["source_id"])
+    if metadata.get("upgrade_v2_requested") and not metadata.get("upgrade_v2_started"):
+        metadata["legacy_transcript_backup"] = cues
+        metadata["upgrade_v2_started"] = True
+        metadata["transcription_completed_windows"] = []
+        completed = set()
+        cues = []
+        session_store.replace_video_cues(source["source_id"], [])
+        session_store.update_video_source(source["source_id"], metadata=metadata)
     usage_state = dict(source.get("ingest_usage") or {})
     runs = list(usage_state.get("runs") or [])
     run_ids = {str(run.get("run_id")) for run in runs if isinstance(run, dict)}
@@ -183,11 +394,11 @@ def _run_video_transcribe(job_id: str, job_data: dict, payload: dict) -> None:
             cues = merge_transcript_cues(cues, incoming)
             session_store.replace_video_cues(source["source_id"], cues)
             completed.add(index)
-            run_id = f"{source['source_id']}:audio:{index}"
+            run_id = f"{source['source_id']}:audio-v2:{index}"
             if run_id not in run_ids:
                 runs.append({
                     "run_id": run_id, "model_used": usage.get("model_used"),
-                    "usage": usage, "modality": "audio",
+                    "usage": usage, "modality": "audio", "stage": "transcript_primary",
                 })
                 run_ids.add(run_id)
             metadata["transcription_completed_windows"] = sorted(completed)
@@ -204,7 +415,12 @@ def _run_video_transcribe(job_id: str, job_data: dict, payload: dict) -> None:
 
     if failures:
         metadata["transcription_errors"] = failures
-        status = "transcription_partial" if cues else "failed"
+        if not cues and metadata.get("legacy_transcript_backup"):
+            cues = list(metadata["legacy_transcript_backup"])
+            session_store.replace_video_cues(source["source_id"], cues)
+        status = "transcription_partial" if any(
+            cue.get("transcript_provider") == "gemini_audio_v2" for cue in cues
+        ) else "failed"
         message = "; ".join(f"Cửa sổ {row['window']}: {row['error']}" for row in failures)
         session_store.update_video_source(
             source["source_id"], metadata=metadata, ingest_usage=usage_state, status=status, error=message
@@ -215,8 +431,17 @@ def _run_video_transcribe(job_id: str, job_data: dict, payload: dict) -> None:
         )
         return
     metadata.pop("transcription_errors", None)
+    metadata.pop("legacy_transcript_backup", None)
+    metadata.pop("upgrade_v2_requested", None)
+    metadata.pop("upgrade_v2_started", None)
+    metadata["transcript_pipeline_version"] = 2
+    metadata["transcript_window_seconds"] = 90
+    metadata["transcript_overlap_seconds"] = 5
     source = session_store.get_video_source(source["source_id"]) or source
     source["metadata"] = metadata
+    cues = session_store.list_video_cues(source["source_id"])
+    cues, usage_state = _auto_verify_transcript(source, cues, usage_state)
+    session_store.replace_video_cues(source["source_id"], cues)
     _finalize_video_transcript(
         job_id, job_data, source, cues, "gemini_audio", usage_state,
         payload.get("billing_tier", "free"),
@@ -438,6 +663,9 @@ def run_job(job_id: str, text: str, lang: str):
             return
         if job_data and job_data.get("job_kind") == "video_translate":
             _run_video_translate(job_id, job_data, json.loads(text or "{}"))
+            return
+        if job_data and job_data.get("job_kind") == "video_cue_recheck":
+            _run_video_cue_recheck(job_id, job_data, json.loads(text or "{}"))
             return
         if job_data and job_data.get("job_kind") in {"video_analysis", "video_deep_analysis"}:
             payload = json.loads(text or "{}")

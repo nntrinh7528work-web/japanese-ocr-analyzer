@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import mimetypes
+from difflib import SequenceMatcher
 from pathlib import Path
 import re
 import subprocess
@@ -13,7 +14,9 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import config as app_config
-from modules.cost_estimator import estimate_cost, estimate_video_plan_cost, PRICING_EFFECTIVE_DATE
+from modules.cost_estimator import (
+    estimate_cost, estimate_run_costs, estimate_video_plan_cost, PRICING_EFFECTIVE_DATE, sum_costs,
+)
 from modules.gemini_client import create_gemini_model
 from modules.sentence_analyzer import detect_sentence_language, split_sentences
 
@@ -37,8 +40,11 @@ GEMINI_MODEL_VIDEO_BATCH = supported_video_model(
     getattr(app_config, "GEMINI_MODEL_VIDEO_BATCH", None), "gemini-3.5-flash-lite"
 )
 GEMINI_MODEL_AUDIO = supported_video_model(
-    getattr(app_config, "GEMINI_MODEL_AUDIO", None), "gemini-3.5-flash-lite"
+    getattr(app_config, "GEMINI_MODEL_AUDIO", None), "gemini-3.6-flash"
 )
+TRANSCRIPT_PIPELINE_VERSION = 2
+TRANSCRIPT_WINDOW_SECONDS = 90
+TRANSCRIPT_OVERLAP_SECONDS = 5
 MAX_VIDEO_SIZE_MB = int(getattr(app_config, "MAX_VIDEO_SIZE_MB", 100))
 MAX_VIDEO_DURATION_SECONDS = int(getattr(app_config, "MAX_VIDEO_DURATION_SECONDS", 30 * 60))
 SUPPORTED_VIDEO_FORMATS = list(
@@ -140,9 +146,10 @@ def validate_video_duration(metadata: dict[str, Any]) -> None:
 
 
 def build_audio_windows(
-    duration_seconds: float, window_seconds: float = 300, overlap_seconds: float = 2,
+    duration_seconds: float, window_seconds: float = TRANSCRIPT_WINDOW_SECONDS,
+    overlap_seconds: float = TRANSCRIPT_OVERLAP_SECONDS,
 ) -> list[dict]:
-    """Return stable five-minute windows while retaining a short boundary overlap."""
+    """Return stable 90-second windows while retaining a five-second overlap."""
     duration = max(0.0, float(duration_seconds or 0))
     if not duration:
         return []
@@ -168,7 +175,7 @@ def extract_audio_window(video_path: str, output_path: str, start: float, end: f
             [
                 "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
                 "-ss", f"{float(start):.3f}", "-i", video_path, "-t", f"{duration:.3f}",
-                "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k", output_path,
+                "-vn", "-ac", "1", "-ar", "16000", "-c:a", "flac", output_path,
             ],
             check=True, capture_output=True, timeout=max(60, int(duration * 2)),
         )
@@ -180,24 +187,96 @@ def extract_audio_window(video_path: str, output_path: str, start: float, end: f
 
 
 def estimate_audio_transcription_cost(duration_seconds: float, billing_tier: str = "paid") -> dict[str, Any]:
-    """Estimate one aligned source+Vietnamese transcript before any API call."""
+    """Estimate primary ASR and the bounded smart-verification allowance."""
     duration = max(0.0, float(duration_seconds or 0))
     input_tokens = int(duration * 32)
     expected_output = max(500, int(duration * 5))
     maximum_output = max(1000, int(duration * 8))
+    primary_expected = estimate_cost(
+        {"input_tokens": input_tokens, "output_tokens": expected_output},
+        GEMINI_MODEL_AUDIO, billing_tier, modality="audio",
+    )
+    primary_maximum = estimate_cost(
+        {"input_tokens": input_tokens, "output_tokens": maximum_output},
+        GEMINI_MODEL_AUDIO, billing_tier, modality="audio",
+    )
+    # Smart mode rechecks only suspicious 20-30 second clips, at most eight.
+    expected_recheck_seconds = min(duration * 0.10, 25 * 4)
+    maximum_recheck_seconds = min(duration * 0.20, 25 * 8)
+    verification_expected = estimate_cost(
+        {
+            "input_tokens": int(expected_recheck_seconds * 32),
+            "output_tokens": max(0, int(expected_recheck_seconds * 5)),
+        },
+        GEMINI_MODEL_AUDIO, billing_tier, modality="audio",
+    )
+    verification_maximum = estimate_cost(
+        {
+            "input_tokens": int(maximum_recheck_seconds * 32),
+            "output_tokens": max(0, int(maximum_recheck_seconds * 8)),
+        },
+        GEMINI_MODEL_AUDIO, billing_tier, modality="audio",
+    )
     return {
         "model": GEMINI_MODEL_AUDIO,
         "input_tokens": input_tokens,
         "window_count": len(build_audio_windows(duration)),
-        "expected": estimate_cost(
-            {"input_tokens": input_tokens, "output_tokens": expected_output},
-            GEMINI_MODEL_AUDIO, billing_tier, modality="audio",
-        ),
-        "maximum": estimate_cost(
-            {"input_tokens": input_tokens, "output_tokens": maximum_output},
-            GEMINI_MODEL_AUDIO, billing_tier, modality="audio",
-        ),
+        "primary_expected": primary_expected,
+        "primary_maximum": primary_maximum,
+        "verification_expected": verification_expected,
+        "verification_maximum": verification_maximum,
+        "expected": sum_costs([primary_expected, verification_expected]),
+        "maximum": sum_costs([primary_maximum, verification_maximum]),
         "pricing_effective_date": PRICING_EFFECTIVE_DATE,
+    }
+
+
+def build_video_usage_cost_breakdown(
+    source: dict, analysis: dict | None = None, billing_tier: str = "paid",
+) -> dict[str, dict]:
+    """Price transcript, verification, translation and learning analysis separately."""
+    analysis_runs = [
+        run for run in (analysis or {}).get("video_analysis_runs") or []
+        if isinstance(run, dict)
+    ]
+    if analysis_runs:
+        all_runs = analysis_runs
+    else:
+        ingest = source.get("ingest_usage") if isinstance(source.get("ingest_usage"), dict) else {}
+        all_runs = [run for run in ingest.get("runs") or [] if isinstance(run, dict)]
+        all_runs.extend(
+            run for run in source.get("translation_runs") or [] if isinstance(run, dict)
+        )
+
+    def stage(run: dict) -> str:
+        return str(run.get("stage") or "")
+
+    verification = [run for run in all_runs if "verification" in stage(run)]
+    translation = [run for run in all_runs if "translation" in stage(run)]
+    primary = [
+        run for run in all_runs
+        if run not in verification and run not in translation
+        and stage(run) in {"", "video_transcription", "transcript_primary", "video_ingest"}
+    ]
+    deep = [
+        run for run in all_runs
+        if run not in verification and run not in translation and run not in primary
+    ]
+    ingest_usage = source.get("ingest_usage") if isinstance(source.get("ingest_usage"), dict) else {}
+    primary_fallback = ingest_usage if not all_runs else {}
+    return {
+        "transcript_primary": estimate_run_costs(
+            primary, primary_fallback, GEMINI_MODEL_AUDIO, billing_tier,
+        ),
+        "transcript_verification": estimate_run_costs(
+            verification, {}, GEMINI_MODEL_AUDIO, billing_tier,
+        ),
+        "translation_vi": estimate_run_costs(
+            translation, {}, GEMINI_MODEL_VIDEO_BATCH, billing_tier,
+        ),
+        "deep_analysis": estimate_run_costs(
+            deep, {}, GEMINI_MODEL_VIDEO_BATCH, billing_tier,
+        ),
     }
 
 
@@ -442,64 +521,171 @@ def transcribe_with_gemini(source: dict) -> tuple[list[dict], dict]:
     return rows, usage
 
 
+def _audio_transcript_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "cues": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "start": {"type": "number"},
+                        "end": {"type": "number"},
+                        "speaker": {"type": "string"},
+                        "language": {"type": "string", "enum": ["japanese", "english"]},
+                        "text": {"type": "string"},
+                        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+                        "uncertainty_reason": {"type": "string"},
+                    },
+                    "required": ["start", "end", "speaker", "language", "text", "confidence", "uncertainty_reason"],
+                },
+            },
+            "warnings": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["cues", "warnings"],
+    }
+
+
+def detect_non_silent_intervals(audio_path: str, duration_seconds: float) -> list[tuple[float, float]]:
+    """Detect probable speech/audio regions locally; failure must not block ASR."""
+    try:
+        completed = subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-nostats", "-i", audio_path,
+                "-af", "silencedetect=n=-35dB:d=0.5", "-f", "null", "-",
+            ],
+            capture_output=True, text=True, timeout=max(30, int(duration_seconds) + 15),
+        )
+        diagnostic = completed.stderr or ""
+        starts = [float(value) for value in re.findall(r"silence_start:\s*([0-9.]+)", diagnostic)]
+        ends = [float(value) for value in re.findall(r"silence_end:\s*([0-9.]+)", diagnostic)]
+        silence: list[tuple[float, float]] = []
+        for index, silence_start in enumerate(starts):
+            silence_end = ends[index] if index < len(ends) else float(duration_seconds)
+            silence.append((max(0.0, silence_start), min(float(duration_seconds), silence_end)))
+        audible: list[tuple[float, float]] = []
+        cursor = 0.0
+        for silence_start, silence_end in sorted(silence):
+            if silence_start - cursor >= 0.6:
+                audible.append((cursor, silence_start))
+            cursor = max(cursor, silence_end)
+        if float(duration_seconds) - cursor >= 0.6:
+            audible.append((cursor, float(duration_seconds)))
+        return audible
+    except Exception:
+        return []
+
+
+def _coverage_gaps(rows: list[dict], audible: list[tuple[float, float]], window_start: float) -> list[dict]:
+    """Subtract recognized cue intervals from audible regions."""
+    gaps = []
+    cue_intervals = sorted(
+        (
+            float(row.get("start", 0) or 0),
+            float(row.get("end", row.get("start", 0)) or row.get("start", 0) or 0),
+        )
+        for row in rows
+    )
+    for local_start, local_end in audible:
+        absolute_start = window_start + local_start
+        absolute_end = window_start + local_end
+        cursor = absolute_start
+        for cue_start, cue_end in cue_intervals:
+            if cue_end <= cursor or cue_start >= absolute_end:
+                continue
+            if cue_start - cursor >= 1.5:
+                gaps.append({
+                    "start": cursor, "end": min(cue_start, absolute_end),
+                    "reason": "Có âm thanh nhưng chưa có transcript.",
+                })
+            cursor = max(cursor, min(cue_end, absolute_end))
+            if cursor >= absolute_end:
+                break
+        if absolute_end - cursor >= 1.5:
+            gaps.append({
+                "start": cursor, "end": absolute_end,
+                "reason": "Có âm thanh nhưng chưa có transcript.",
+            })
+    return gaps
+
+
 def transcribe_audio_window(source: dict, window: dict, temp_dir: str | None = None) -> tuple[list[dict], dict]:
-    """Transcribe one uploaded-video audio window and translate each cue to Vietnamese."""
+    """Transcribe one short upload window; translation intentionally runs later."""
     local_path = str(source.get("local_path") or "")
     if not local_path or not Path(local_path).exists():
         raise ValueError("File video tạm không còn tồn tại. Hãy tải lại video.")
     start = float(window.get("start", 0) or 0)
     end = float(window.get("end", start) or start)
-    temp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False, dir=temp_dir)
+    temp = tempfile.NamedTemporaryFile(suffix=".flac", delete=False, dir=temp_dir)
     audio_path = temp.name
     temp.close()
     model = create_gemini_model(GEMINI_MODEL_AUDIO, GEMINI_API_KEY)
     uploaded_name = ""
     try:
         extract_audio_window(local_path, audio_path, start, end)
-        uploaded = model.upload_file(audio_path, "audio/mp3")
+        audible = detect_non_silent_intervals(audio_path, max(0.0, end - start))
+        uploaded = model.upload_file(audio_path, "audio/flac")
         uploaded_name = str(getattr(uploaded, "name", "") or "")
         uploaded = model.wait_for_file(uploaded_name)
         uploaded_uri = str(getattr(uploaded, "uri", "") or "")
-        prompt = """Bạn là hệ thống chép lời song ngữ Nhật-Anh.
-Chép chính xác toàn bộ lời nói trong audio, không sửa nguyên văn và không bỏ từ.
-Tự nhận diện từng dòng là japanese hoặc english. Dịch từng dòng sang tiếng Việt tự nhiên.
-Timestamp start/end tính bằng giây từ đầu file audio nhỏ này, không dùng timestamp tuyệt đối của video.
-Giữ dòng ngắn theo lượt nói/caption, không gộp thành đoạn dài. Speaker để rỗng nếu không chắc chắn.
-Trả duy nhất JSON object dạng:
-{"cues":[{"start":0.0,"end":2.0,"speaker":"","language":"japanese|english","text":"","translation_vi":""}],"warnings":[]}.
-"""
-        response = model.create_interaction([
-            {"type": "text", "text": prompt},
-            {"type": "audio", "uri": uploaded_uri, "mime_type": "audio/mp3"},
-        ])
+        prompt = """Bạn là hệ thống chép lời chính xác cho audio tiếng Nhật và/hoặc tiếng Anh.
+Chỉ chép nguyên văn lời thực sự nghe thấy. Không dịch, không sửa văn phong, không đoán thêm từ trong khoảng im lặng.
+Chia cue theo lượt nói hoặc câu ngắn. Timestamp start/end tính bằng giây từ đầu clip audio này.
+Nếu không chắc một từ, vẫn ghi cách nghe hợp lý nhất nhưng đặt confidence=low và giải thích ngắn trong uncertainty_reason.
+Dùng confidence=medium cho tên riêng, tiếng nói bị che hoặc phát âm khó; high chỉ khi nghe rõ.
+Speaker để rỗng nếu không phân biệt chắc chắn. Trả duy nhất JSON đúng schema."""
+        response = model.create_interaction(
+            [
+                {"type": "audio", "uri": uploaded_uri, "mime_type": "audio/flac"},
+                {"type": "text", "text": prompt},
+            ],
+            response_mime_type="application/json",
+            response_format=_audio_transcript_schema(),
+        )
         payload = _parse_json(_response_text(response))
         rows = []
         for raw in _as_record_list(payload.get("cues"), "text"):
             text = str(raw.get("text") or raw.get("source_text") or "").strip()
             if not text:
                 continue
-            relative_start = max(0.0, float(raw.get("start", 0) or 0))
-            relative_end = max(relative_start, float(raw.get("end", relative_start) or relative_start))
+            relative_start = max(0.0, min(end - start, float(raw.get("start", 0) or 0)))
+            relative_end = max(relative_start, min(end - start, float(raw.get("end", relative_start) or relative_start)))
             language = str(raw.get("language") or "unknown").lower()
             if language not in {"japanese", "english"}:
                 language, _, _ = detect_sentence_language(text, "english")
+            confidence = str(raw.get("confidence") or "unknown").lower()
+            if confidence not in {"high", "medium", "low"}:
+                confidence = "unknown"
+            uncertainty = str(raw.get("uncertainty_reason") or "").strip()
+            cue_duration = relative_end - relative_start
+            if cue_duration <= 0 or cue_duration > 30:
+                uncertainty = "; ".join(
+                    value for value in (uncertainty, "Timestamp cue bất thường.") if value
+                )
+            needs_review = confidence in {"low", "unknown"} or bool(uncertainty)
             rows.append({
-                "start": start + relative_start, "end": min(end, start + relative_end),
+                "start": start + relative_start, "end": start + relative_end,
                 "speaker": str(raw.get("speaker") or ""), "language": language,
-                "text": text,
-                "translation_vi": str(raw.get("translation_vi") or raw.get("translation") or "").strip(),
-                "transcript_provider": "gemini_audio",
-                "translation_provider": "gemini_audio",
+                "text": text, "translation_vi": "",
+                "transcript_provider": "gemini_audio_v2", "translation_provider": "",
+                "confidence": confidence,
+                "verification_status": "needs_review" if needs_review else "primary",
+                "uncertainty_reason": uncertainty,
+                "source_window_index": int(window.get("index", 0) or 0),
             })
         normalized = normalize_transcript(rows)
         if not normalized:
             raise ValueError("Gemini không nhận diện được lời nói trong cửa sổ audio này.")
+        coverage_gaps = _coverage_gaps(normalized, audible, start)
         usage = response_usage(response)
         usage.update({
             "model_used": GEMINI_MODEL_AUDIO,
             "window_index": int(window.get("index", 0) or 0),
             "window_start": start, "window_end": end,
             "warnings": _as_text_list(payload.get("warnings")),
+            "coverage_gaps": coverage_gaps,
+            "pipeline_version": TRANSCRIPT_PIPELINE_VERSION,
         })
         return normalized, usage
     finally:
@@ -509,7 +695,6 @@ Trả duy nhất JSON object dạng:
             except Exception:
                 pass
         Path(audio_path).unlink(missing_ok=True)
-
 
 def build_cue_translation_batches(
     cues: list[dict], max_cues: int = 80, max_chars: int = 5000,
@@ -641,6 +826,13 @@ def normalize_transcript(rows: list[Any]) -> list[dict]:
             "transcript_provider": str(row.get("transcript_provider") or ""),
             "translation_provider": str(row.get("translation_provider") or ""),
             "warning": str(row.get("warning") or ""),
+            "original_source_text": str(row.get("original_source_text") or text),
+            "confidence": str(row.get("confidence") or "unknown"),
+            "verification_status": str(row.get("verification_status") or "unverified"),
+            "uncertainty_reason": str(row.get("uncertainty_reason") or ""),
+            "revision": int(row.get("revision", 0) or 0),
+            "source_window_index": int(row.get("source_window_index", 0) or 0),
+            "recheck": row.get("recheck") if isinstance(row.get("recheck"), dict) else {},
         })
     return sorted(result, key=lambda row: (row["start"], row["end"]))
 
@@ -662,6 +854,13 @@ def transcript_rows_to_cues(rows: list[dict], source_id: str, provider: str = ""
             "translation_provider": row.get("translation_provider") or "",
             "status": "translated" if translation else "translation_pending",
             "warning": row.get("warning") or "",
+            "original_source_text": row.get("original_source_text") or row["text"],
+            "confidence": row.get("confidence") or "unknown",
+            "verification_status": row.get("verification_status") or "unverified",
+            "uncertainty_reason": row.get("uncertainty_reason") or "",
+            "revision": int(row.get("revision", 0) or 0),
+            "source_window_index": int(row.get("source_window_index", 0) or 0),
+            "recheck": row.get("recheck") if isinstance(row.get("recheck"), dict) else {},
         })
     return cues
 
@@ -676,41 +875,91 @@ def cues_to_transcript_rows(cues: list[dict]) -> list[dict]:
             "transcript_provider": cue.get("transcript_provider", ""),
             "translation_provider": cue.get("translation_provider", ""),
             "warning": cue.get("warning", ""),
+            "original_source_text": cue.get("original_source_text", ""),
+            "confidence": cue.get("confidence", "unknown"),
+            "verification_status": cue.get("verification_status", "unverified"),
+            "uncertainty_reason": cue.get("uncertainty_reason", ""),
+            "revision": cue.get("revision", 0),
+            "source_window_index": cue.get("source_window_index", 0),
+            "recheck": cue.get("recheck") if isinstance(cue.get("recheck"), dict) else {},
         }
         for cue in cues if isinstance(cue, dict)
     ])
 
 
+def _normalized_cue_text(value: object) -> str:
+    return re.sub(r"[^0-9a-zぁ-んァ-ン一-龯々]+", "", str(value or "").lower())
+
+
+def _cue_similarity(left: object, right: object) -> float:
+    first, second = _normalized_cue_text(left), _normalized_cue_text(right)
+    if not first or not second:
+        return 0.0
+    return SequenceMatcher(None, first, second).ratio()
+
+
 def merge_transcript_cues(existing: list[dict], incoming: list[dict]) -> list[dict]:
-    """Merge overlapping ASR windows without dropping distinct neighboring speech."""
+    """Fuzzy-align overlapping ASR windows while surfacing real conflicts."""
     merged = [dict(row) for row in existing if isinstance(row, dict)]
+    confidence_rank = {"unknown": 0, "low": 1, "medium": 2, "high": 3}
     for candidate in incoming:
         if not isinstance(candidate, dict) or not str(candidate.get("source_text") or "").strip():
             continue
-        normalized = re.sub(r"[\s,.!?。、！？]+", "", str(candidate.get("source_text") or "").lower())
-        duplicate = next(
+        candidate_start = float(candidate.get("start_seconds", 0) or 0)
+        nearby = [
+            row for row in merged
+            if abs(float(row.get("start_seconds", 0) or 0) - candidate_start) <= TRANSCRIPT_OVERLAP_SECONDS + 1
+        ]
+        best = max(
+            nearby,
+            key=lambda row: _cue_similarity(row.get("source_text"), candidate.get("source_text")),
+            default=None,
+        )
+        similarity = _cue_similarity(best.get("source_text"), candidate.get("source_text")) if best else 0.0
+        if best is not None and similarity >= 0.78:
+            best_rank = confidence_rank.get(str(best.get("confidence") or "unknown"), 0)
+            candidate_rank = confidence_rank.get(str(candidate.get("confidence") or "unknown"), 0)
+            if candidate_rank > best_rank or (
+                candidate_rank == best_rank
+                and len(str(candidate.get("source_text") or "")) > len(str(best.get("source_text") or ""))
+            ):
+                preserved_translation = best.get("translation_vi") or candidate.get("translation_vi") or ""
+                original = best.get("original_source_text") or best.get("source_text") or ""
+                best.update(candidate)
+                best["translation_vi"] = preserved_translation
+                best["original_source_text"] = original
+            if not best.get("translation_vi") and candidate.get("translation_vi"):
+                best["translation_vi"] = candidate["translation_vi"]
+                best["translation_provider"] = candidate.get("translation_provider") or "gemini_audio"
+            best["start_seconds"] = min(float(best.get("start_seconds", 0)), candidate_start)
+            best["end_seconds"] = max(
+                float(best.get("end_seconds", 0)), float(candidate.get("end_seconds", 0))
+            )
+            if similarity < 0.94:
+                best["verification_status"] = "needs_review"
+                best["uncertainty_reason"] = "Hai cửa sổ audio nhận dạng hơi khác nhau."
+            continue
+        conflict = next(
             (
-                row for row in merged
-                if normalized
-                and normalized == re.sub(r"[\s,.!?。、！？]+", "", str(row.get("source_text") or "").lower())
-                and abs(float(row.get("start_seconds", 0)) - float(candidate.get("start_seconds", 0))) <= 3
+                row for row in nearby
+                if 0.35 <= _cue_similarity(row.get("source_text"), candidate.get("source_text")) < 0.78
+                and abs(float(row.get("start_seconds", 0)) - candidate_start) <= 2
             ),
             None,
         )
-        if duplicate:
-            if not duplicate.get("translation_vi") and candidate.get("translation_vi"):
-                duplicate["translation_vi"] = candidate["translation_vi"]
-                duplicate["translation_provider"] = candidate.get("translation_provider", "gemini_audio")
-            duplicate["end_seconds"] = max(
-                float(duplicate.get("end_seconds", 0)), float(candidate.get("end_seconds", 0))
-            )
-            continue
+        if conflict:
+            conflict["verification_status"] = "needs_review"
+            conflict["uncertainty_reason"] = "Hai cửa sổ audio cho lời thoại xung đột."
+            candidate = {
+                **candidate,
+                "verification_status": "needs_review",
+                "uncertainty_reason": "Hai cửa sổ audio cho lời thoại xung đột.",
+            }
         merged.append(dict(candidate))
     merged.sort(key=lambda row: (float(row.get("start_seconds", 0)), float(row.get("end_seconds", 0))))
     for ordinal, row in enumerate(merged, 1):
         row["ordinal"] = ordinal
     return merged
-
 
 def clean_transcript(rows: list[dict]) -> tuple[list[dict], list[str]]:
     """Conservatively remove exact ASR repeats and standalone fillers without rewriting source words."""
@@ -720,8 +969,7 @@ def clean_transcript(rows: list[dict]) -> tuple[list[dict], list[str]]:
     for row in normalize_transcript(rows):
         comparable = re.sub(r"[\s,.!?。、！？]+", "", row["text"].lower())
         if comparable in fillers:
-            warnings.append(f"Đã ẩn từ đệm tại {format_timestamp(row['start'])}: {row['text']}")
-            continue
+            warnings.append(f"Từ đệm tại {format_timestamp(row['start'])}: {row['text']}")
         if cleaned:
             previous = re.sub(r"[\s,.!?。、！？]+", "", cleaned[-1]["text"].lower())
             if comparable and comparable == previous and row["start"] <= cleaned[-1]["end"] + 2:
@@ -733,7 +981,21 @@ def clean_transcript(rows: list[dict]) -> tuple[list[dict], list[str]]:
 
 
 def transcript_hash(rows: list[dict]) -> str:
-    return hashlib.sha256(json.dumps(rows, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    """Hash only accepted source speech, independent of translation and review metadata."""
+    canonical = [
+        {
+            "start": round(float(row.get("start", row.get("start_seconds", 0)) or 0), 3),
+            "end": round(float(row.get("end", row.get("end_seconds", 0)) or 0), 3),
+            "speaker": str(row.get("speaker") or ""),
+            "language": str(row.get("language") or "unknown"),
+            "text": str(row.get("text") or row.get("source_text") or "").strip(),
+        }
+        for row in rows if isinstance(row, dict)
+        and str(row.get("text") or row.get("source_text") or "").strip()
+    ]
+    return hashlib.sha256(
+        json.dumps(canonical, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
 
 
 def build_segments(
@@ -965,7 +1227,7 @@ def build_video_analysis(source: dict, segments: list[dict]) -> dict:
     ingest_runs = [run for run in ingest_usage.get("runs") or [] if isinstance(run, dict)]
     if ingest_runs:
         for run in ingest_runs:
-            usage_runs.append({**run, "stage": "video_transcription"})
+            usage_runs.append({**run, "stage": run.get("stage") or "video_transcription"})
     elif ingest_usage and sum(int(ingest_usage.get(key, 0) or 0) for key in ("input_tokens", "output_tokens")):
         usage_runs.append({
             "run_id": f"{source.get('source_id')}:ingest",

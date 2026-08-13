@@ -17,7 +17,9 @@ from modules.job_store import create_job
 from modules.video_analyzer import (
     build_cost_estimate,
     build_segments,
+    build_video_usage_cost_breakdown,
     clean_transcript,
+    cues_to_transcript_rows,
     estimate_audio_transcription_cost,
     estimate_cue_translation_cost,
     format_timestamp,
@@ -28,7 +30,7 @@ from modules.video_analyzer import (
     validate_video_upload,
     validate_video_duration,
 )
-from components.video_player import render_upload_transcript, render_youtube_player
+from components.video_player import render_upload_player, render_youtube_player
 
 
 def _range_inputs(source: dict, key_prefix: str) -> tuple[float, float]:
@@ -141,6 +143,155 @@ def _queue_video_job(
     session_store.update_video_source(source["source_id"], status=status, error="")
     _start_worker(worker_path, project_dir, job_id, document_id=source["document_id"])
 
+
+def _queue_cue_recheck(
+    source: dict, cue_id: str, revision: int, worker_path: str, project_dir: str,
+) -> None:
+    payload = {"cue_id": cue_id, "revision": int(revision)}
+    job_id = create_job(
+        json.dumps(payload, ensure_ascii=False), "video", st.session_state.session_id,
+        source_hash=str(source.get("transcript_hash") or ""), document_id=source["document_id"],
+        job_kind="video_cue_recheck", source_id=source["source_id"], stage="pending",
+    )
+    _start_worker(worker_path, project_dir, job_id, document_id=source["document_id"])
+
+
+def _refresh_transcript_after_cue_change(source: dict, config: dict) -> None:
+    cues = session_store.list_video_cues(source["source_id"])
+    rows = cues_to_transcript_rows(cues)
+    clean_rows, warnings = clean_transcript(rows)
+    current_hash = transcript_hash(rows)
+    translated = all(str(cue.get("translation_vi") or "").strip() for cue in cues)
+    status = "awaiting_cost_confirmation" if translated else "awaiting_translation_confirmation"
+    segments = session_store.list_video_segments(source["source_id"])
+    if not segments:
+        session_store.replace_video_segments(source["source_id"], build_segments(clean_rows, namespace=source["source_id"]))
+    else:
+        for segment in segments:
+            segment_rows = [
+                row for row in clean_rows
+                if float(row.get("end", 0)) >= float(segment.get("start_seconds", 0))
+                and float(row.get("start", 0)) <= float(segment.get("end_seconds", 0))
+            ]
+            updated_text = " ".join(str(row.get("text") or "") for row in segment_rows).strip()
+            if updated_text and updated_text != str(segment.get("clean_text") or ""):
+                session_store.update_video_segment(
+                    segment["segment_id"], original_text=updated_text,
+                    clean_text=updated_text, status="pending", error="",
+                )
+    metadata = {**(source.get("metadata") or {}), "transcript_pipeline_version": 2, "has_unanalyzed_changes": True}
+    session_store.update_video_source(
+        source["source_id"], raw_transcript=rows, clean_transcript=clean_rows,
+        transcript_hash=current_hash, transcript_warnings=[*(source.get("transcript_warnings") or []), *warnings],
+        metadata=metadata, status=status, error="",
+    )
+    session_store.update_document_source_hash(source["document_id"], current_hash, status=status)
+    refreshed = session_store.get_video_source(source["source_id"]) or source
+    estimate = build_cost_estimate(
+        refreshed, session_store.list_video_segments(source["source_id"]), config.get("billing_tier", "free")
+    )
+    session_store.update_video_source(source["source_id"], cost_estimate=estimate)
+
+
+def _render_cue_review(
+    source: dict, cues: list[dict], config: dict, worker_path: str, project_dir: str,
+) -> None:
+    if not cues:
+        return
+    review_count = sum(
+        1 for cue in cues if cue.get("verification_status") in {"needs_review", "recheck_ready"}
+    )
+    label = f"Kiểm tra và sửa script ({review_count} dòng cần xem lại)"
+    with st.expander(label, expanded=review_count > 0):
+        only_review = st.checkbox(
+            "Chỉ hiện dòng cần kiểm tra", value=review_count > 0,
+            key=f"video_only_review_{source['source_id']}",
+        )
+        visible = [
+            cue for cue in cues
+            if not only_review or cue.get("verification_status") in {"needs_review", "recheck_ready"}
+        ]
+        for cue in visible:
+            cue_id = str(cue["cue_id"])
+            quality = str(cue.get("confidence") or "unknown")
+            status = str(cue.get("verification_status") or "unverified")
+            st.markdown(
+                f"**{format_timestamp(cue.get('start_seconds', 0))} · {cue.get('language', 'unknown')}** "
+                f"· độ tin cậy `{quality}` · `{status}`"
+            )
+            if cue.get("uncertainty_reason"):
+                st.warning(str(cue["uncertainty_reason"]))
+            edited = st.text_area(
+                "Lời thoại", value=str(cue.get("source_text") or ""),
+                key=f"video_cue_text_{cue_id}", height=80,
+            )
+            start_col, end_col = st.columns(2)
+            start_value = start_col.number_input(
+                "Bắt đầu", min_value=0.0, value=float(cue.get("start_seconds", 0) or 0),
+                step=0.1, key=f"video_cue_start_{cue_id}",
+            )
+            end_value = end_col.number_input(
+                "Kết thúc", min_value=0.0, value=float(cue.get("end_seconds", 0) or 0),
+                step=0.1, key=f"video_cue_end_{cue_id}",
+            )
+            save_col, recheck_col = st.columns(2)
+            if save_col.button("Lưu sửa", key=f"save_video_cue_{cue_id}", use_container_width=True):
+                cleaned = edited.strip()
+                if not cleaned:
+                    st.error("Lời thoại không được để trống.")
+                elif float(end_value) < float(start_value):
+                    st.error("Thời gian kết thúc phải sau thời gian bắt đầu.")
+                else:
+                    changed_text = cleaned != str(cue.get("source_text") or "")
+                    session_store.update_video_cue(
+                        cue_id, source_text=cleaned, start_seconds=float(start_value), end_seconds=float(end_value),
+                        original_source_text=cue.get("original_source_text") or cue.get("source_text") or "",
+                        confidence="user", verification_status="verified_user", uncertainty_reason="",
+                        revision=int(cue.get("revision", 0) or 0) + 1, recheck={},
+                        translation_vi="" if changed_text else cue.get("translation_vi", ""),
+                        translation_provider="" if changed_text else cue.get("translation_provider", ""),
+                        status="translation_pending" if changed_text else cue.get("status", "translated"),
+                    )
+                    _refresh_transcript_after_cue_change(source, config)
+                    st.rerun()
+            if recheck_col.button("Nghe lại đoạn này", key=f"recheck_video_cue_{cue_id}", use_container_width=True):
+                _queue_cue_recheck(source, cue_id, int(cue.get("revision", 0) or 0), worker_path, project_dir)
+                st.rerun()
+            proposal = cue.get("recheck") if isinstance(cue.get("recheck"), dict) else {}
+            if proposal.get("source_text"):
+                st.markdown("**Đề xuất sau khi AI nghe lại**")
+                st.code(str(proposal["source_text"]), language=None)
+                st.caption(
+                    f"{format_timestamp(proposal.get('start_seconds', 0))}–"
+                    f"{format_timestamp(proposal.get('end_seconds', 0))} · "
+                    f"độ tin cậy {proposal.get('confidence', 'unknown')}"
+                )
+                accept_col, keep_col = st.columns(2)
+                if accept_col.button("Dùng đề xuất", key=f"accept_video_cue_{cue_id}", type="primary", use_container_width=True):
+                    changed_text = str(proposal["source_text"]).strip() != str(cue.get("source_text") or "")
+                    session_store.update_video_cue(
+                        cue_id, source_text=str(proposal["source_text"]).strip(),
+                        start_seconds=float(proposal.get("start_seconds", cue.get("start_seconds", 0)) or 0),
+                        end_seconds=float(proposal.get("end_seconds", cue.get("end_seconds", 0)) or 0),
+                        speaker=str(proposal.get("speaker") or cue.get("speaker") or ""),
+                        language=str(proposal.get("language") or cue.get("language") or "unknown"),
+                        original_source_text=cue.get("original_source_text") or cue.get("source_text") or "",
+                        confidence=str(proposal.get("confidence") or "unknown"), verification_status="verified_user",
+                        uncertainty_reason=str(proposal.get("uncertainty_reason") or ""),
+                        revision=int(cue.get("revision", 0) or 0) + 1, recheck={},
+                        translation_vi="" if changed_text else cue.get("translation_vi", ""),
+                        translation_provider="" if changed_text else cue.get("translation_provider", ""),
+                        status="translation_pending" if changed_text else cue.get("status", "translated"),
+                    )
+                    _refresh_transcript_after_cue_change(source, config)
+                    st.rerun()
+                if keep_col.button("Giữ bản hiện tại", key=f"keep_video_cue_{cue_id}", use_container_width=True):
+                    session_store.update_video_cue(
+                        cue_id, recheck={}, verification_status="verified_user",
+                        uncertainty_reason="Người dùng đã kiểm tra và giữ bản hiện tại.",
+                    )
+                    st.rerun()
+            st.divider()
 
 def _create_video_document(title: str) -> dict:
     document = session_store.create_document(
@@ -335,7 +486,7 @@ def _render_segment(
 
 def _video_json_bytes(source: dict, cues: list[dict], segments: list[dict], analysis: dict) -> bytes:
     payload = {
-        "schema_version": "video-1.0",
+        "schema_version": "video-2.0",
         "source": {**source, "local_path": None},
         "transcript_raw": source.get("raw_transcript") or [],
         "transcript_clean": source.get("clean_transcript") or [],
@@ -344,6 +495,29 @@ def _video_json_bytes(source: dict, cues: list[dict], segments: list[dict], anal
         "analysis": analysis,
     }
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str).encode("utf-8")
+
+
+def _render_usage_cost_breakdown(source: dict, analysis: dict, config: dict) -> None:
+    costs = build_video_usage_cost_breakdown(
+        source, analysis, config.get("billing_tier", "free")
+    )
+    rate = float(config.get("usd_to_jpy", 155.0) or 155.0)
+    labels = {
+        "transcript_primary": "Chép lời chính",
+        "transcript_verification": "Xác minh transcript",
+        "translation_vi": "Dịch tiếng Việt",
+        "deep_analysis": "Phân tích học sâu",
+    }
+    rows = []
+    for key, label in labels.items():
+        cost = costs.get(key) or {}
+        rows.append({
+            "Giai đoạn": label,
+            "Token vào": int(cost.get("input_tokens", 0) or 0),
+            "Token ra": int(cost.get("output_tokens", 0) or 0),
+            "Chi phí JPY": round(float(cost.get("paid_equivalent_usd", 0) or 0) * rate, 3),
+        })
+    st.dataframe(rows, use_container_width=True, hide_index=True)
 
 
 def _render_results(source: dict, cues: list[dict], segments: list[dict], analysis: dict, config: dict) -> None:
@@ -359,6 +533,7 @@ def _render_results(source: dict, cues: list[dict], segments: list[dict], analys
     metrics[0].metric("Token vào thực tế", f"{int(actual.get('input_tokens', 0)):,}")
     metrics[1].metric("Token ra thực tế", f"{int(actual.get('output_tokens', 0)):,}")
     metrics[2].metric("Chi phí tương đương", f"¥{float(actual.get('paid_equivalent_usd', 0)) * rate:,.2f}")
+    _render_usage_cost_breakdown(source, analysis, config)
     cols = st.columns(3)
     cols[0].download_button(
         "Tải Markdown", markdown.encode("utf-8"), "video_analysis.md", "text/markdown", use_container_width=True
@@ -393,11 +568,13 @@ def render_video_tab(
         st.video(source["source_url"])
     elif source.get("local_path") and Path(source["local_path"]).exists():
         if cues:
-            player_column, script_column = st.columns([1.08, 1])
-            with player_column:
+            native_container_key = f"upload_media_{str(source['source_id']).replace('-', '_')}"
+            with st.container(key=native_container_key):
                 st.video(source["local_path"])
-            with script_column:
-                render_upload_transcript(cues, key=f"upload_sync_{source['source_id']}")
+                render_upload_player(
+                    cues, key=f"upload_sync_{source['source_id']}",
+                    native_container_key=native_container_key, source_id=str(source["source_id"]),
+                )
         else:
             st.video(source["local_path"])
     elif source.get("source_kind") == "upload":
@@ -407,8 +584,33 @@ def render_video_tab(
         f"Thời lượng: {format_timestamp(source.get('duration_seconds', 0))} | "
         f"Transcript: {source.get('transcript_provider') or 'chưa có'}"
     )
-
     status = str(source.get("status") or "pending")
+    pipeline_version = int((source.get("metadata") or {}).get("transcript_pipeline_version", 0) or 0)
+    if cues and pipeline_version < 2:
+        st.warning("Transcript Legacy / chưa xác minh. Bạn vẫn có thể xem và sửa từng dòng.")
+        can_upgrade = bool(
+            source.get("source_kind") == "upload"
+            and source.get("local_path")
+            and Path(str(source.get("local_path"))).exists()
+        )
+        if can_upgrade and st.button(
+            "Nâng cấp transcript sang V2", key=f"upgrade_video_v2_{source['source_id']}",
+            use_container_width=True,
+        ):
+            metadata = {
+                **(source.get("metadata") or {}),
+                "upgrade_v2_requested": True,
+                "upgrade_v2_started": False,
+                "transcription_completed_windows": [],
+            }
+            session_store.update_video_source(source["source_id"], metadata=metadata)
+            _queue_video_job(source, config, worker_path, project_dir, "video_transcribe")
+            st.rerun()
+    if cues and status not in {"transcribing", "translating", "ingesting", "segmenting", "analyzing"}:
+        _render_cue_review(source, cues, config, worker_path, project_dir)
+    elif cues:
+        st.caption("Tạm khóa chỉnh script trong khi job nền đang cập nhật dữ liệu.")
+
     if status in {"pending", "ingesting", "segmenting"}:
         st.info("Đang lấy caption và tạo mục lục. Bạn có thể chuyển sang bài khác; job vẫn tiếp tục.")
         return
@@ -416,7 +618,7 @@ def render_video_tab(
         metadata = source.get("metadata") or {}
         done = len(metadata.get("transcription_completed_windows") or [])
         total = int(metadata.get("transcription_total_windows") or 1)
-        st.info(f"Đang tạo script và bản dịch: {done}/{total} cửa sổ audio đã hoàn thành.")
+        st.info(f"Đang tạo script: {done}/{total} cửa sổ audio đã hoàn thành.")
         st.progress(min(1.0, done / max(1, total)))
         return
     if status == "translating":
@@ -446,21 +648,24 @@ def render_video_tab(
         )
         rate = float(config.get("usd_to_jpy", 155) or 155)
         cols = st.columns(4)
-        cols[0].metric("Token audio dự kiến", f"{int(estimate.get('input_tokens', 0)):,}")
-        cols[1].metric("Số cửa sổ", str(estimate.get("window_count", 0)))
+        cols[0].metric("Token audio chính", f"{int(estimate.get('input_tokens', 0)):,}")
+        cols[1].metric("Cửa sổ 90 giây", str(estimate.get("window_count", 0)))
         cols[2].metric(
-            "Chi phí dự kiến",
-            f"¥{float((estimate.get('expected') or {}).get('paid_equivalent_usd', 0)) * rate:,.2f}",
+            "Chép lời chính",
+            f"¥{float((estimate.get('primary_expected') or {}).get('paid_equivalent_usd', 0)) * rate:,.2f}",
         )
         cols[3].metric(
-            "Tối đa dự kiến",
-            f"¥{float((estimate.get('maximum') or {}).get('paid_equivalent_usd', 0)) * rate:,.2f}",
+            "Xác minh dự kiến",
+            f"¥{float((estimate.get('verification_expected') or {}).get('paid_equivalent_usd', 0)) * rate:,.2f}",
         )
         st.caption(
-            "App chỉ tách và gửi audio mono cho Gemini Flash-Lite; video gốc không được gửi ở bước tạo script. "
-            "Free tier vẫn hiển thị mức tương đương trả phí."
+            "Tổng dự kiến "
+            f"¥{float((estimate.get('expected') or {}).get('paid_equivalent_usd', 0)) * rate:,.2f}; "
+            "mức tối đa gồm xác minh có giới hạn "
+            f"¥{float((estimate.get('maximum') or {}).get('paid_equivalent_usd', 0)) * rate:,.2f}. "
+            "App gửi audio FLAC mono 16 kHz cho Gemini Flash; dịch tiếng Việt được tính riêng sau khi script hoàn tất."
         )
-        if st.button("Tạo script và bản dịch", type="primary", use_container_width=True):
+        if st.button("Tạo script", type="primary", use_container_width=True):
             _queue_video_job(source, config, worker_path, project_dir, "video_transcribe")
             st.rerun()
         return

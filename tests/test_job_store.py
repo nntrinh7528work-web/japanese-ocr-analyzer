@@ -60,6 +60,48 @@ def test_partial_results_survive_running_updates():
     assert job["result"] is None
 
 
+def test_video_cue_recheck_rejects_stale_transcript(monkeypatch):
+    monkeypatch.setattr(
+        worker.session_store, "get_video_source",
+        lambda source_id: {"source_id": source_id, "transcript_hash": "new-hash"},
+    )
+    with pytest.raises(ValueError, match="đã thay đổi"):
+        worker._run_video_cue_recheck(
+            "job", {"source_id": "source", "source_hash": "old-hash"},
+            {"cue_id": "cue", "revision": 0},
+        )
+
+
+def test_auto_verify_can_restore_uncovered_speech(monkeypatch):
+    monkeypatch.setattr(
+        worker, "_transcribe_cue_proposal",
+        lambda source, cue: (
+            {
+                "source_text": "Missing sentence.", "start_seconds": 10,
+                "end_seconds": 12, "language": "english", "speaker": "",
+                "confidence": "high", "uncertainty_reason": "",
+            },
+            {"model_used": "gemini-3.6-flash", "input_tokens": 10, "output_tokens": 5},
+        ),
+    )
+    usage = {
+        "runs": [{
+            "run_id": "primary", "usage": {
+                "coverage_gaps": [{"start": 10, "end": 12}]
+            }
+        }]
+    }
+    cues, updated = worker._auto_verify_transcript(
+        {"source_id": "source", "duration_seconds": 20}, [], usage
+    )
+    assert cues[0]["source_text"] == "Missing sentence."
+    assert cues[0]["verification_status"] == "verified_auto"
+    assert [cue["start_seconds"] for cue in cues] == sorted(
+        cue["start_seconds"] for cue in cues
+    )
+    assert updated["runs"][-1]["stage"] == "transcript_verification"
+
+
 def test_video_worker_ignores_legacy_string_analysis_values():
     assert worker._has_sentence_breakdown({"analysis": "legacy raw response"}) is False
     assert worker._has_sentence_breakdown({"analysis": {"sentence_breakdown": {"original": "Hello"}}}) is True

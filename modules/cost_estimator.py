@@ -79,7 +79,7 @@ def estimate_video_plan_cost(
     ingest = (
         estimate_cost(
             {"input_tokens": audio_tokens, "output_tokens": transcript_tokens},
-            "gemini-3.5-flash-lite", billing_tier, modality="audio",
+            "gemini-3.6-flash", billing_tier, modality="audio",
         )
         if audio_tokens else
         estimate_cost(

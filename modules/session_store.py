@@ -195,6 +195,13 @@ CREATE TABLE IF NOT EXISTS video_cues (
     translation_provider TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'pending',
     warning TEXT NOT NULL DEFAULT '',
+    original_source_text TEXT NOT NULL DEFAULT '',
+    confidence TEXT NOT NULL DEFAULT 'unknown',
+    verification_status TEXT NOT NULL DEFAULT 'unverified',
+    uncertainty_reason TEXT NOT NULL DEFAULT '',
+    revision INTEGER NOT NULL DEFAULT 0,
+    source_window_index INTEGER,
+    recheck_json TEXT NOT NULL DEFAULT '{}',
     updated_at TEXT NOT NULL,
     UNIQUE(source_id, ordinal),
     FOREIGN KEY (source_id) REFERENCES video_sources(source_id) ON DELETE CASCADE
@@ -272,6 +279,22 @@ def _get_connection() -> sqlite3.Connection:
                     "ALTER TABLE video_sources ADD COLUMN translation_runs_json TEXT NOT NULL DEFAULT '[]'"
                 )
                 conn.commit()
+            video_cue_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(video_cues)").fetchall()
+            }
+            cue_migrations = {
+                "original_source_text": "TEXT NOT NULL DEFAULT ''",
+                "confidence": "TEXT NOT NULL DEFAULT 'unknown'",
+                "verification_status": "TEXT NOT NULL DEFAULT 'unverified'",
+                "uncertainty_reason": "TEXT NOT NULL DEFAULT ''",
+                "revision": "INTEGER NOT NULL DEFAULT 0",
+                "source_window_index": "INTEGER",
+                "recheck_json": "TEXT NOT NULL DEFAULT '{}'",
+            }
+            for column, definition in cue_migrations.items():
+                if column not in video_cue_columns:
+                    conn.execute(f"ALTER TABLE video_cues ADD COLUMN {column} {definition}")
+            conn.commit()
             return conn
         except sqlite3.OperationalError as exc:
             conn.close()
@@ -908,7 +931,9 @@ def replace_video_cues(source_id: str, cues: list[dict]) -> None:
                 conn.execute(
                     "INSERT INTO video_cues (cue_id, source_id, ordinal, start_seconds, end_seconds, speaker, "
                     "language, source_text, translation_vi, transcript_provider, translation_provider, status, "
-                    "warning, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "warning, original_source_text, confidence, verification_status, uncertainty_reason, revision, "
+                    "source_window_index, recheck_json, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         str(cue.get("cue_id") or _stable_video_cue_id(source_id, ordinal, cue)),
                         source_id, ordinal, start, end, str(cue.get("speaker") or ""),
@@ -916,7 +941,14 @@ def replace_video_cues(source_id: str, cues: list[dict]) -> None:
                         str(cue.get("transcript_provider") or ""),
                         str(cue.get("translation_provider") or ""),
                         str(cue.get("status") or ("translated" if translation else "translation_pending")),
-                        str(cue.get("warning") or ""), now,
+                        str(cue.get("warning") or ""),
+                        str(cue.get("original_source_text") or source_text),
+                        str(cue.get("confidence") or "unknown"),
+                        str(cue.get("verification_status") or "unverified"),
+                        str(cue.get("uncertainty_reason") or ""),
+                        int(cue.get("revision", 0) or 0),
+                        int(cue.get("source_window_index", 0) or 0) or None,
+                        json.dumps(cue.get("recheck") or {}, ensure_ascii=False), now,
                     ),
                 )
             conn.commit()
@@ -929,11 +961,18 @@ def list_video_cues(source_id: str) -> list[dict]:
         conn = _get_connection()
         conn.row_factory = sqlite3.Row
         try:
-            return [
+            rows = [
                 dict(row) for row in conn.execute(
                     "SELECT * FROM video_cues WHERE source_id=? ORDER BY ordinal", (source_id,)
                 ).fetchall()
             ]
+            for row in rows:
+                try:
+                    parsed = json.loads(row.pop("recheck_json", "{}") or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    parsed = {}
+                row["recheck"] = parsed if isinstance(parsed, dict) else {}
+            return rows
         finally:
             conn.close()
 
@@ -943,13 +982,17 @@ def update_video_cue(cue_id: str, **changes) -> None:
         "translation_vi": "translation_vi", "translation_provider": "translation_provider",
         "status": "status", "warning": "warning", "language": "language",
         "source_text": "source_text", "speaker": "speaker",
+        "start_seconds": "start_seconds", "end_seconds": "end_seconds",
+        "original_source_text": "original_source_text", "confidence": "confidence",
+        "verification_status": "verification_status", "uncertainty_reason": "uncertainty_reason",
+        "revision": "revision", "source_window_index": "source_window_index", "recheck": "recheck_json",
     }
     fields, values = [], []
     for key, value in changes.items():
         column = mapping.get(key)
         if column:
             fields.append(f"{column}=?")
-            values.append(value)
+            values.append(json.dumps(value, ensure_ascii=False) if column == "recheck_json" else value)
     if not fields:
         return
     fields.append("updated_at=?")
@@ -984,6 +1027,15 @@ def ensure_video_cues(source: dict | None) -> list[dict]:
             "transcript_provider": row.get("transcript_provider") or provider,
             "translation_provider": row.get("translation_provider", ""),
             "warning": row.get("warning", ""),
+            "original_source_text": row.get("original_source_text") or row.get("text", ""),
+            "confidence": row.get("confidence", "unknown"),
+            "verification_status": row.get("verification_status", "legacy"),
+            "uncertainty_reason": row.get(
+                "uncertainty_reason", "Transcript cũ chưa được xác minh bằng pipeline V2."
+            ),
+            "revision": row.get("revision", 0),
+            "source_window_index": row.get("source_window_index", 0),
+            "recheck": row.get("recheck") if isinstance(row.get("recheck"), dict) else {},
         }
         for row in rows if isinstance(row, dict)
     ])

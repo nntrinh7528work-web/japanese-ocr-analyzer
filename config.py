@@ -56,6 +56,6 @@ GEMINI_MODEL_VIDEO = _get_streamlit_secret("GEMINI_MODEL_VIDEO") or os.getenv("G
 # Keep this separate from the regular text model because video segments favor
 # low-cost, high-throughput structured extraction.
 GEMINI_MODEL_VIDEO_BATCH = _get_streamlit_secret("GEMINI_MODEL_VIDEO_BATCH") or os.getenv("GEMINI_MODEL_VIDEO_BATCH") or "gemini-3.5-flash-lite"
-GEMINI_MODEL_AUDIO = _get_streamlit_secret("GEMINI_MODEL_AUDIO") or os.getenv("GEMINI_MODEL_AUDIO") or "gemini-3.5-flash-lite"
+GEMINI_MODEL_AUDIO = _get_streamlit_secret("GEMINI_MODEL_AUDIO") or os.getenv("GEMINI_MODEL_AUDIO") or "gemini-3.6-flash"
 SUPPORTED_FORMATS = ["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff"]
 SUPPORTED_UPLOAD_FORMATS = [*SUPPORTED_FORMATS, "pdf"]

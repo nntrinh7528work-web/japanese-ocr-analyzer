@@ -92,6 +92,56 @@ class TestVideoDocuments:
         listed = session_store.list_documents("video01")
         assert listed[0]["video_count"] == 1
 
+    def test_video_cue_v2_fields_survive_reload_and_update(self) -> None:
+        session_store.create_session("video-v2")
+        document = session_store.create_document(
+            "video-v2", "V2 lesson", document_type="video", language="japanese"
+        )
+        source = session_store.create_video_source(
+            document["document_id"], "upload", file_name="lesson.mov", status="transcribing"
+        )
+        session_store.replace_video_cues(source["source_id"], [{
+            "cue_id": "cue-v2", "start_seconds": 1.25, "end_seconds": 3.5,
+            "source_text": "今日は勉強します。", "original_source_text": "今日は勉強します。",
+            "language": "japanese", "confidence": "low",
+            "verification_status": "needs_review", "uncertainty_reason": "nhạc nền",
+            "revision": 2, "source_window_index": 4,
+            "recheck": {"source_text": "今日は勉強します。", "confidence": "high"},
+        }])
+        restored = session_store.list_video_cues(source["source_id"])[0]
+        assert restored["original_source_text"] == "今日は勉強します。"
+        assert restored["confidence"] == "low"
+        assert restored["verification_status"] == "needs_review"
+        assert restored["revision"] == 2
+        assert restored["source_window_index"] == 4
+        assert restored["recheck"]["confidence"] == "high"
+
+        session_store.update_video_cue(
+            "cue-v2", verification_status="verified_user", revision=3, recheck={}
+        )
+        updated = session_store.list_video_cues(source["source_id"])[0]
+        assert updated["verification_status"] == "verified_user"
+        assert updated["revision"] == 3
+        assert updated["recheck"] == {}
+
+    def test_legacy_transcript_is_marked_unverified(self) -> None:
+        session_store.create_session("video-legacy")
+        document = session_store.create_document(
+            "video-legacy", "Legacy lesson", document_type="video"
+        )
+        source = session_store.create_video_source(
+            document["document_id"], "upload", status="awaiting_cost_confirmation"
+        )
+        session_store.update_video_source(
+            source["source_id"],
+            clean_transcript=[{"start": 0, "end": 2, "text": "Hello"}],
+        )
+        restored = session_store.ensure_video_cues(
+            session_store.get_video_source(source["source_id"])
+        )[0]
+        assert restored["verification_status"] == "legacy"
+        assert "chưa được xác minh" in restored["uncertainty_reason"]
+
 
 class TestImageItems:
     """Tests for ``save_image_items`` and ``load_image_items``."""
